@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">ДроидКрипт</string>
+    <string name="app_name">ZeroLess</string>
     <string name="input_label">Входной текст:</string>
     <string name="input_hint">Введите текст для шифрования/дешифрования</string>
     <string name="password_label">Пароль:</string>
@@ -14,8 +14,8 @@
     <string name="clear_button">Очистить</string>
     <string name="exit_button">Выход</string>
     <string name="info_button">Инфо</string>
-    <string name="info_title">О ДроидКрипт</string>
-    <string name="info_message">ДроидКрипт от NEMESIS, 2025.\nБезопасное шифрование текста и файлов с использованием AES-GCM и ключей, выведенных через scrypt.</string>
+    <string name="info_title">О ZeroLess</string>
+    <string name="info_message">ZeroLess от NEMESIS, 2025.\nБезопасное шифрование с AES-GCM и выводом ключей через scrypt.\nМин. энтропия пароля: ~80 бит (например, 12+ символов с буквами, цифрами, знаками).</string>
     <string name="output_label">Выходной текст:</string>
     <string name="output_hint">Результат будет здесь</string>
     <string name="error_permission_denied">Доступ запрещён</string>
@@ -36,4 +36,29 @@
     <string name="success_input_cleared">Поле ввода очищено</string>
     <string name="success_data_cleared">Все данные очищены</string>
     <string name="success_obfuscating">Обфускация буфера обмена и выход...</string>
+    <string name="language_title">Выберите язык</string>
+    <string-array name="languages">
+        <item>English</item>
+        <item>Русский</item>
+        <item>Italiano</item>
+        <item>Українська</item>
+        <item>Español</item>
+        <item>Français</item>
+        <item>Deutsch</item>
+        <item>日本語</item>
+        <item>العربية</item>
+        <item>עברית</item>
+    </string-array>
+    <string-array name="language_codes">
+        <item>en</item>
+        <item>ru</item>
+        <item>it</item>
+        <item>uk</item>
+        <item>es</item>
+        <item>fr</item>
+        <item>de</item>
+        <item>ja</item>
+        <item>ar</item>
+        <item>he</item>
+    </string-array>
 </resources>
