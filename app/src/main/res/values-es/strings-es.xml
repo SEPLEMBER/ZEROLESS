@@ -6,15 +6,13 @@
     <string name="password_hint">Ingrese contraseña</string>
     <string name="encrypt_button">Cifrar</string>
     <string name="decrypt_button">Descifrar</string>
-    <string name="pick_file_button">Seleccionar</string>
+    <string name="pick_file_button">Seleccionar archivo</string>
     <string name="encrypt_file_button">Cifrar archivo</string>
     <string name="decrypt_file_button">Descifrar archivo</string>
     <string name="copy_button">Copiar</string>
-    </string>
     <string name="paste_button">Pegar</string>
     <string name="clear_button">Limpiar</string>
-    <string name="exit_button">Excluir</string>
-    </string>
+    <string name="exit_button">Salir</string>
     <string name="info_button">Información</string>
     <string name="info_title">Sobre ZeroLess</string>
     <string name="info_message">ZeroLess, 2025.\nCifrado AES-GCM con claves scrypt.\nEntropía mínima de contraseña: ~80 bits (12+ caracteres, letras/dígitos/símbolos).</string>
@@ -24,7 +22,7 @@
     <string name="error_password_short">La contraseña debe tener al menos 6 caracteres</string>
     <string name="error_empty_input">Ingrese texto para %1$s</string>
     <string name="error_file_not_selected">Seleccione un archivo para %1$s</string>
-    <string name="error_process_failed">No se pudo %1$s</string>
+    <string name="error_process_failed">No se pudo %1$s: %2$s</string>
     <string name="error_save_failed">No se pudo guardar el archivo: %1$s</string>
     <string name="error_clipboard_unavailable">Servicio de portapapeles no disponible</string>
     <string name="error_clipboard_empty">Portapapeles vacío</string>
