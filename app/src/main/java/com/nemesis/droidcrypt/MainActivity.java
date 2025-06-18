@@ -2,7 +2,6 @@ package com.nemesis.droidcrypt;
 
 import android.Manifest;
 import android.app.Activity;
-import android.app.Activity;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
@@ -16,13 +15,17 @@ import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
 import android.provider.OpenableColumns;
+import android.text.Editable;
+import android.text.TextWatcher;
 import android.view.View;
+import android.view.WindowManager;
 import android.widget.EditText;
 import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.annotation.NonNull;
+import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
@@ -49,7 +52,7 @@ import javax.crypto.spec.SecretKeySpec;
 public class MainActivity extends AppCompatActivity {
 
     private EditText inputEditText, passwordEditText;
-    private TextView outputTextView;
+    private TextView outputTextView, passwordDisplay;
     private ProgressBar progress;
     private static final int FILE_PICKER_REQUEST_CODE = 123;
     private static final int PERMISSION_REQUEST_CODE = 124;
@@ -58,16 +61,60 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        // Запрет скриншотов
+        getWindow().setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE);
         setContentView(R.layout.activity_main);
 
         inputEditText = findViewById(R.id.inputEditText);
         passwordEditText = findViewById(R.id.passwordEditText);
         outputTextView = findViewById(R.id.outputTextView);
+        passwordDisplay = findViewById(R.id.passwordDisplay);
         progress = findViewById(R.id.textEncryptProgress);
+
+        // Частичное отображение пароля
+        passwordEditText.addTextChangedListener(new TextWatcher() {
+            @Override
+            public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            @Override
+            public void onTextChanged(CharSequence s, int start, int before, int count) {}
+            @Override
+            public void afterTextChanged(Editable s) {
+                String text = s.toString();
+                if (text.length() > 5) {
+                    String display = text.substring(0, 5) + "*".repeat(text.length() - 5);
+                    passwordDisplay.setText(display);
+                } else {
+                    passwordDisplay.setText(text);
+                }
+            }
+        });
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
                 ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
             ActivityCompat.requestPermissions(this, new String[]{Manifest.permission.READ_EXTERNAL_STORAGE}, PERMISSION_REQUEST_CODE);
+        }
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        // Автовставка зашифрованного текста
+        ClipboardManager clipboard = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+        if (clipboard.hasPrimaryClip() && clipboard.getPrimaryClip().getItemCount() > 0) {
+            CharSequence pasteData = clipboard.getPrimaryClip().getItemAt(0).getText();
+            if (pasteData != null && isBase64(pasteData.toString())) {
+                inputEditText.setText(pasteData);
+                showToast(getString(R.string.success_text_pasted));
+            }
+        }
+    }
+
+    private boolean isBase64(String text) {
+        try {
+            Base64.decode(text, Base64.DEFAULT);
+            return true;
+        } catch (IllegalArgumentException e) {
+            return false;
         }
     }
 
@@ -126,7 +173,7 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
         if (!isText && selectedFileUri == null) {
-            showToast(String.format(getString(R.string.error_file_not_selected), isEncryption ? getString(R.string.encrypt_button).toLowerCase() : getString(R.string.decrypt_button).toLowerCase()));
+            showToast(String.format(getString(R.string.error_file_not_selected), isEncryption ? getString(R.string.encrypt_file_button).toLowerCase() : getString(R.string.decrypt_file_button).toLowerCase()));
             return;
         }
         progress.setVisibility(View.VISIBLE);
@@ -146,11 +193,11 @@ public class MainActivity extends AppCompatActivity {
                     if (isText && finalResult != null) {
                         showOutputText(finalResult);
                     } else if (!isText) {
-                        showToast(getString(R.string.success_file_processed, isEncryption ? getString(R.string.encrypt_button).toLowerCase() : getString(R.string.decrypt_button).toLowerCase()));
+                        showToast(getString(R.string.success_file_processed, isEncryption ? getString(R.string.encrypt_file_button).toLowerCase() : getString(R.string.decrypt_file_button).toLowerCase()));
                     }
                 });
             } catch (Exception e) {
-                showError(getString(R.string.error_process_failed, isEncryption ? getString(R.string.encrypt_button).toLowerCase() : getString(R.string.decrypt_button).toLowerCase(), e.getMessage()));
+                showError(getString(R.string.error_process_failed, isEncryption ? (isText ? getString(R.string.encrypt_button) : getString(R.string.encrypt_file_button)).toLowerCase() : (isText ? getString(R.string.decrypt_button) : getString(R.string.decrypt_file_button)).toLowerCase(), e.getMessage()));
             }
         }).start();
     }
@@ -304,6 +351,7 @@ public class MainActivity extends AppCompatActivity {
         inputEditText.setText("");
         passwordEditText.setText("");
         outputTextView.setText("");
+        passwordDisplay.setText("");
         selectedFileUri = null;
         ClipboardManager clipboard = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
         if (clipboard != null) {
@@ -337,17 +385,30 @@ public class MainActivity extends AppCompatActivity {
                 ClipData clip = ClipData.newPlainText("obfuscation", String.valueOf(num));
                 clipboard.setPrimaryClip(clip);
                 if (num == 45) {
-                    forgetEverything(null); // Вызываем forgetEverything после копирования 45
-                    finish(); // Закрываем приложение
+                    forgetEverything(null);
+                    finish();
                 }
             }, i * 50);
         }
         showToast(getString(R.string.success_obfuscating));
     }
 
+    public void showInfo(View view) {
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.info_title)
+                .setMessage(R.string.info_message)
+                .setPositiveButton(android.R.string.ok, null)
+                .show();
+    }
+
     public void showOutputText(String text) {
         outputTextView.setVisibility(View.VISIBLE);
         outputTextView.setText(text);
+        // Автокопирование зашифрованного текста
+        ClipboardManager clipboard = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+        ClipData clip = ClipData.newPlainText("Encrypted Text", text);
+        clipboard.setPrimaryClip(clip);
+        showToast(getString(R.string.success_text_copied));
     }
 
     public void hideOutputText() {
