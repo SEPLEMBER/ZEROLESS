@@ -8,7 +8,7 @@
     <string name="decrypt_button">Розшифрувати</string>
     <string name="pick_file_button">Вибрати файл</string>
     <string name="encrypt_file_button">Зашифрувати файл</string>
-    <string name="decrypt_button">Розшифрувати файл</string>
+    <string name="decrypt_file_button">Розшифрувати файл</string>
     <string name="copy_button">Копіювати</string>
     <string name="paste_button">Вставити</string>
     <string name="clear_button">Очистити</string>
@@ -22,7 +22,7 @@
     <string name="error_password_short">Пароль має бути не менше 6 символів</string>
     <string name="error_empty_input">Введіть текст для %1$s</string>
     <string name="error_file_not_selected">Виберіть файл для %1$s</string>
-    <string name="error_process_failed">Не вдалося %1$s</string>
+    <string name="error_process_failed">Не вдалося %1$s: %2$s</string>
     <string name="error_save_failed">Не вдалося зберегти файл: %1$s</string>
     <string name="error_clipboard_unavailable">Служба буфера обміну недоступна</string>
     <string name="error_clipboard_empty">Буфер обміну порожній</string>
