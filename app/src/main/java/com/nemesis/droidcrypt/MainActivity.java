@@ -61,7 +61,6 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        // Запрет скриншотов
         getWindow().setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE);
         setContentView(R.layout.activity_main);
 
@@ -71,7 +70,6 @@ public class MainActivity extends AppCompatActivity {
         passwordDisplay = findViewById(R.id.passwordDisplay);
         progress = findViewById(R.id.textEncryptProgress);
 
-        // Частичное отображение пароля
         passwordEditText.addTextChangedListener(new TextWatcher() {
             @Override
             public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
@@ -98,23 +96,13 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onResume() {
         super.onResume();
-        // Автовставка зашифрованного текста
         ClipboardManager clipboard = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
         if (clipboard.hasPrimaryClip() && clipboard.getPrimaryClip().getItemCount() > 0) {
             CharSequence pasteData = clipboard.getPrimaryClip().getItemAt(0).getText();
-            if (pasteData != null && isBase64(pasteData.toString())) {
+            if (pasteData != null && inputEditText.getText().toString().isEmpty()) {
                 inputEditText.setText(pasteData);
                 showToast(getString(R.string.success_text_pasted));
             }
-        }
-    }
-
-    private boolean isBase64(String text) {
-        try {
-            Base64.decode(text, Base64.DEFAULT);
-            return true;
-        } catch (IllegalArgumentException e) {
-            return false;
         }
     }
 
@@ -404,7 +392,6 @@ public class MainActivity extends AppCompatActivity {
     public void showOutputText(String text) {
         outputTextView.setVisibility(View.VISIBLE);
         outputTextView.setText(text);
-        // Автокопирование зашифрованного текста
         ClipboardManager clipboard = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
         ClipData clip = ClipData.newPlainText("Encrypted Text", text);
         clipboard.setPrimaryClip(clip);
