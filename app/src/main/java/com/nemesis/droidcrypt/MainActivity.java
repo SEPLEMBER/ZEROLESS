@@ -1,23 +1,22 @@
 package com.nemesis.droidcrypt;
 
-import android.Manifest;
 import android.app.Activity;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
-import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.database.Cursor;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
+import android.os.Handler;
+import android.os.Looper;
 import android.provider.OpenableColumns;
-import android.provider.Settings;
 import android.view.View;
-import android.widget.CheckBox;
 import android.widget.EditText;
+import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -25,7 +24,6 @@ import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
-import androidx.core.widget.ContentLoadingProgressBar;
 
 import org.bouncycastle.crypto.generators.SCrypt;
 
@@ -40,7 +38,6 @@ import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.util.Arrays;
 import android.util.Base64;
-import java.util.Locale;
 
 import javax.crypto.Cipher;
 import javax.crypto.SecretKey;
@@ -51,12 +48,10 @@ public class MainActivity extends AppCompatActivity {
 
     private EditText inputEditText, passwordEditText;
     private TextView outputTextView;
-    private ContentLoadingProgressBar progress;
-    private CheckBox rememberPasswordCheckBox;
+    private ProgressBar progress;
     private static final int FILE_PICKER_REQUEST_CODE = 123;
     private static final int PERMISSION_REQUEST_CODE = 124;
     private Uri selectedFileUri;
-    private SharedPreferences sharedPreferences;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -67,13 +62,6 @@ public class MainActivity extends AppCompatActivity {
         passwordEditText = findViewById(R.id.passwordEditText);
         outputTextView = findViewById(R.id.outputTextView);
         progress = findViewById(R.id.textEncryptProgress);
-        rememberPasswordCheckBox = findViewById(R.id.rememberPasswordCheckBox);
-
-        // Initialize SharedPreferences
-        sharedPreferences = getSharedPreferences("MyPrefs", Context.MODE_PRIVATE);
-
-        // Load saved password if exists
-        loadSavedPassword();
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
                 ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
@@ -81,29 +69,11 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    private void loadSavedPassword() {
-        // Load saved password from SharedPreferences
-        String savedPassword = sharedPreferences.getString("password", null);
-        if (savedPassword != null) {
-            passwordEditText.setText(savedPassword);
-            rememberPasswordCheckBox.setChecked(true);
-        }
-    }
-
-    private void savePassword(String password) {
-        // Save password to SharedPreferences if "Remember Password" is checked
-        if (rememberPasswordCheckBox.isChecked()) {
-            SharedPreferences.Editor editor = sharedPreferences.edit();
-            editor.putString("password", password);
-            editor.apply();
-        }
-    }
-
     @Override
     public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         if (requestCode == PERMISSION_REQUEST_CODE && (grantResults.length == 0 || grantResults[0] != PackageManager.PERMISSION_GRANTED)) {
-            showToast("Permission denied");
+            showToast(getString(R.string.error_permission_denied));
         }
     }
 
@@ -121,78 +91,66 @@ public class MainActivity extends AppCompatActivity {
             selectedFileUri = data.getData();
             if (selectedFileUri != null) {
                 getContentResolver().takePersistableUriPermission(selectedFileUri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                showToast("File selected: " + getFileName(selectedFileUri));
+                showToast(getString(R.string.success_file_selected, getFileName(selectedFileUri)));
             }
         }
     }
 
     public void performTextEncryption(View view) {
-        processText(true);
+        process(true, true);
     }
 
     public void performTextDecryption(View view) {
-        processText(false);
-    }
-
-    private void processText(boolean isEncryption) {
-        hideOutputText();
-        String inputText = inputEditText.getText().toString();
-        if (!inputText.isEmpty()) {
-            progress.show();
-            String password = passwordEditText.getText().toString();
-            savePassword(password); // Save password if "Remember Password" is checked
-            new Thread(() -> {
-                try {
-                    String resultText = isEncryption ? encryptText(inputText, password) : decryptText(inputText, password);
-                    runOnUiThread(() -> {
-                        progress.hide();
-                        showOutputText(resultText);
-                    });
-                } catch (Exception e) {
-                    showError((isEncryption ? "Encryption" : "Decryption") + " failed: " + e.getMessage());
-                }
-            }).start();
-        } else {
-            showToast("Please enter text to " + (isEncryption ? "encrypt" : "decrypt") + ".");
-        }
+        process(false, true);
     }
 
     public void performFileEncryption(View view) {
-        processFile(true);
+        process(true, false);
     }
 
     public void performFileDecryption(View view) {
-        processFile(false);
+        process(false, false);
     }
 
-    private void processFile(boolean isEncryption) {
-        if (selectedFileUri != null) {
-            String password = passwordEditText.getText().toString();
-            new Thread(() -> {
-                try {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && !Environment.isExternalStorageManager()) {
-                        Uri uri = Uri.parse(String.format(Locale.ENGLISH, "package:%s", getApplicationContext().getPackageName()));
-                        Intent intent = new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, uri);
-                        startActivity(intent);
-                        showToast("Please enable the Manage All Files Access permission and try again.");
-                        return;
-                    }
-
-                    byte[] processedBytes = isEncryption ? encryptFile(selectedFileUri, password) : decryptFile(selectedFileUri, password);
-                    if (processedBytes != null) {
-                        String fileName = isEncryption ? getFileName(selectedFileUri) + ".enc" : getFileNameWithoutExtension(selectedFileUri);
-                        saveFile(processedBytes, fileName);
-                        showToast("File " + (isEncryption ? "encrypted" : "decrypted") + " successfully.");
-                    } else {
-                        showError((isEncryption ? "Encryption" : "Decryption") + " failed. Check password or file.");
-                    }
-                } catch (Exception e) {
-                    showError((isEncryption ? "Encryption" : "Decryption") + " failed: " + e.getMessage());
-                }
-            }).start();
-        } else {
-            showToast("Please select a file to " + (isEncryption ? "encrypt" : "decrypt") + ".");
+    private void process(boolean isEncryption, boolean isText) {
+        String input = inputEditText.getText().toString();
+        String password = passwordEditText.getText().toString();
+        if (password.length() < 6) {
+            showToast(getString(R.string.error_password_short));
+            return;
         }
+        if (isText && input.isEmpty()) {
+            showToast(String.format(getString(R.string.error_empty_input), isEncryption ? getString(R.string.encrypt_button).toLowerCase() : getString(R.string.decrypt_button).toLowerCase()));
+            return;
+        }
+        if (!isText && selectedFileUri == null) {
+            showToast(String.format(getString(R.string.error_file_not_selected), isEncryption ? getString(R.string.encrypt_button).toLowerCase() : getString(R.string.decrypt_button).toLowerCase()));
+            return;
+        }
+        progress.setVisibility(View.VISIBLE);
+        new Thread(() -> {
+            try {
+                String result = null;
+                if (isText) {
+                    result = isEncryption ? encryptText(input, password) : decryptText(input, password);
+                } else {
+                    byte[] processedBytes = isEncryption ? encryptFile(selectedFileUri, password) : decryptFile(selectedFileUri, password);
+                    String fileName = isEncryption ? getFileName(selectedFileUri) + ".enc" : getFileNameWithoutExtension(selectedFileUri);
+                    saveFile(processedBytes, fileName);
+                }
+                final String finalResult = result;
+                runOnUiThread(() -> {
+                    progress.setVisibility(View.GONE);
+                    if (isText && finalResult != null) {
+                        showOutputText(finalResult);
+                    } else if (!isText) {
+                        showToast(getString(R.string.success_file_processed, isEncryption ? getString(R.string.encrypt_button).toLowerCase() : getString(R.string.decrypt_button).toLowerCase()));
+                    }
+                });
+            } catch (Exception e) {
+                showError(getString(R.string.error_process_failed, isEncryption ? getString(R.string.encrypt_button).toLowerCase() : getString(R.string.decrypt_button).toLowerCase(), e.getMessage()));
+            }
+        }).start();
     }
 
     private void saveFile(byte[] bytes, String fileName) {
@@ -200,16 +158,15 @@ public class MainActivity extends AppCompatActivity {
         File file = new File(directory, fileName);
         try (FileOutputStream fos = new FileOutputStream(file)) {
             fos.write(bytes);
-            showToast("File saved as: " + file.getAbsolutePath());
+            showToast(getString(R.string.success_file_saved, file.getAbsolutePath()));
         } catch (IOException e) {
-            showError("Failed to save file: " + e.getMessage());
+            showError(getString(R.string.error_save_failed, e.getMessage()));
         }
     }
 
     private byte[] encryptFile(Uri fileUri, String password) throws IOException, GeneralSecurityException {
         try (InputStream inputStream = getContentResolver().openInputStream(fileUri);
              BufferedInputStream bis = new BufferedInputStream(inputStream)) {
-
             ByteArrayOutputStream baos = new ByteArrayOutputStream();
             byte[] buffer = new byte[4096];
             int bytesRead;
@@ -230,8 +187,7 @@ public class MainActivity extends AppCompatActivity {
 
     private byte[] decryptFile(Uri fileUri, String password) throws IOException, GeneralSecurityException {
         try (InputStream inputStream = getContentResolver().openInputStream(fileUri)) {
-
-            byte[] inputBytes = readBytes(inputStream);  // Read entire file (if not large, you can optimize this)
+            byte[] inputBytes = readBytes(inputStream);
             byte[] salt = Arrays.copyOfRange(inputBytes, 0, 16);
             byte[] iv = Arrays.copyOfRange(inputBytes, 16, 28);
             byte[] cipherText = Arrays.copyOfRange(inputBytes, 28, inputBytes.length);
@@ -272,7 +228,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private SecretKey generateSecretKey(String password, byte[] salt) throws NoSuchAlgorithmException {
-        byte[] derivedKey = SCrypt.generate(password.getBytes(), salt, 32768, 16, 4, 32);
+        byte[] derivedKey = SCrypt.generate(password.getBytes(), salt, 16384, 8, 1, 32);
         return new SecretKeySpec(derivedKey, "AES");
     }
 
@@ -284,8 +240,8 @@ public class MainActivity extends AppCompatActivity {
 
     private byte[] concatenateArrays(byte[]... arrays) {
         int totalLength = 0;
-        for( int i = 0 ; i < arrays.length ; i++ ) {
-            totalLength += arrays[i].length;
+        for (byte[] array : arrays) {
+            totalLength += array.length;
         }
         byte[] result = new byte[totalLength];
         int currentIndex = 0;
@@ -318,7 +274,7 @@ public class MainActivity extends AppCompatActivity {
 
     private byte[] readBytes(InputStream inputStream) throws IOException {
         ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
-        byte[] buffer = new byte[4096];  // Buffer size of 4KB
+        byte[] buffer = new byte[4096];
         int bytesRead;
         while ((bytesRead = inputStream.read(buffer)) != -1) {
             byteArrayOutputStream.write(buffer, 0, bytesRead);
@@ -333,30 +289,58 @@ public class MainActivity extends AppCompatActivity {
             ClipData clip = ClipData.newPlainText("Output Text", outputText);
             if (clipboard != null) {
                 clipboard.setPrimaryClip(clip);
-                showToast("Output text copied to clipboard.");
+                showToast(getString(R.string.success_text_copied));
             } else {
-                showError("Clipboard service not available.");
+                showError(getString(R.string.error_clipboard_unavailable));
             }
         } else {
-            showToast("Output text is empty.");
+            showToast(getString(R.string.error_output_empty));
         }
     }
 
     public void forgetEverything(View view) {
-        // Clear SharedPreferences
-        SharedPreferences.Editor editor = sharedPreferences.edit();
-        editor.remove("password");
-        editor.apply();
-
-        passwordEditText.setText(""); // Clear the password EditText
-        // Clear input and output fields
         inputEditText.setText("");
+        passwordEditText.setText("");
         outputTextView.setText("");
+        selectedFileUri = null;
+        ClipboardManager clipboard = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+        if (clipboard != null) {
+            clipboard.setPrimaryClip(ClipData.newPlainText("clear", ""));
+        }
+        showToast(getString(R.string.success_data_cleared));
+    }
 
-        // Clear remember password checkbox
-        rememberPasswordCheckBox.setChecked(false);
+    public void pasteInput(View view) {
+        ClipboardManager clipboard = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+        if (clipboard != null && clipboard.hasPrimaryClip()) {
+            ClipData.Item item = clipboard.getPrimaryClip().getItemAt(0);
+            CharSequence pasteData = item.getText();
+            if (pasteData != null) {
+                inputEditText.setText(pasteData.toString());
+                showToast(getString(R.string.success_text_pasted));
+            } else {
+                showToast(getString(R.string.error_clipboard_empty));
+            }
+        } else {
+            showToast(getString(R.string.error_clipboard_empty));
+        }
+    }
 
-        showToast("All data forgotten.");
+    public void exitWithObfuscation(View view) {
+        ClipboardManager clipboard = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+        Handler handler = new Handler(Looper.getMainLooper());
+        for (int i = 1; i <= 45; i++) {
+            final int num = i;
+            handler.postDelayed(() -> {
+                ClipData clip = ClipData.newPlainText("obfuscation", String.valueOf(num));
+                clipboard.setPrimaryClip(clip);
+                if (num == 45) {
+                    forgetEverything(null); // Вызываем forgetEverything после копирования 45
+                    finish(); // Закрываем приложение
+                }
+            }, i * 50);
+        }
+        showToast(getString(R.string.success_obfuscating));
     }
 
     public void showOutputText(String text) {
@@ -369,31 +353,11 @@ public class MainActivity extends AppCompatActivity {
         outputTextView.setText("");
     }
 
-    public void pasteInput(View view) {
-        ClipboardManager clipboard = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
-        if (clipboard != null && clipboard.hasPrimaryClip()) {
-            ClipData.Item item = clipboard.getPrimaryClip().getItemAt(0);
-            CharSequence pasteData = item.getText();
-            if (pasteData != null) {
-                inputEditText.setText(pasteData.toString());
-                showToast("Pasted text successfully.");
-            } else {
-                showToast("Clipboard contains no data to paste.");
-            }
-        } else {
-            showToast("Clipboard is empty.");
-        }
-    }
-
     private void showToast(String message) {
-        runOnUiThread(() -> {
-            Toast.makeText(this, message, Toast.LENGTH_SHORT).show();
-        });
+        runOnUiThread(() -> Toast.makeText(this, message, Toast.LENGTH_SHORT).show());
     }
 
     private void showError(String message) {
-        runOnUiThread(() -> {
-            Toast.makeText(this, message, Toast.LENGTH_SHORT).show();
-        });
+        runOnUiThread(() -> Toast.makeText(this, message, Toast.LENGTH_SHORT).show());
     }
 }
