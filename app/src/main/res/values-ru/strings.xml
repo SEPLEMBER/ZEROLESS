@@ -1,0 +1,34 @@
+<resources>
+    <string name="app_name">ДроидКрипт</string>
+    <string name="input_label">Входной текст:</string>
+    <string name="input_hint">Введите текст для шифрования/дешифрования</string>
+    <string name="password_label">Пароль:</string>
+    <string name="password_hint">Введите пароль</string>
+    <string name="encrypt_button">Зашифровать</string>
+    <string name="decrypt_button">Расшифровать</string>
+    <string name="pick_file_button">Выбрать файл</string>
+    <string name="encrypt_file_button">Зашифровать файл</string>
+    <string name="decrypt_file_button">Расшифровать файл</string>
+    <string name="copy_button">Копировать</string>
+    <string name="paste_button">Вставить</string>
+    <string name="forget_button">Забыть всё</string>
+    <string name="exit_button">Выход</string>
+    <string name="output_label">Выходной текст:</string>
+    <string name="output_hint">Результат будет здесь</string>
+    <string name="error_permission_denied">Доступ запрещён</string>
+    <string name="error_password_short">Пароль должен быть не короче 6 символов</string>
+    <string name="error_empty_input">Введите текст для %1$s</string>
+    <string name="error_file_not_selected">Выберите файл для %1$s</string>
+    <string name="error_process_failed">Не удалось %1$s: %2$s</string>
+    <string name="error_save_failed">Не удалось сохранить файл: %1$s</string>
+    <string name="error_clipboard_unavailable">Буфер обмена недоступен</string>
+    <string name="error_clipboard_empty">Буфер обмена пуст</string>
+    <string name="error_output_empty">Выходной текст пуст</string>
+    <string name="success_file_selected">Файл выбран: %1$s</string>
+    <string name="success_file_saved">Файл сохранён как: %1$s</string>
+    <string name="success_file_processed">Файл успешно %1$s</string>
+    <string name="success_text_copied">Выходной текст скопирован</string>
+    <string name="success_text_pasted">Текст вставлен</string>
+    <string name="success_data_cleared">Все данные очищены</string>
+    <string name="success_obfuscating">Обфускация буфера обмена и выход...</string>
+</resources>
