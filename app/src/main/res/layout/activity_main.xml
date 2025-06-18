@@ -4,187 +4,214 @@
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    tools:context=".MainActivity">
+    tools:context=".MainActivity"
+    android:background="@color/black_background">
 
-    <RelativeLayout
+    <androidx.constraintlayout.widget.ConstraintLayout
         android:layout_width="match_parent"
-        android:layout_height="wrap_content">
+        android:layout_height="wrap_content"
+        android:padding="16dp">
 
         <!-- Input Section -->
         <TextView
             android:id="@+id/inputLabel"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Input Text:"
-            android:layout_marginStart="16dp"
-            android:layout_marginTop="16dp"/>
+            android:text="@string/input_label"
+            android:textColor="@color/text_color"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toTopOf="parent" />
 
         <EditText
             android:id="@+id/inputEditText"
-            android:layout_width="match_parent"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:layout_below="@id/inputLabel"
-            android:layout_marginStart="16dp"
-            android:layout_marginEnd="16dp"
-            android:hint="Enter text to encrypt/decrypt"
+            android:hint="@string/input_hint"
             android:inputType="textMultiLine"
             android:minLines="4"
             android:maxLines="10"
-            android:scrollbars="vertical"/>
+            android:scrollbars="vertical"
+            android:textColor="@color/text_color"
+            android:backgroundTint="@color/olive_accent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintTop_toBottomOf="@id/inputLabel"
+            android:layout_marginTop="8dp" />
 
         <!-- Password Section -->
         <TextView
             android:id="@+id/passwordLabel"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Password:"
-            android:layout_below="@id/inputEditText"
-            android:layout_marginStart="16dp"
-            android:layout_marginTop="16dp"/>
+            android:text="@string/password_label"
+            android:textColor="@color/text_color"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toBottomOf="@id/inputEditText"
+            android:layout_marginTop="16dp" />
 
         <EditText
             android:id="@+id/passwordEditText"
-            android:layout_width="match_parent"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:layout_below="@id/passwordLabel"
-            android:layout_marginStart="16dp"
-            android:layout_marginEnd="16dp"
-            android:inputType="textPassword"/>
-
-        <!-- Remember Password Checkbox -->
-        <CheckBox
-            android:id="@+id/rememberPasswordCheckBox"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_below="@id/passwordEditText"
-            android:layout_marginStart="16dp"
-            android:text="Remember Password"
-            android:checked="true"/>
+            android:hint="@string/password_hint"
+            android:inputType="textPassword"
+            android:textColor="@color/text_color"
+            android:backgroundTint="@color/olive_accent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintTop_toBottomOf="@id/passwordLabel"
+            android:layout_marginTop="8dp" />
 
         <!-- Encrypt and Decrypt Buttons -->
         <Button
             android:id="@+id/encryptTextButton"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_below="@id/rememberPasswordCheckBox"
-            android:layout_marginStart="16dp"
-            android:layout_marginTop="16dp"
-            android:text="Encrypt Text"
-            android:onClick="performTextEncryption"/>
+            android:text="@string/encrypt_button"
+            android:onClick="performTextEncryption"
+            android:backgroundTint="@color/olive_accent"
+            android:textColor="@color/text_color"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toBottomOf="@id/passwordEditText"
+            android:layout_marginTop="16dp" />
 
         <Button
             android:id="@+id/decryptTextButton"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_below="@id/rememberPasswordCheckBox"
-            android:layout_toEndOf="@id/encryptTextButton"
-            android:layout_marginStart="16dp"
-            android:layout_marginTop="16dp"
-            android:text="Decrypt Text"
-            android:onClick="performTextDecryption"/>
+            android:text="@string/decrypt_button"
+            android:onClick="performTextDecryption"
+            android:backgroundTint="@color/olive_accent"
+            android:textColor="@color/text_color"
+            app:layout_constraintStart_toEndOf="@id/encryptTextButton"
+            app:layout_constraintTop_toTopOf="@id/encryptTextButton"
+            android:layout_marginStart="16dp" />
 
         <!-- Copy and Paste Buttons -->
         <Button
             android:id="@+id/copyTextButton"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_below="@id/decryptTextButton"
-            android:layout_marginStart="16dp"
-            android:layout_marginTop="16dp"
-            android:text="Copy Output Text"
-            android:onClick="copyToClipboard"/>
+            android:text="@string/copy_button"
+            android:onClick="copyToClipboard"
+            android:backgroundTint="@color/olive_accent"
+            android:textColor="@color/text_color"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toBottomOf="@id/encryptTextButton"
+            android:layout_marginTop="16dp" />
 
         <Button
             android:id="@+id/pasteTextButton"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_below="@id/decryptTextButton"
-            android:layout_toEndOf="@id/copyTextButton"
-            android:layout_marginStart="16dp"
-            android:layout_marginTop="16dp"
-            android:text="Paste Text"
-            android:onClick="pasteInput"/>
+            android:text="@string/paste_button"
+            android:onClick="pasteInput"
+            android:backgroundTint="@color/olive_accent"
+            android:textColor="@color/text_color"
+            app:layout_constraintStart_toEndOf="@id/copyTextButton"
+            app:layout_constraintTop_toTopOf="@id/copyTextButton"
+            android:layout_marginStart="16dp" />
 
         <!-- File Operations Buttons -->
         <Button
             android:id="@+id/pickFileButton"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_below="@id/copyTextButton"
-            android:layout_marginStart="16dp"
-            android:layout_marginTop="16dp"
-            android:text="Pick File"
-            android:onClick="pickFile"/>
+            android:text="@string/pick_file_button"
+            android:onClick="pickFile"
+            android:backgroundTint="@color/olive_accent"
+            android:textColor="@color/text_color"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toBottomOf="@id/copyTextButton"
+            android:layout_marginTop="16dp" />
 
         <Button
             android:id="@+id/encryptFileButton"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_below="@id/pickFileButton"
-            android:layout_marginStart="16dp"
-            android:layout_marginTop="16dp"
-            android:text="Encrypt File"
-            android:onClick="performFileEncryption"/>
+            android:text="@string/encrypt_file_button"
+            android:onClick="performFileEncryption"
+            android:backgroundTint="@color/olive_accent"
+            android:textColor="@color/text_color"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toBottomOf="@id/pickFileButton"
+            android:layout_marginTop="16dp" />
 
         <Button
             android:id="@+id/decryptFileButton"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_below="@id/pickFileButton"
-            android:layout_toEndOf="@id/encryptFileButton"
-            android:layout_marginStart="16dp"
-            android:layout_marginTop="16dp"
-            android:text="Decrypt File"
-            android:onClick="performFileDecryption"/>
+            android:text="@string/decrypt_file_button"
+            android:onClick="performFileDecryption"
+            android:backgroundTint="@color/olive_accent"
+            android:textColor="@color/text_color"
+            app:layout_constraintStart_toEndOf="@id/encryptFileButton"
+            app:layout_constraintTop_toTopOf="@id/encryptFileButton"
+            android:layout_marginStart="16dp" />
 
-        <!-- Forget Everything Button -->
+        <!-- Forget Everything and Exit Buttons -->
         <Button
             android:id="@+id/forgetEverythingButton"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_below="@id/decryptFileButton"
-            android:layout_marginStart="16dp"
-            android:layout_marginTop="16dp"
-            android:text="Forget Everything"
-            android:onClick="forgetEverything"/>
+            android:text="@string/forget_button"
+            android:onClick="forgetEverything"
+            android:backgroundTint="@color/olive_accent"
+            android:textColor="@color/text_color"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toBottomOf="@id/encryptFileButton"
+            android:layout_marginTop="16dp" />
+
+        <Button
+            android:id="@+id/exitButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/exit_button"
+            android:onClick="exitWithObfuscation"
+            android:backgroundTint="@color/olive_accent"
+            android:textColor="@color/text_color"
+            app:layout_constraintStart_toEndOf="@id/forgetEverythingButton"
+            app:layout_constraintTop_toTopOf="@id/forgetEverythingButton"
+            android:layout_marginStart="16dp" />
 
         <!-- Output Section -->
         <TextView
             android:id="@+id/outputLabel"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Output Text:"
-            android:layout_below="@id/forgetEverythingButton"
-            android:layout_marginStart="16dp"
-            android:layout_marginTop="16dp"/>
+            android:text="@string/output_label"
+            android:textColor="@color/text_color"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toBottomOf="@id/forgetEverythingButton"
+            android:layout_marginTop="16dp" />
 
         <TextView
             android:id="@+id/outputTextView"
-            android:layout_width="match_parent"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:layout_below="@id/outputLabel"
-            android:layout_marginStart="16dp"
-            android:layout_marginEnd="16dp"
-            android:hint="Output will be displayed here"
+            android:hint="@string/output_hint"
             android:minLines="4"
             android:maxLines="10"
             android:textSize="18sp"
             android:textStyle="bold"
             android:textIsSelectable="true"
             android:scrollbars="vertical"
-            android:visibility="invisible"/>
+            android:visibility="invisible"
+            android:textColor="@color/text_color"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintTop_toBottomOf="@id/outputLabel"
+            android:layout_marginTop="8dp" />
 
-        <androidx.core.widget.ContentLoadingProgressBar
+        <ProgressBar
             android:id="@+id/textEncryptProgress"
-            style="?android:attr/progressBarStyleLarge"
-            android:layout_width="50dp"
-            android:layout_height="50dp"
-            android:layout_alignTop="@id/outputTextView"
-            android:layout_centerHorizontal="true"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
             android:visibility="gone"
-            />
+            app:layout_constraintStart_toStartOf="@id/outputTextView"
+            app:layout_constraintEnd_toEndOf="@id/outputTextView"
+            app:layout_constraintTop_toTopOf="@id/outputTextView"
+            app:layout_constraintBottom_toBottomOf="@id/outputTextView" />
 
-
-
-    </RelativeLayout>
+    </androidx.constraintlayout.widget.ConstraintLayout>
 </ScrollView>
