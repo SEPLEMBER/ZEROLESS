@@ -44,6 +44,7 @@ import java.security.SecureRandom;
 import java.util.Arrays;
 import android.util.Base64;
 
+import javax.crypto.AEADBadTagException;
 import javax.crypto.Cipher;
 import javax.crypto.SecretKey;
 import javax.crypto.spec.GCMParameterSpec;
@@ -57,6 +58,8 @@ public class MainActivity extends AppCompatActivity {
     private static final int FILE_PICKER_REQUEST_CODE = 123;
     private static final int PERMISSION_REQUEST_CODE = 124;
     private Uri selectedFileUri;
+    private byte[] salt, iv, derivedKey;
+    private SecretKey secretKey;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -183,9 +186,14 @@ public class MainActivity extends AppCompatActivity {
                     } else if (!isText) {
                         showToast(getString(R.string.success_file_processed, isEncryption ? getString(R.string.encrypt_file_button).toLowerCase() : getString(R.string.decrypt_file_button).toLowerCase()));
                     }
+                    clearSensitiveData();
                 });
+            } catch (AEADBadTagException e) {
+                showError(getString(R.string.error_tampering_detected));
             } catch (Exception e) {
                 showError(getString(R.string.error_process_failed, isEncryption ? (isText ? getString(R.string.encrypt_button) : getString(R.string.encrypt_file_button)).toLowerCase() : (isText ? getString(R.string.decrypt_button) : getString(R.string.decrypt_file_button)).toLowerCase(), e.getMessage()));
+            } finally {
+                runOnUiThread(() -> progress.setVisibility(View.GONE));
             }
         }).start();
     }
@@ -198,6 +206,8 @@ public class MainActivity extends AppCompatActivity {
             showToast(getString(R.string.success_file_saved, file.getAbsolutePath()));
         } catch (IOException e) {
             showError(getString(R.string.error_save_failed, e.getMessage()));
+        } finally {
+            Arrays.fill(bytes, (byte) 0);
         }
     }
 
@@ -212,46 +222,60 @@ public class MainActivity extends AppCompatActivity {
             }
             byte[] inputBytes = baos.toByteArray();
 
-            byte[] salt = generateSalt();
-            SecretKey secretKey = generateSecretKey(password, salt);
+            salt = generateSalt();
+            secretKey = generateSecretKey(password, salt);
             Cipher cipher = getCipher(Cipher.ENCRYPT_MODE, secretKey, null);
-            byte[] iv = cipher.getIV();
+            iv = cipher.getIV();
             byte[] cipherText = cipher.doFinal(inputBytes);
 
-            return concatenateArrays(salt, iv, cipherText);
+            byte[] result = concatenateArrays(salt, iv, cipherText);
+            Arrays.fill(inputBytes, (byte) 0);
+            Arrays.fill(cipherText, (byte) 0);
+            return result;
         }
     }
 
     private byte[] decryptFile(Uri fileUri, String password) throws IOException, GeneralSecurityException {
         try (InputStream inputStream = getContentResolver().openInputStream(fileUri)) {
             byte[] inputBytes = readBytes(inputStream);
-            byte[] salt = Arrays.copyOfRange(inputBytes, 0, 16);
-            byte[] iv = Arrays.copyOfRange(inputBytes, 16, 28);
+            salt = Arrays.copyOfRange(inputBytes, 0, 16);
+            iv = Arrays.copyOfRange(inputBytes, 16, 28);
             byte[] cipherText = Arrays.copyOfRange(inputBytes, 28, inputBytes.length);
 
-            SecretKey secretKey = generateSecretKey(password, salt);
+            secretKey = generateSecretKey(password, salt);
             Cipher cipher = getCipher(Cipher.DECRYPT_MODE, secretKey, iv);
-            return cipher.doFinal(cipherText);
+            byte[] result = cipher.doFinal(cipherText);
+
+            Arrays.fill(inputBytes, (byte) 0);
+            Arrays.fill(cipherText, (byte) 0);
+            return result;
         }
     }
 
     private String encryptText(String inputText, String password) throws GeneralSecurityException {
-        byte[] salt = generateSalt();
-        SecretKey secretKey = generateSecretKey(password, salt);
+        salt = generateSalt();
+        secretKey = generateSecretKey(password, salt);
         Cipher cipher = getCipher(Cipher.ENCRYPT_MODE, secretKey, null);
-        byte[] iv = cipher.getIV();
+        iv = cipher.getIV();
         byte[] cipherText = cipher.doFinal(inputText.getBytes());
-        return Base64.encodeToString(concatenateArrays(salt, iv, cipherText), Base64.DEFAULT);
+        String result = Base64.encodeToString(concatenateArrays(salt, iv, cipherText), Base64.DEFAULT);
+        Arrays.fill(cipherText, (byte) 0);
+        return result;
     }
 
     private String decryptText(String inputText, String password) throws GeneralSecurityException {
         byte[] inputBytes = Base64.decode(inputText, Base64.DEFAULT);
-        byte[] salt = Arrays.copyOfRange(inputBytes, 0, 16);
-        byte[] iv = Arrays.copyOfRange(inputBytes, 16, 28);
+        salt = Arrays.copyOfRange(inputBytes, 0, 16);
+        iv = Arrays.copyOfRange(inputBytes, 16, 28);
         byte[] cipherText = Arrays.copyOfRange(inputBytes, 28, inputBytes.length);
-        SecretKey secretKey = generateSecretKey(password, salt);
+        secretKey = generateSecretKey(password, salt);
         Cipher cipher = getCipher(Cipher.DECRYPT_MODE, secretKey, iv);
-        return new String(cipher.doFinal(cipherText));
+        byte[] decryptedBytes = cipher.doFinal(cipherText);
+        String result = new String(decryptedBytes);
+        Arrays.fill(inputBytes, (byte) 0);
+        Arrays.fill(cipherText, (byte) 0);
+        Arrays.fill(decryptedBytes, (byte) 0);
+        return result;
     }
 
     private Cipher getCipher(int mode, SecretKey secretKey, byte[] iv) throws GeneralSecurityException {
@@ -265,7 +289,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private SecretKey generateSecretKey(String password, byte[] salt) throws NoSuchAlgorithmException {
-        byte[] derivedKey = SCrypt.generate(password.getBytes(), salt, 16384, 8, 1, 32);
+        derivedKey = SCrypt.generate(password.getBytes(), salt, 16384, 8, 1, 32);
         return new SecretKeySpec(derivedKey, "AES");
     }
 
@@ -319,6 +343,37 @@ public class MainActivity extends AppCompatActivity {
         return byteArrayOutputStream.toByteArray();
     }
 
+    private void clearSensitiveData() {
+        if (salt != null) {
+            Arrays.fill(salt, (byte) 0);
+            salt = null;
+        }
+        if (iv != null) {
+            Arrays.fill(iv, (byte) 0);
+            iv = null;
+        }
+        if (derivedKey != null) {
+            Arrays.fill(derivedKey, (byte) 0);
+            derivedKey = null;
+        }
+        secretKey = null;
+        System.gc();
+    }
+
+    private void clearAllData() {
+        inputEditText.setText("");
+        passwordEditText.setText("");
+        outputTextView.setText("");
+        passwordDisplay.setText("");
+        selectedFileUri = null;
+        ClipboardManager clipboard = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+        if (clipboard != null) {
+            clipboard.setPrimaryClip(ClipData.newPlainText("clear", ""));
+        }
+        clearSensitiveData();
+        showToast(getString(R.string.success_data_cleared));
+    }
+
     public void copyToClipboard(View view) {
         String outputText = outputTextView.getText().toString();
         if (!outputText.isEmpty()) {
@@ -335,17 +390,9 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    public void forgetEverything(View view) {
+    public void clearInput(View view) {
         inputEditText.setText("");
-        passwordEditText.setText("");
-        outputTextView.setText("");
-        passwordDisplay.setText("");
-        selectedFileUri = null;
-        ClipboardManager clipboard = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
-        if (clipboard != null) {
-            clipboard.setPrimaryClip(ClipData.newPlainText("clear", ""));
-        }
-        showToast(getString(R.string.success_data_cleared));
+        showToast(getString(R.string.success_input_cleared));
     }
 
     public void pasteInput(View view) {
@@ -373,7 +420,7 @@ public class MainActivity extends AppCompatActivity {
                 ClipData clip = ClipData.newPlainText("obfuscation", String.valueOf(num));
                 clipboard.setPrimaryClip(clip);
                 if (num == 45) {
-                    forgetEverything(null);
+                    clearAllData();
                     finish();
                 }
             }, i * 50);
