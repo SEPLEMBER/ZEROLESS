@@ -13,6 +13,9 @@
     <string name="paste_button">Вставить</string>
     <string name="forget_button">Забыть всё</string>
     <string name="exit_button">Выход</string>
+    <string name="info_button">Инфо</string>
+    <string name="info_title">О ДроидКрипт</string>
+    <string name="info_message">ДроидКрипт от NEMESIS, 2025.\nБезопасное шифрование текста и файлов с использованием AES-GCM и ключей, выведенных через scrypt.</string>
     <string name="output_label">Выходной текст:</string>
     <string name="output_hint">Результат будет здесь</string>
     <string name="error_permission_denied">Доступ запрещён</string>
