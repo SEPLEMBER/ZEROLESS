@@ -11,7 +11,7 @@
     <string name="decrypt_file_button">Расшифровать файл</string>
     <string name="copy_button">Копировать</string>
     <string name="paste_button">Вставить</string>
-    <string name="forget_button">Забыть всё</string>
+    <string name="clear_button">Очистить</string>
     <string name="exit_button">Выход</string>
     <string name="info_button">Инфо</string>
     <string name="info_title">О ДроидКрипт</string>
@@ -27,11 +27,13 @@
     <string name="error_clipboard_unavailable">Буфер обмена недоступен</string>
     <string name="error_clipboard_empty">Буфер обмена пуст</string>
     <string name="error_output_empty">Выходной текст пуст</string>
+    <string name="error_tampering_detected">Обнаружена подделка данных</string>
     <string name="success_file_selected">Файл выбран: %1$s</string>
     <string name="success_file_saved">Файл сохранён как: %1$s</string>
     <string name="success_file_processed">Файл успешно %1$s</string>
     <string name="success_text_copied">Выходной текст скопирован</string>
     <string name="success_text_pasted">Текст вставлен</string>
+    <string name="success_input_cleared">Поле ввода очищено</string>
     <string name="success_data_cleared">Все данные очищены</string>
     <string name="success_obfuscating">Обфускация буфера обмена и выход...</string>
 </resources>
