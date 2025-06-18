@@ -6,7 +6,9 @@ import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
+import android.content.res.Configuration;
 import android.database.Cursor;
 import android.net.Uri;
 import android.os.Build;
@@ -19,8 +21,10 @@ import android.text.Editable;
 import android.text.TextWatcher;
 import android.view.View;
 import android.view.WindowManager;
+import android.widget.ArrayAdapter;
 import android.widget.EditText;
 import android.widget.ProgressBar;
+import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -42,6 +46,7 @@ import java.security.GeneralSecurityException;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.util.Arrays;
+import java.util.Locale;
 import android.util.Base64;
 
 import javax.crypto.AEADBadTagException;
@@ -63,6 +68,7 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        loadSavedLanguage();
         super.onCreate(savedInstanceState);
         getWindow().setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE);
         setContentView(R.layout.activity_main);
@@ -94,6 +100,20 @@ public class MainActivity extends AppCompatActivity {
                 ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
             ActivityCompat.requestPermissions(this, new String[]{Manifest.permission.READ_EXTERNAL_STORAGE}, PERMISSION_REQUEST_CODE);
         }
+    }
+
+    private void loadSavedLanguage() {
+        SharedPreferences prefs = getSharedPreferences("app_prefs", MODE_PRIVATE);
+        String languageCode = prefs.getString("language", "en");
+        setLocale(languageCode);
+    }
+
+    private void setLocale(String languageCode) {
+        Locale locale = new Locale(languageCode);
+        Locale.setDefault(locale);
+        Configuration config = new Configuration();
+        config.setLocale(locale);
+        getResources().updateConfiguration(config, getResources().getDisplayMetrics());
     }
 
     @Override
@@ -429,11 +449,43 @@ public class MainActivity extends AppCompatActivity {
     }
 
     public void showInfo(View view) {
-        new AlertDialog.Builder(this)
-                .setTitle(R.string.info_title)
-                .setMessage(R.string.info_message)
-                .setPositiveButton(android.R.string.ok, null)
-                .show();
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setTitle(R.string.info_title);
+        builder.setMessage(R.string.info_message);
+
+        // Add language selection
+        Spinner languageSpinner = new Spinner(this);
+        ArrayAdapter<CharSequence> adapter = ArrayAdapter.createFromResource(this,
+                R.array.languages, android.R.layout.simple_spinner_item);
+        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        languageSpinner.setAdapter(adapter);
+
+        SharedPreferences prefs = getSharedPreferences("app_prefs", MODE_PRIVATE);
+        String[] languageCodes = getResources().getStringArray(R.array.language_codes);
+        languageSpinner.setSelection(getCurrentLanguageIndex(prefs, languageCodes));
+
+        builder.setView(languageSpinner);
+        builder.setPositiveButton(android.R.string.ok, (dialog, which) -> {
+            int selectedPosition = languageSpinner.getSelectedItemPosition();
+            String selectedCode = languageCodes[selectedPosition];
+            if (!prefs.getString("language", "en").equals(selectedCode)) {
+                prefs.edit().putString("language", selectedCode).apply();
+                setLocale(selectedCode);
+                recreate();
+            }
+        });
+        builder.setNegativeButton(android.R.string.cancel, null);
+        builder.show();
+    }
+
+    private int getCurrentLanguageIndex(SharedPreferences prefs, String[] languageCodes) {
+        String savedLanguage = prefs.getString("language", "en");
+        for (int i = 0; i < languageCodes.length; i++) {
+            if (languageCodes[i].equals(savedLanguage)) {
+                return i;
+            }
+        }
+        return 0;
     }
 
     public void showOutputText(String text) {
