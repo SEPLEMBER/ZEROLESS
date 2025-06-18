@@ -6,6 +6,5 @@
         <item name="colorSecondary">@color/olive_accent</item>
         <item name="colorSecondaryVariant">@color/black_background</item>
         <item name="colorOnSecondary">@color/text_color</item>
-        <item name="android:statusBarColor">@color/black_background</item>
     </style>
 </resources>
