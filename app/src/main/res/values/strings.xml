@@ -13,6 +13,9 @@
     <string name="paste_button">Paste</string>
     <string name="forget_button">Forget Everything</string>
     <string name="exit_button">Exit</string>
+    <string name="info_button">Info</string>
+    <string name="info_title">About DroidCrypt</string>
+    <string name="info_message">DroidCrypt by NEMESIS, 2025.\nSecurely encrypt text and files using AES-GCM with scrypt-derived keys.</string>
     <string name="output_label">Output Text:</string>
     <string name="output_hint">Output will be displayed here</string>
     <string name="error_permission_denied">Permission denied</string>
