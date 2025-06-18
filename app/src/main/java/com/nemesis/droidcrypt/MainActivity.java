@@ -86,13 +86,7 @@ public class MainActivity extends AppCompatActivity {
             public void onTextChanged(CharSequence s, int start, int before, int count) {}
             @Override
             public void afterTextChanged(Editable s) {
-                String text = s.toString();
-                if (text.length() > 5) {
-                    String display = text.substring(0, 5) + "*".repeat(text.length() - 5);
-                    passwordDisplay.setText(display);
-                } else {
-                    passwordDisplay.setText(text);
-                }
+                passwordDisplay.setText(s.toString()); // Показываем полный пароль
             }
         });
 
