@@ -1,0 +1,5 @@
+<resources>
+    <style name="Theme.DroidCrypt" parent="Theme.MaterialComponents.DayNight.DarkActionBar">
+        <item name="android:statusBarColor">@color/black_background</item>
+    </style>
+</resources>
