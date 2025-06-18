@@ -11,7 +11,7 @@
     <string name="decrypt_file_button">Decrypt File</string>
     <string name="copy_button">Copy</string>
     <string name="paste_button">Paste</string>
-    <string name="forget_button">Forget Everything</string>
+    <string name="clear_button">Clear</string>
     <string name="exit_button">Exit</string>
     <string name="info_button">Info</string>
     <string name="info_title">About DroidCrypt</string>
@@ -27,11 +27,13 @@
     <string name="error_clipboard_unavailable">Clipboard service not available</string>
     <string name="error_clipboard_empty">Clipboard is empty</string>
     <string name="error_output_empty">Output text is empty</string>
+    <string name="error_tampering_detected">Data tampering detected</string>
     <string name="success_file_selected">File selected: %1$s</string>
     <string name="success_file_saved">File saved as: %1$s</string>
     <string name="success_file_processed">File %1$s successfully</string>
     <string name="success_text_copied">Output text copied to clipboard</string>
     <string name="success_text_pasted">Pasted text successfully</string>
+    <string name="success_input_cleared">Input cleared</string>
     <string name="success_data_cleared">All data cleared</string>
     <string name="success_obfuscating">Obfuscating clipboard and exiting...</string>
 </resources>
