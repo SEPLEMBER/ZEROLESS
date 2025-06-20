@@ -275,7 +275,7 @@ public class MainActivity extends AppCompatActivity {
         byte[] cipherText = cipher.doFinal(inputText.getBytes("UTF-8"));
         byte[] resultBytes = concatenateArrays(salt, iv, cipherText);
         showToast("Salt: " + salt.length + ", IV: " + iv.length + ", CipherText: " + cipherText.length + ", Result: " + resultBytes.length);
-        String result = Base64.encodeToString(resultBytes, Base64.DEFAULT);
+        String result = Base64.encodeToString(resultBytes, Base64.NO_WRAP);
         Arrays.fill(cipherText, (byte) 0);
         return result;
     }
