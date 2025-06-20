@@ -77,7 +77,7 @@ public class MainActivity extends AppCompatActivity {
         inputEditText = findViewById(R.id.inputEditText);
         passwordEditText = findViewById(R.id.passwordEditText);
         outputTextView = findViewById(R.id.outputTextView);
-        passwordDisplay = findViewById(R.id.passwordTextView);
+        passwordDisplay = findViewById(R.id.passwordDisplay);
         progress = findViewById(R.id.textEncryptProgress);
 
         passwordEditText.addTextChangedListener(new TextWatcher() {
@@ -118,7 +118,7 @@ public class MainActivity extends AppCompatActivity {
         if (clipboard.hasPrimaryClip() && clipboard.getPrimaryClip().getItemCount() > 0) {
             CharSequence pasteData = clipboard.getPrimaryClip().getItemAt(0).getText();
             if (pasteData != null && inputEditText.getText().toString().isEmpty()) {
-                inputEdit.setText(pasteData);
+                inputEditText.setText(pasteData);
                 showToast(getString(R.string.success_text_pasted));
             }
         }
@@ -445,7 +445,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     public void showInfo(View view) {
-        AlertDialog.Builder builder = new AlertDialogBuilder(this);
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
         builder.setTitle(R.string.info_title);
         builder.setMessage(R.string.info_message);
 
@@ -461,7 +461,7 @@ public class MainActivity extends AppCompatActivity {
         languageSpinner.setSelection(getCurrentLanguageIndex(prefs, languageCodes));
 
         builder.setView(languageSpinner);
-        builder.setPositiveButton(android.R.id.button_positive, (dialog, which) -> {
+        builder.setPositiveButton(android.R.string.ok, (dialog, which) -> {
             int selectedPosition = languageSpinner.getSelectedItemPosition();
             String selectedCode = languageCodes[selectedPosition];
             if (!prefs.getString("language", "en").equals(selectedCode)) {
@@ -470,7 +470,7 @@ public class MainActivity extends AppCompatActivity {
                 recreate();
             }
         });
-        builder.setNegativeButton(android.R.id.button_negative, null);
+        builder.setNegativeButton(android.R.string.cancel, null);
         builder.show();
     }
 
@@ -493,7 +493,7 @@ public class MainActivity extends AppCompatActivity {
         showToast(getString(R.string.success_text_copied));
     }
 
-    public void hideOutput() {
+    public void hideOutputText() {
         outputTextView.setVisibility(View.INVISIBLE);
         outputTextView.setText("");
     }
