@@ -86,7 +86,7 @@ public class MainActivity extends AppCompatActivity {
             public void onTextChanged(CharSequence s, int start, int before, int count) {}
             @Override
             public void afterTextChanged(Editable s) {
-                passwordDisplay.setText(s.toString()); // Показываем полный пароль
+                passwordDisplay.setText(s.toString());
             }
         });
 
@@ -271,7 +271,7 @@ public class MainActivity extends AppCompatActivity {
         secretKey = generateSecretKey(password, salt);
         Cipher cipher = getCipher(Cipher.ENCRYPT_MODE, secretKey, null);
         iv = cipher.getIV();
-        byte[] cipherText = cipher.doFinal(inputText.getBytes());
+        byte[] cipherText = cipher.doFinal(inputText.getBytes("UTF-8"));
         String result = Base64.encodeToString(concatenateArrays(salt, iv, cipherText), Base64.DEFAULT);
         Arrays.fill(cipherText, (byte) 0);
         return result;
@@ -285,7 +285,7 @@ public class MainActivity extends AppCompatActivity {
         secretKey = generateSecretKey(password, salt);
         Cipher cipher = getCipher(Cipher.DECRYPT_MODE, secretKey, iv);
         byte[] decryptedBytes = cipher.doFinal(cipherText);
-        String result = new String(decryptedBytes);
+        String result = new String(decryptedBytes, "UTF-8");
         Arrays.fill(inputBytes, (byte) 0);
         Arrays.fill(cipherText, (byte) 0);
         Arrays.fill(decryptedBytes, (byte) 0);
