@@ -54,6 +54,7 @@ import javax.crypto.Cipher;
 import javax.crypto.SecretKey;
 import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
+import java.io.UnsupportedEncodingException;
 
 public class MainActivity extends AppCompatActivity {
 
@@ -266,7 +267,7 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    private String encryptText(String inputText, String password) throws GeneralSecurityException {
+    private String encryptText(String inputText, String password) throws GeneralSecurityException, UnsupportedEncodingException {
         salt = generateSalt();
         secretKey = generateSecretKey(password, salt);
         Cipher cipher = getCipher(Cipher.ENCRYPT_MODE, secretKey, null);
@@ -277,7 +278,7 @@ public class MainActivity extends AppCompatActivity {
         return result;
     }
 
-    private String decryptText(String inputText, String password) throws GeneralSecurityException {
+    private String decryptText(String inputText, String password) throws GeneralSecurityException, UnsupportedEncodingException {
         byte[] inputBytes = Base64.decode(inputText, Base64.DEFAULT);
         salt = Arrays.copyOfRange(inputBytes, 0, 16);
         iv = Arrays.copyOfRange(inputBytes, 16, 28);
