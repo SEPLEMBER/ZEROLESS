@@ -77,7 +77,7 @@ public class MainActivity extends AppCompatActivity {
         inputEditText = findViewById(R.id.inputEditText);
         passwordEditText = findViewById(R.id.passwordEditText);
         outputTextView = findViewById(R.id.outputTextView);
-        passwordDisplay = findViewById(R.id.passwordDisplay);
+        passwordDisplay = findViewById(R.id.passwordTextView);
         progress = findViewById(R.id.textEncryptProgress);
 
         passwordEditText.addTextChangedListener(new TextWatcher() {
@@ -118,7 +118,7 @@ public class MainActivity extends AppCompatActivity {
         if (clipboard.hasPrimaryClip() && clipboard.getPrimaryClip().getItemCount() > 0) {
             CharSequence pasteData = clipboard.getPrimaryClip().getItemAt(0).getText();
             if (pasteData != null && inputEditText.getText().toString().isEmpty()) {
-                inputEditText.setText(pasteData);
+                inputEdit.setText(pasteData);
                 showToast(getString(R.string.success_text_pasted));
             }
         }
@@ -273,6 +273,7 @@ public class MainActivity extends AppCompatActivity {
         Cipher cipher = getCipher(Cipher.ENCRYPT_MODE, secretKey, null);
         iv = cipher.getIV();
         byte[] cipherText = cipher.doFinal(inputText.getBytes("UTF-8"));
+        showToast("Salt: " + salt.length + ", IV: " + iv.length + ", CipherText: " + cipherText.length);
         String result = Base64.encodeToString(concatenateArrays(salt, iv, cipherText), Base64.DEFAULT);
         Arrays.fill(cipherText, (byte) 0);
         return result;
@@ -444,7 +445,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     public void showInfo(View view) {
-        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        AlertDialog.Builder builder = new AlertDialogBuilder(this);
         builder.setTitle(R.string.info_title);
         builder.setMessage(R.string.info_message);
 
@@ -460,7 +461,7 @@ public class MainActivity extends AppCompatActivity {
         languageSpinner.setSelection(getCurrentLanguageIndex(prefs, languageCodes));
 
         builder.setView(languageSpinner);
-        builder.setPositiveButton(android.R.string.ok, (dialog, which) -> {
+        builder.setPositiveButton(android.R.id.button_positive, (dialog, which) -> {
             int selectedPosition = languageSpinner.getSelectedItemPosition();
             String selectedCode = languageCodes[selectedPosition];
             if (!prefs.getString("language", "en").equals(selectedCode)) {
@@ -469,7 +470,7 @@ public class MainActivity extends AppCompatActivity {
                 recreate();
             }
         });
-        builder.setNegativeButton(android.R.string.cancel, null);
+        builder.setNegativeButton(android.R.id.button_negative, null);
         builder.show();
     }
 
@@ -492,7 +493,7 @@ public class MainActivity extends AppCompatActivity {
         showToast(getString(R.string.success_text_copied));
     }
 
-    public void hideOutputText() {
+    public void hideOutput() {
         outputTextView.setVisibility(View.INVISIBLE);
         outputTextView.setText("");
     }
@@ -502,6 +503,6 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void showError(String message) {
-        runOnUiThread(() -> Toast.makeText(this, message, Toast.LENGTH_SHORT).show());
+        runOnUiThread(() -> Toast.makeText(this, message, Toast.LENGTH_LONG).show());
     }
 }
