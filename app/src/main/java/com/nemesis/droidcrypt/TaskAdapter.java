@@ -44,20 +44,14 @@ public class TaskAdapter extends RecyclerView.Adapter<TaskAdapter.TaskViewHolder
     @Override
     public void onBindViewHolder(@NonNull TaskViewHolder holder, int position) {
         Task task = tasks.get(position);
-        // Mask project and task to show first 5 chars
-        String project = task.getProject();
-        String taskText = task.getTask();
-        holder.projectText.setText(project.length() > 5 ? project.substring(0, 5) + "..." : project);
-        holder.taskText.setText(taskText.length() > 5 ? taskText.substring(0, 5) + "..." : taskText);
+        holder.projectText.setText(task.getProject());
+        holder.taskText.setText(task.getTask());
         holder.priorityText.setText(task.getPriority());
         holder.statusText.setText(task.getStatus());
         holder.emojiText.setText(task.getEmoji());
 
         holder.deleteButton.setOnClickListener(v -> onDelete.onDelete(position));
-        holder.editButton.setOnClickListener(v -> {
-            Task updatedTask = new Task(task.getProject(), task.getTask() + " (Edited)", task.getPriority(), task.getStatus(), task.getEmoji());
-            onEdit.onEdit(position, updatedTask);
-        });
+        holder.editButton.setOnClickListener(v -> onEdit.onEdit(position, task));
     }
 
     @Override
