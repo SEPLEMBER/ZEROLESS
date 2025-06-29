@@ -1,34 +1,34 @@
 <resources>
-    <string name="app_name">DroidCrypt</string>
-    <string name="password_hint">Password</string>
-    <string name="project_hint">Project</string>
-    <string name="task_hint">Task</string>
-    <string name="add_task">Add Task</string>
-    <string name="unlock">Unlock</string>
-    <string name="edit">Edit</string>
-    <string name="delete">Delete</string>
-    <string name="password_too_short">Password must be at least 6 characters</string>
-    <string name="empty_input">Project and task cannot be empty</string>
-    <string name="tasks_saved">Tasks saved</string>
-    <string name="error_saving_tasks">Error saving tasks</string>
-    <string name="error_loading_tasks">Error loading tasks</string>
+       <string name="app_name">DroidCrypt</string>
+       <string name="password_hint">Password</string>
+       <string name="project_hint">Project</string>
+       <string name="task_hint">Task</string>
+       <string name="add_task">Add Task</string>
+       <string name="unlock">Unlock</string>
+       <string name="edit">Edit</string>
+       <string name="delete">Delete</string>
+       <string name="password_too_short">Password must be at least 6 characters</string>
+       <string name="empty_input">Project and task cannot be empty</string>
+       <string name="tasks_saved">Tasks saved</string>
+       <string name="error_saving_tasks">Error saving tasks</string>
+       <string name="error_loading_tasks">Error loading tasks</string>
 
-    <string-array name="priority_array">
-        <item>High</item>
-        <item>Medium</item>
-        <item>Low</item>
-    </string-array>
+       <string-array name="priority_array">
+           <item>High</item>
+           <item>Medium</item>
+           <item>Low</item>
+       </string-array>
 
-    <string-array name="status_array">
-        <item>To Do</item>
-        <item>In Progress</item>
-        <item>Done</item>
-    </string-array>
+       <string-array name="status_array">
+           <item>To Do</item>
+           <item>In Progress</item>
+           <item>Done</item>
+       </string-array>
 
-    <string-array name="emoji_array">
-        <item>😊</item>
-        <item>🚀</item>
-        <item>🔥</item>
-        <item>⭐</item>
-    </string-array>
-</resources>
+       <string-array name="emoji_array">
+           <item>😊</item>
+           <item>🚀</item>
+           <item>🔥</item>
+           <item>⭐</item>
+       </string-array>
+   </resources>
