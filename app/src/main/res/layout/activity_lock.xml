@@ -12,8 +12,7 @@
            android:layout_height="wrap_content"
            app:layout_constraintTop_toTopOf="parent"
            app:layout_constraintStart_toStartOf="parent"
-           app:hintEnabled="true"
-           app:hintText="@string/password_hint"
+           android:hint="@string/password_hint"
            style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox">
 
            <com.google.android.material.textfield.TextInputEditText
