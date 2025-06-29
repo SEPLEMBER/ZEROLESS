@@ -55,16 +55,16 @@ public class CryptUtils {
 
     private static SecretKeySpec generateKey(char[] password, byte[] salt) throws Exception {
         byte[] key = SCrypt.generate(charToByteArray(password), salt, 8192, 8, 1, 32);
-        SecretKeySpec secretKey = new SecretKeySpec(key, "AES");
+        SecretKeySpec keySpec = new SecretKeySpec(key, "AES");
         Arrays.fill(key, (byte) 0);
-        return secretKey;
+        return keySpec;
     }
 
     private static SecretKeySpec generateHmacKey(char[] password, byte[] salt) throws Exception {
         byte[] key = SCrypt.generate(charToByteArray(password), salt, 8192, 8, 1, 32);
-        SecretKeySpec hmacKey = new SecretKeySpec(key, "HmacSHA256");
+        SecretKeySpec keySpec = new SecretKeySpec(key, "HmacSHA256");
         Arrays.fill(key, (byte) 0);
-        return secretKey;
+        return keySpec;
     }
 
     private static byte[] charToByteArray(char[] chars) throws Exception {
@@ -104,7 +104,7 @@ public class CryptUtils {
 
     private static void clearKey(SecretKeySpec key) {
         if (key != null) {
-            Arrays.fill(key.getKey(), (byte) 0);
+            Arrays.fill(key.getEncoded(), (byte) 0);
         }
     }
 }
