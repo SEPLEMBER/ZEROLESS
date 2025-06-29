@@ -6,6 +6,7 @@ import android.view.WindowManager;
 import android.widget.ArrayAdapter;
 import android.widget.Spinner;
 import android.widget.Toast;
+import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.recyclerview.widget.DefaultItemAnimator;
 import androidx.recyclerview.widget.LinearLayoutManager;
@@ -25,6 +26,7 @@ public class MainActivity extends AppCompatActivity {
     private Spinner prioritySpinner, statusSpinner, emojiSpinner;
     private MaterialButton addButton;
     private RecyclerView taskRecyclerView;
+    private ProgressBar progressBar;
     private TaskAdapter taskAdapter;
     private List<Task> tasks = new ArrayList<>();
     private String password;
@@ -32,7 +34,6 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        // Prevent screenshots
         getWindow().setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE);
         setContentView(R.layout.activity_main);
 
@@ -44,6 +45,7 @@ public class MainActivity extends AppCompatActivity {
         emojiSpinner = findViewById(R.id.emoji_spinner);
         addButton = findViewById(R.id.add_button);
         taskRecyclerView = findViewById(R.id.task_recycler_view);
+        progressBar = findViewById(R.id.progress_bar);
 
         taskAdapter = new TaskAdapter(tasks, this::deleteTask, this::editTask);
         taskRecyclerView.setLayoutManager(new LinearLayoutManager(this));
@@ -99,16 +101,74 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void editTask(int position, Task updatedTask) {
-        tasks.set(position, updatedTask);
-        taskAdapter.notifyDataSetChanged();
-        saveTasks();
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        View dialogView = getLayoutInflater().inflate(R.layout.dialog_edit_task, null);
+        builder.setView(dialogView);
+
+        TextInputEditText projectInput = dialogView.findViewById(R.id.edit_project_input);
+        TextInputEditText taskInput = dialogView.findViewById(R.id.edit_task_input);
+        Spinner prioritySpinner = dialogView.findViewById(R.id.edit_priority_spinner);
+        Spinner statusSpinner = dialogView.findViewById(R.id.edit_status_spinner);
+        Spinner emojiSpinner = dialogView.findViewById(R.id.edit_emoji_spinner);
+        MaterialButton saveButton = dialogView.findViewById(R.id.save_button);
+        MaterialButton cancelButton = dialogView.findViewById(R.id.cancel_button);
+
+        Task task = tasks.get(position);
+        projectInput.setText(task.getProject());
+        taskInput.setText(task.getTask());
+
+        ArrayAdapter<CharSequence> priorityAdapter = ArrayAdapter.createFromResource(this,
+                R.array.priority_array, android.R.layout.simple_spinner_item);
+        priorityAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        prioritySpinner.setAdapter(priorityAdapter);
+        prioritySpinner.setSelection(((ArrayAdapter<?>) prioritySpinner.getAdapter()).getPosition(task.getPriority()));
+
+        ArrayAdapter<CharSequence> statusAdapter = ArrayAdapter.createFromResource(this,
+                R.array.status_array, android.R.layout.simple_spinner_item);
+        statusAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        statusSpinner.setAdapter(statusAdapter);
+        statusSpinner.setSelection(((ArrayAdapter<?>) statusSpinner.getAdapter()).getPosition(task.getStatus()));
+
+        ArrayAdapter<CharSequence> emojiAdapter = ArrayAdapter.createFromResource(this,
+                R.array.emoji_array, android.R.layout.simple_spinner_item);
+        emojiAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        emojiSpinner.setAdapter(emojiAdapter);
+        emojiSpinner.setSelection(((ArrayAdapter<?>) emojiSpinner.getAdapter()).getPosition(task.getEmoji()));
+
+        AlertDialog dialog = builder.create();
+
+        saveButton.setOnClickListener(v -> {
+            String newProject = projectInput.getText().toString().trim();
+            String newTask = taskInput.getText().toString().trim();
+            String newPriority = prioritySpinner.getSelectedItem().toString();
+            String newStatus = statusSpinner.getSelectedItem().toString();
+            String newEmoji = emojiSpinner.getSelectedItem().toString();
+
+            if (newProject.isEmpty() || newTask.isEmpty()) {
+                showToast(R.string.empty_input);
+                return;
+            }
+
+            tasks.set(position, new Task(newProject, newTask, newPriority, newStatus, newEmoji));
+            taskAdapter.notifyDataSetChanged();
+            saveTasks();
+            dialog.dismiss();
+        });
+
+        cancelButton.setOnClickListener(v -> dialog.dismiss());
+
+        dialog.show();
     }
 
     private void loadTasks() {
+        progressBar.setVisibility(View.VISIBLE);
         new Thread(() -> {
             try {
                 File file = new File(getExternalFilesDir(null), "tasks/project.txt");
-                if (!file.exists()) return;
+                if (!file.exists()) {
+                    runOnUiThread(() -> progressBar.setVisibility(View.GONE));
+                    return;
+                }
 
                 byte[] inputBytes = new byte[(int) file.length()];
                 try (FileInputStream fis = new FileInputStream(file)) {
@@ -129,14 +189,19 @@ public class MainActivity extends AppCompatActivity {
                     tasks.clear();
                     tasks.addAll(loadedTasks);
                     taskAdapter.notifyDataSetChanged();
+                    progressBar.setVisibility(View.GONE);
                 });
             } catch (Exception e) {
-                runOnUiThread(() -> showToast(R.string.error_loading_tasks));
+                runOnUiThread(() -> {
+                    showToast(R.string.error_loading_tasks);
+                    progressBar.setVisibility(View.GONE);
+                });
             }
         }).start();
     }
 
     private void saveTasks() {
+        progressBar.setVisibility(View.VISIBLE);
         new Thread(() -> {
             try {
                 StringBuilder data = new StringBuilder();
@@ -150,9 +215,15 @@ public class MainActivity extends AppCompatActivity {
                 try (FileOutputStream fos = new FileOutputStream(file)) {
                     fos.write(encryptedData);
                 }
-                runOnUiThread(() -> showToast(R.string.tasks_saved));
+                runOnUiThread(() -> {
+                    showToast(R.string.tasks_saved);
+                    progressBar.setVisibility(View.GONE);
+                });
             } catch (Exception e) {
-                runOnUiThread(() -> showToast(R.string.error_saving_tasks));
+                runOnUiThread(() -> {
+                    showToast(R.string.error_saving_tasks);
+                    progressBar.setVisibility(View.GONE);
+                });
             }
         }).start();
     }
