@@ -11,20 +11,26 @@
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:textColor="@color/text_color"
+        android:importantForAccessibility="no"
         app:layout_constraintTop_toTopOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toStartOf="@id/edit_button"
-        android:layout_marginEnd="8dp" />
+        android:layout_marginEnd="8dp"
+        android:maxLines="2"
+        android:ellipsize="end" />
 
     <TextView
         android:id="@+id/task_text"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:textColor="@color/text_color"
+        android:importantForAccessibility="no"
         app:layout_constraintTop_toBottomOf="@id/project_text"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toStartOf="@id/edit_button"
-        android:layout_marginEnd="8dp" />
+        android:layout_marginEnd="8dp"
+        android:maxLines="2"
+        android:ellipsize="end" />
 
     <TextView
         android:id="@+id/priority_text"
@@ -32,7 +38,8 @@
         android:layout_height="wrap_content"
         android:textColor="@color/olive_accent"
         app:layout_constraintTop_toBottomOf="@id/task_text"
-        app:layout_constraintStart_toStartOf="parent" />
+        app:layout_constraintStart_toStartOf="parent"
+        android:layout_marginTop="4dp" />
 
     <TextView
         android:id="@+id/status_text"
@@ -41,6 +48,7 @@
         android:textColor="@color/olive_accent"
         app:layout_constraintTop_toBottomOf="@id/task_text"
         app:layout_constraintStart_toEndOf="@id/priority_text"
+        android:layout_marginTop="4dp"
         android:layout_marginStart="8dp" />
 
     <TextView
@@ -50,6 +58,7 @@
         android:textColor="@color/text_color"
         app:layout_constraintTop_toBottomOf="@id/task_text"
         app:layout_constraintStart_toEndOf="@id/status_text"
+        android:layout_marginTop="4dp"
         android:layout_marginStart="8dp" />
 
     <com.google.android.material.button.MaterialButton
@@ -60,7 +69,8 @@
         android:textColor="@color/text_color"
         app:backgroundTint="@color/olive_accent"
         app:layout_constraintTop_toTopOf="parent"
-        app:layout_constraintEnd_toStartOf="@id/delete_button" />
+        app:layout_constraintEnd_toStartOf="@id/delete_button"
+        android:layout_marginEnd="4dp" />
 
     <com.google.android.material.button.MaterialButton
         android:id="@+id/delete_button"
