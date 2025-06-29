@@ -1,38 +1,37 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:tools="http://schemas.android.com/tools"
-    package="com.nemesis.droidcrypt">
+   <manifest xmlns:android="http://schemas.android.com/apk/res/android"
+       xmlns:tools="http://schemas.android.com/tools">
 
-    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
-        android:maxSdkVersion="30"
-        tools:ignore="ScopedStorage" />
-    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
-        android:maxSdkVersion="30"
-        tools:ignore="ScopedStorage" />
+       <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+           android:maxSdkVersion="30"
+           tools:ignore="ScopedStorage" />
+       <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
+           android:maxSdkVersion="30"
+           tools:ignore="ScopedStorage" />
 
-    <application
-        android:allowBackup="true"
-        android:requestLegacyExternalStorage="true"
-        android:icon="@mipmap/ic_launcher"
-        android:label="@string/app_name"
-        android:supportsRtl="true"
-        android:theme="@style/Theme.DroidCrypt"
-        android:localeConfig="@xml/locales_config"
-        tools:targetApi="31">
+       <application
+           android:allowBackup="true"
+           android:requestLegacyExternalStorage="true"
+           android:icon="@mipmap/ic_launcher"
+           android:label="@string/app_name"
+           android:supportsRtl="true"
+           android:theme="@style/Theme.DroidCrypt"
+           android:localeConfig="@xml/locales_config"
+           tools:targetApi="31">
 
-        <activity
-            android:name=".LockActivity"
-            android:exported="true"
-            android:configChanges="orientation|screenSize">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity>
-        <activity
-            android:name=".MainActivity"
-            android:exported="false"
-            android:configChanges="orientation|screenSize" />
+           <activity
+               android:name=".LockActivity"
+               android:exported="true"
+               android:configChanges="orientation|screenSize">
+               <intent-filter>
+                   <action android:name="android.intent.action.MAIN" />
+                   <category android:name="android.intent.category.LAUNCHER" />
+               </intent-filter>
+           </activity>
+           <activity
+               android:name=".MainActivity"
+               android:exported="false"
+               android:configChanges="orientation|screenSize" />
 
-    </application>
-</manifest>
+       </application>
+   </manifest>
