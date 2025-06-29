@@ -12,6 +12,8 @@
        <string name="tasks_saved">Tasks saved</string>
        <string name="error_saving_tasks">Error saving tasks</string>
        <string name="error_loading_tasks">Error loading tasks</string>
+       <string name="save">Save</string>
+       <string name="cancel">Cancel</string>
 
        <string-array name="priority_array">
            <item>High</item>
