@@ -4,6 +4,7 @@ import android.os.Bundle;
 import android.view.View;
 import android.view.WindowManager;
 import android.widget.ArrayAdapter;
+import android.widget.ProgressBar;
 import android.widget.Spinner;
 import android.widget.Toast;
 import androidx.appcompat.app.AlertDialog;
@@ -29,7 +30,7 @@ public class MainActivity extends AppCompatActivity {
     private ProgressBar progressBar;
     private TaskAdapter taskAdapter;
     private List<Task> tasks = new ArrayList<>();
-    private String password;
+    private char[] password;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -37,7 +38,7 @@ public class MainActivity extends AppCompatActivity {
         getWindow().setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE);
         setContentView(R.layout.activity_main);
 
-        password = getIntent().getStringExtra("password");
+        password = getIntent().getCharArrayExtra("password");
         projectInput = findViewById(R.id.project_input);
         taskInput = findViewById(R.id.task_input);
         prioritySpinner = findViewById(R.id.priority_spinner);
@@ -121,19 +122,19 @@ public class MainActivity extends AppCompatActivity {
                 R.array.priority_array, android.R.layout.simple_spinner_item);
         priorityAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
         prioritySpinner.setAdapter(priorityAdapter);
-        prioritySpinner.setSelection(((ArrayAdapter<?>) prioritySpinner.getAdapter()).getPosition(task.getPriority()));
+        prioritySpinner.setSelection(priorityAdapter.getPosition(task.getPriority()));
 
         ArrayAdapter<CharSequence> statusAdapter = ArrayAdapter.createFromResource(this,
                 R.array.status_array, android.R.layout.simple_spinner_item);
         statusAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
         statusSpinner.setAdapter(statusAdapter);
-        statusSpinner.setSelection(((ArrayAdapter<?>) statusSpinner.getAdapter()).getPosition(task.getStatus()));
+        statusSpinner.setSelection(statusAdapter.getPosition(task.getStatus()));
 
         ArrayAdapter<CharSequence> emojiAdapter = ArrayAdapter.createFromResource(this,
                 R.array.emoji_array, android.R.layout.simple_spinner_item);
         emojiAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
         emojiSpinner.setAdapter(emojiAdapter);
-        emojiSpinner.setSelection(((ArrayAdapter<?>) emojiSpinner.getAdapter()).getPosition(task.getEmoji()));
+        emojiSpinner.setSelection(emojiAdapter.getPosition(task.getEmoji()));
 
         AlertDialog dialog = builder.create();
 
@@ -239,6 +240,7 @@ public class MainActivity extends AppCompatActivity {
             task.clear();
         }
         tasks.clear();
+        Arrays.fill(password, '\0');
         password = null;
     }
 }
