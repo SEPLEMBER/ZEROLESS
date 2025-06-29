@@ -30,8 +30,9 @@ public class LockActivity extends AppCompatActivity {
         progressBar = findViewById(R.id.progress_bar);
 
         unlockButton.setOnClickListener(v -> {
-            char[] password = passwordInput.getText().toString().toCharArray();
-            if (password.length < 8) {
+            String input = passwordInput.getText().toString().trim();
+            char[] password = input.toCharArray();
+            if (password.length < 6) {
                 Toast.makeText(this, R.string.password_too_short, Toast.LENGTH_SHORT).show();
                 Arrays.fill(password, '\0');
                 return;
