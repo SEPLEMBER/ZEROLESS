@@ -20,6 +20,7 @@ import java.io.BufferedReader;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -29,7 +30,7 @@ public class ChatActivity extends AppCompatActivity {
 
     private Uri folderUri;
     private TextView responseArea;
-    private ScrollView responseScrollView; // Добавлено для управления скроллом
+    private ScrollView responseScrollView;
     private AutoCompleteTextView chatInput;
     private Button chatSend;
     private Button clearChatButton;
@@ -40,11 +41,28 @@ public class ChatActivity extends AppCompatActivity {
 
     // Templates: trigger -> list of answers
     private Map<String, List<String>> templatesMap = new HashMap<>();
-
-    // context keyword -> file (e.g., "сон" -> "health.txt")
+    // Context keyword -> file (e.g., "сон" -> "health.txt")
     private Map<String, String> contextMap = new HashMap<>();
+    // Keyword responses: keyword -> list of responses (e.g., "спасибо" -> ["Рад, что помог!", ...])
+    private Map<String, List<String>> keywordResponses = new HashMap<>();
+    // Query count: query -> count of consecutive repetitions
+    private Map<String, Integer> queryCountMap = new HashMap<>();
+    // Anti-spam responses
+    private List<String> antiSpamResponses = Arrays.asList(
+        "Ты надоел, давай что-то новенькое!",
+        "Спамить нехорошо, попробуй другой запрос.",
+        "Я устал от твоих повторений!",
+        "Хватит спамить, придумай что-то интересное.",
+        "Эй, не зацикливайся, попробуй другой вопрос!",
+        "Повторяешь одно и то же? Давай разнообразие!",
+        "Слишком много повторов, я же не робот... ну, почти.",
+        "Не спамь, пожалуйста, задай новый вопрос!",
+        "Пять раз одно и то же? Попробуй что-то другое.",
+        "Я уже ответил, давай новый запрос!"
+    );
 
     private String currentContext = "base.txt";
+    private String lastQuery = ""; // Track last query for repetition
     private Random random = new Random();
 
     @Override
@@ -57,7 +75,7 @@ public class ChatActivity extends AppCompatActivity {
         folderUri = intent != null ? intent.getParcelableExtra("folderUri") : null;
 
         responseArea = findViewById(R.id.responseArea);
-        responseScrollView = findViewById(R.id.responseScrollView); // Найти ScrollView
+        responseScrollView = findViewById(R.id.responseScrollView);
         chatInput = findViewById(R.id.chatInput);
         chatSend = findViewById(R.id.chatSend);
         clearChatButton = findViewById(R.id.clearChatButton);
@@ -97,7 +115,10 @@ public class ChatActivity extends AppCompatActivity {
         });
 
         if (clearChatButton != null) {
-            clearChatButton.setOnClickListener(v -> responseArea.setText(""));
+            clearChatButton.setOnClickListener(v -> {
+                responseArea.setText("");
+                queryCountMap.clear(); // Reset query counts on clear
+            });
         }
     }
 
@@ -112,8 +133,9 @@ public class ChatActivity extends AppCompatActivity {
 
     private void loadTemplatesFromFile(String filename) {
         templatesMap.clear();
+        keywordResponses.clear();
         if ("base.txt".equals(filename)) {
-            contextMap.clear(); // Очищаем только для base.txt
+            contextMap.clear();
         }
 
         if (folderUri == null) {
@@ -160,6 +182,27 @@ public class ChatActivity extends AppCompatActivity {
                         continue;
                     }
 
+                    // Парсинг ключевых слов: -ключ=ответ1|ответ2|...
+                    if (l.startsWith("-")) {
+                        String keywordLine = l.substring(1);
+                        if (keywordLine.contains("=")) {
+                            String[] parts = keywordLine.split("=", 2);
+                            if (parts.length == 2) {
+                                String keyword = parts[0].trim().toLowerCase();
+                                String[] responses = parts[1].split("\\|");
+                                List<String> responseList = new ArrayList<>();
+                                for (String r : responses) {
+                                    String rr = r.trim();
+                                    if (!rr.isEmpty()) responseList.add(rr);
+                                }
+                                if (!keyword.isEmpty() && !responseList.isEmpty()) {
+                                    keywordResponses.put(keyword, responseList);
+                                }
+                            }
+                        }
+                        continue;
+                    }
+
                     // Обычные шаблоны: trigger=ответ1|ответ2|...
                     if (!l.contains("=")) continue;
                     String[] parts = l.split("=", 2);
@@ -187,8 +230,10 @@ public class ChatActivity extends AppCompatActivity {
     private void loadFallbackTemplates() {
         templatesMap.clear();
         contextMap.clear();
-        templatesMap.put("привет", new ArrayList<>(List.of("Привет! Чем могу помочь?")));
-        templatesMap.put("как дела", new ArrayList<>(List.of("Всё отлично, а у тебя?")));
+        keywordResponses.clear();
+        templatesMap.put("привет", new ArrayList<>(Arrays.asList("Привет! Чем могу помочь?", "Здравствуй!")));
+        templatesMap.put("как дела", new ArrayList<>(Arrays.asList("Всё отлично, а у тебя?", "Нормально, как дела?")));
+        keywordResponses.put("спасибо", new ArrayList<>(Arrays.asList("Рад, что помог!", "Всегда пожалуйста!")));
     }
 
     private void updateAutoComplete() {
@@ -212,19 +257,47 @@ public class ChatActivity extends AppCompatActivity {
     private void processQuery(String query) {
         String q = query.toLowerCase().trim();
 
-        // Проверка на смену контекста (приоритет над триггерами)
+        // Отслеживание повторений
+        if (q.equals(lastQuery)) {
+            queryCountMap.put(q, queryCountMap.getOrDefault(q, 0) + 1);
+        } else {
+            queryCountMap.clear();
+            queryCountMap.put(q, 1);
+            lastQuery = q;
+        }
+
+        // Антиспам: если запрос повторён 5 раз подряд
+        if (queryCountMap.getOrDefault(q, 0) >= 5) {
+            String response = antiSpamResponses.get(random.nextInt(antiSpamResponses.size()));
+            responseArea.append("Ты: " + query + "\nBot: " + response + "\n\n");
+            responseScrollView.post(() -> responseScrollView.fullScroll(View.FOCUS_DOWN));
+            return;
+        }
+
+        // Проверка на смену контекста
         String newContext = detectContext(q);
         if (newContext != null && !newContext.equals(currentContext)) {
             currentContext = newContext;
             loadTemplatesFromFile(currentContext);
             updateAutoComplete();
             responseArea.append("Ты: " + query + "\nBot: Переключено на контекст: " + currentContext + "\n\n");
-            // Прокрутка к последнему сообщению
             responseScrollView.post(() -> responseScrollView.fullScroll(View.FOCUS_DOWN));
             return;
         }
 
-        // Поиск ответа в templatesMap
+        // Проверка ключевых слов (-спасибо=...)
+        for (Map.Entry<String, List<String>> entry : keywordResponses.entrySet()) {
+            String keyword = entry.getKey();
+            if (q.contains(keyword)) {
+                List<String> responses = entry.getValue();
+                String response = responses.get(random.nextInt(responses.size()));
+                responseArea.append("Ты: " + query + "\nBot: " + response + "\n\n");
+                responseScrollView.post(() -> responseScrollView.fullScroll(View.FOCUS_DOWN));
+                return;
+            }
+        }
+
+        // Поиск точного триггера
         List<String> possibleResponses = templatesMap.get(q);
         if (possibleResponses != null && !possibleResponses.isEmpty()) {
             String response = possibleResponses.get(random.nextInt(possibleResponses.size()));
@@ -250,7 +323,6 @@ public class ChatActivity extends AppCompatActivity {
     }
 
     private String detectContext(String input) {
-        // Проверяем все ключевые слова из contextMap
         for (Map.Entry<String, String> entry : contextMap.entrySet()) {
             String keyword = entry.getKey().toLowerCase();
             String contextFile = entry.getValue();
