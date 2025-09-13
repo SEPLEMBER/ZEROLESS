@@ -3,8 +3,8 @@ package com.nemesis.droidcrypt;
 import android.content.SharedPreferences;
 import android.os.Bundle;
 import android.preference.PreferenceManager;
-import android.view\.LayoutInflater;
-import android.view\.View;
+import android.view.LayoutInflater;
+import android.view.View;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.AutoCompleteTextView;
@@ -20,7 +20,6 @@ import java.util.Map;
 
 public class ChatActivity extends AppCompatActivity {
 
-```
 private SharedPreferences prefs;
 private TextView responseArea;
 private AutoCompleteTextView chatInput;
