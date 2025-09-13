@@ -19,6 +19,16 @@
             android:textSize="20sp"
             android:layout_marginBottom="12dp" />
 
+        <!-- Кнопка выбора папки на SD -->
+        <Button
+            android:id="@+id/selectFolderButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Выбрать папку на SD"
+            android:textColor="@color/text_green"
+            android:background="@color/button_transparent"
+            android:layout_marginBottom="12dp" />
+
         <EditText
             android:id="@+id/templatesInput"
             android:layout_width="match_parent"
@@ -28,9 +38,9 @@
             android:scrollbars="vertical"
             android:hint="@string/templates_hint"
             android:textColor="@color/text_green"
+            android:textColorHint="#809F809F"
             android:background="@color/card_dark"
-            android:padding="8dp"
-            android:textColorHint="#809F809F" />
+            android:padding="8dp" />
 
         <Button
             android:id="@+id/saveTemplatesButton"
@@ -42,10 +52,10 @@
             android:layout_marginTop="12dp" />
 
         <Button
-            android:id="@+id/clearCacheButton"
+            android:id="@+id/clearTemplatesButton"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="@string/clear_cache"
+            android:text="Очистить шаблоны"
             android:textColor="@color/text_green"
             android:background="@color/button_transparent"
             android:layout_marginTop="8dp" />
