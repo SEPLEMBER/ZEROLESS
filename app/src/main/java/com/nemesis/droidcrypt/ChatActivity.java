@@ -9,6 +9,7 @@ import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.AutoCompleteTextView;
 import android.widget.Button;
+import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -28,6 +29,7 @@ public class ChatActivity extends AppCompatActivity {
 
     private Uri folderUri;
     private TextView responseArea;
+    private ScrollView responseScrollView; // Добавлено для управления скроллом
     private AutoCompleteTextView chatInput;
     private Button chatSend;
     private Button clearChatButton;
@@ -50,16 +52,17 @@ public class ChatActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_chat);
 
-        // Получение folderUri из Intent (если передан)
+        // Получение folderUri из Intent
         Intent intent = getIntent();
         folderUri = intent != null ? intent.getParcelableExtra("folderUri") : null;
 
         responseArea = findViewById(R.id.responseArea);
+        responseScrollView = findViewById(R.id.responseScrollView); // Найти ScrollView
         chatInput = findViewById(R.id.chatInput);
         chatSend = findViewById(R.id.chatSend);
         clearChatButton = findViewById(R.id.clearChatButton);
 
-        // Если folderUri == null — попробуем найти сохранённый persisted Uri (не используя SharedPreferences)
+        // Если folderUri == null — попробуем найти сохранённый persisted Uri
         if (folderUri == null) {
             List<android.content.UriPermission> perms = getContentResolver().getPersistedUriPermissions();
             for (android.content.UriPermission p : perms) {
@@ -72,22 +75,17 @@ public class ChatActivity extends AppCompatActivity {
 
         if (folderUri == null) {
             showCustomToast("Папка не выбрана! Откройте настройки и выберите папку.");
-            // Не finish() — оставляем активность, но без данных
             loadFallbackTemplates();
             updateAutoComplete();
         } else {
-            // Загрузка base.txt по умолчанию (с парсингом контекстов)
             loadTemplatesFromFile(currentContext);
             updateAutoComplete();
         }
 
-        chatInput.setOnItemClickListener(new AdapterView.OnItemClickListener() {
-            @Override
-            public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
-                String selected = (String) parent.getItemAtPosition(position);
-                chatInput.setText(selected);
-                processQuery(selected);
-            }
+        chatInput.setOnItemClickListener((parent, view, position, id) -> {
+            String selected = (String) parent.getItemAtPosition(position);
+            chatInput.setText(selected);
+            processQuery(selected);
         });
 
         chatSend.setOnClickListener(v -> {
@@ -106,7 +104,6 @@ public class ChatActivity extends AppCompatActivity {
     @Override
     protected void onResume() {
         super.onResume();
-        // При возобновлении — если у нас есть folderUri, попытаемся загрузить текущий контекст
         if (folderUri != null) {
             loadTemplatesFromFile(currentContext);
         }
@@ -115,15 +112,11 @@ public class ChatActivity extends AppCompatActivity {
 
     private void loadTemplatesFromFile(String filename) {
         templatesMap.clear();
-        // Если мы парсим base.txt, очищаем contextMap и затем заполняем из base.txt
-        if (!"base.txt".equals(filename)) {
-            contextMap.clear(); // контексты берем только из base.txt
-        } else {
-            contextMap.clear();
+        if ("base.txt".equals(filename)) {
+            contextMap.clear(); // Очищаем только для base.txt
         }
 
         if (folderUri == null) {
-            // нет папки — ничего не читаем
             showCustomToast("Папка не выбрана, используем базовые ответы.");
             loadFallbackTemplates();
             return;
@@ -153,7 +146,7 @@ public class ChatActivity extends AppCompatActivity {
 
                     // Парсинг контекстных ссылок (только в base.txt): :ключ=файл.txt:
                     if ("base.txt".equals(filename) && l.startsWith(":") && l.endsWith(":")) {
-                        String contextLine = l.substring(1, l.length() - 1); // Убираем :
+                        String contextLine = l.substring(1, l.length() - 1);
                         if (contextLine.contains("=")) {
                             String[] parts = contextLine.split("=", 2);
                             if (parts.length == 2) {
@@ -164,7 +157,7 @@ public class ChatActivity extends AppCompatActivity {
                                 }
                             }
                         }
-                        continue; // контекстную строку не добавляем в templatesMap
+                        continue;
                     }
 
                     // Обычные шаблоны: trigger=ответ1|ответ2|...
@@ -182,9 +175,8 @@ public class ChatActivity extends AppCompatActivity {
                             templatesMap.put(trigger, responseList);
                         }
                     }
-                } // end while
-            } // end try stream
-
+                }
+            }
         } catch (Exception e) {
             e.printStackTrace();
             showCustomToast("Ошибка чтения файла: " + e.getMessage());
@@ -195,17 +187,15 @@ public class ChatActivity extends AppCompatActivity {
     private void loadFallbackTemplates() {
         templatesMap.clear();
         contextMap.clear();
-        List<String> lst = new ArrayList<>();
-        lst.add("Всё отлично, а у тебя?");
-        templatesMap.put("привет", lst);
-        // можно добавить ещё пару fallback-ответов
+        templatesMap.put("привет", new ArrayList<>(List.of("Привет! Чем могу помочь?")));
+        templatesMap.put("как дела", new ArrayList<>(List.of("Всё отлично, а у тебя?")));
     }
 
     private void updateAutoComplete() {
         List<String> suggestionsList = new ArrayList<>();
         suggestionsList.addAll(templatesMap.keySet());
         for (String s : fallback) {
-            if (!suggestionsList.contains(s)) suggestionsList.add(s);
+            if (!suggestionsList.contains(s.toLowerCase())) suggestionsList.add(s.toLowerCase());
         }
 
         if (adapter == null) {
@@ -222,21 +212,24 @@ public class ChatActivity extends AppCompatActivity {
     private void processQuery(String query) {
         String q = query.toLowerCase().trim();
 
-        // Проверка на смену контекста (динамически из contextMap)
+        // Проверка на смену контекста (приоритет над триггерами)
         String newContext = detectContext(q);
         if (newContext != null && !newContext.equals(currentContext)) {
             currentContext = newContext;
             loadTemplatesFromFile(currentContext);
             updateAutoComplete();
             responseArea.append("Ты: " + query + "\nBot: Переключено на контекст: " + currentContext + "\n\n");
+            // Прокрутка к последнему сообщению
+            responseScrollView.post(() -> responseScrollView.fullScroll(View.FOCUS_DOWN));
             return;
         }
 
-        // Поиск ответа в templatesMap (вариативный через random)
+        // Поиск ответа в templatesMap
         List<String> possibleResponses = templatesMap.get(q);
         if (possibleResponses != null && !possibleResponses.isEmpty()) {
             String response = possibleResponses.get(random.nextInt(possibleResponses.size()));
             responseArea.append("Ты: " + query + "\nBot: " + response + "\n\n");
+            responseScrollView.post(() -> responseScrollView.fullScroll(View.FOCUS_DOWN));
             return;
         }
 
@@ -246,20 +239,22 @@ public class ChatActivity extends AppCompatActivity {
             loadTemplatesFromFile(currentContext);
             updateAutoComplete();
             responseArea.append("Ты: " + query + "\nBot: Не понял по теме. Вернулся к основному меню. Попробуй другой запрос.\n\n");
+            responseScrollView.post(() -> responseScrollView.fullScroll(View.FOCUS_DOWN));
             return;
         }
 
         // Fallback в base.txt
         String response = getDummyResponse(q);
         responseArea.append("Ты: " + query + "\nBot: " + response + "\n\n");
+        responseScrollView.post(() -> responseScrollView.fullScroll(View.FOCUS_DOWN));
     }
 
     private String detectContext(String input) {
-        // Динамическая проверка ключевых слов из contextMap
+        // Проверяем все ключевые слова из contextMap
         for (Map.Entry<String, String> entry : contextMap.entrySet()) {
-            String keyword = entry.getKey();
+            String keyword = entry.getKey().toLowerCase();
             String contextFile = entry.getValue();
-            if (input.contains(keyword)) {
+            if (input.toLowerCase().contains(keyword)) {
                 return contextFile;
             }
         }
@@ -276,16 +271,13 @@ public class ChatActivity extends AppCompatActivity {
         try {
             LayoutInflater inflater = getLayoutInflater();
             View layout = inflater.inflate(R.layout.custom_toast, null);
-
             TextView text = layout.findViewById(R.id.customToastText);
             text.setText(message);
-
             Toast toast = new Toast(getApplicationContext());
             toast.setDuration(Toast.LENGTH_SHORT);
             toast.setView(layout);
             toast.show();
         } catch (Exception e) {
-            // fallback: стандартный toast
             Toast.makeText(this, message, Toast.LENGTH_SHORT).show();
         }
     }
