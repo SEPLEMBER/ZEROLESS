@@ -1,63 +1,66 @@
 <?xml version="1.0" encoding="utf-8"?>
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    android:orientation="vertical"
     android:background="@color/background_black"
     android:padding="16dp">
 
-    <LinearLayout
+    <!-- Область отображения чата -->
+    <ScrollView
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="vertical">
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:fillViewport="true">
 
-        <!-- Область отображения чата -->
         <TextView
             android:id="@+id/responseArea"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Bot: "
+            android:text="Bot: Добро пожаловать!\n"
             android:textColor="@color/text_green"
             android:textSize="18sp"
             android:padding="8dp"
             android:background="@color/card_dark"
-            android:maxLines="0"
+            android:minHeight="200dp"
             android:scrollbars="vertical"
-            android:layout_weight="1" />
+            android:fadeScrollbars="false" />
 
-        <!-- Поле ввода с автодополнением -->
-        <AutoCompleteTextView
-            android:id="@+id/chatInput"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
-            android:hint="Напиши сообщение..."
-            android:textColor="@color/text_green"
-            android:textColorHint="@color/text_green"
-            android:background="@color/card_dark"
-            android:padding="8dp"
-            android:inputType="textMultiLine"
-            android:maxLines="3"
-            android:scrollbars="vertical" />
+    </ScrollView>
 
-        <!-- Кнопка отправки -->
-        <Button
-            android:id="@+id/chatSend"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="@string/send"
-            android:textColor="@color/text_green"
-            android:background="@color/button_transparent"
-            android:layout_marginTop="8dp" />
+    <!-- Поле ввода с автодополнением -->
+    <AutoCompleteTextView
+        android:id="@+id/chatInput"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:hint="Напиши сообщение..."
+        android:textColor="@color/text_green"
+        android:textColorHint="@color/text_green"
+        android:background="@color/card_dark"
+        android:padding="8dp"
+        android:inputType="textMultiLine"
+        android:maxLines="3"
+        android:scrollbars="vertical" />
 
-        <!-- Кнопка очистки чата -->
-        <Button
-            android:id="@+id/clearChatButton"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Очистить чат"
-            android:textColor="@color/text_green"
-            android:background="@color/button_transparent"
-            android:layout_marginTop="8dp" />
+    <!-- Кнопка отправки -->
+    <Button
+        android:id="@+id/chatSend"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/send"
+        android:textColor="@color/text_green"
+        android:background="@color/button_transparent"
+        android:layout_marginTop="8dp" />
 
-    </LinearLayout>
-</ScrollView>
+    <!-- Кнопка очистки чата -->
+    <Button
+        android:id="@+id/clearChatButton"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Очистить чат"
+        android:textColor="@color/text_green"
+        android:background="@color/button_transparent"
+        android:layout_marginTop="8dp" />
+
+</LinearLayout>
