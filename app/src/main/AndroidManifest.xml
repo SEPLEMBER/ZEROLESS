@@ -1,50 +1,49 @@
-   </manifest>
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:tools="http://schemas.android.com/tools"
-    package="com.nemesis.droidcrypt">
+xmlns:tools="http://schemas.android.com/tools"
+package="com.nemesis.droidcrypt">
 
-    <!-- Permissions: For prototype, use internal storage, so minimal external perms. Keep for SD if needed later -->
-    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
-        android:maxSdkVersion="30"
-        tools:ignore="ScopedStorage" />
-    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
-        android:maxSdkVersion="30"
-        tools:ignore="ScopedStorage" />
+<!-- Permissions: For prototype, use internal storage -->
+<uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
+android:maxSdkVersion="30"
+tools:ignore="ScopedStorage" />
+<uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+android:maxSdkVersion="30"
+tools:ignore="ScopedStorage" />
 
-    <application
-        android:allowBackup="false" <!-- Disabled for prototype to avoid eMMC writes -->
-        android:icon="@mipmap/ic_launcher"
-        android:label="@string/app_name"
-        android:supportsRtl="true"
-        android:theme="@style/Theme.AppCompat.Light.DarkActionBar" <!-- Switched to AppCompat for Material-like; original Theme.DroidCrypt not Material, so update for better UI -->
-        android:localeConfig="@xml/locales_config"
-        tools:targetApi="31">
+<application
+android:allowBackup="false"
+android:icon="@mipmap/ic_launcher"
+android:label="@string/app_name"
+android:supportsRtl="true"
+android:theme="@style/Theme.AppCompat.Light.DarkActionBar"
+android:localeConfig="@xml/locales_config"
+tools:targetApi="31">
 
-        <!-- MainActivity: Launcher, handles initial setup (e.g., SAF folder selection if needed) -->
-        <activity
-            android:name=".MainActivity"
-            android:exported="true"
-            android:configChanges="orientation|screenSize">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity>
+<!-- MainActivity: Launcher -->
+<activity
+android:name=".MainActivity"
+android:exported="true"
+android:configChanges="orientation|screenSize">
+<intent-filter>
+<action android:name="android.intent.action.MAIN" />
+<category android:name="android.intent.category.LAUNCHER" />
+</intent-filter>
+</activity>
 
-        <!-- ChatActivity: Core chat UI with input, autocomplete, and responses -->
-        <activity
-            android:name=".ChatActivity"
-            android:exported="false"
-            android:parentActivityName=".MainActivity"
-            android:configChanges="orientation|screenSize" />
+<!-- ChatActivity -->
+<activity
+android:name=".ChatActivity"
+android:exported="false"
+android:parentActivityName=".MainActivity"
+android:configChanges="orientation|screenSize" />
 
-        <!-- SettingsActivity: For prototype settings, e.g., clear cache or theme toggle -->
-        <activity
-            android:name=".SettingsActivity"
-            android:exported="false"
-            android:parentActivityName=".MainActivity"
-            android:configChanges="orientation|screenSize" />
+<!-- SettingsActivity -->
+<activity
+android:name=".SettingsActivity"
+android:exported="false"
+android:parentActivityName=".MainActivity"
+android:configChanges="orientation|screenSize" />
 
-    </application>
+</application>
 </manifest>
