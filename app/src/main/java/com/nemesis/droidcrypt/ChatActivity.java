@@ -48,18 +48,19 @@ public class ChatActivity extends AppCompatActivity {
     // Query count: query -> count of consecutive repetitions
     private Map<String, Integer> queryCountMap = new HashMap<>();
     // Anti-spam responses
-    private List<String> antiSpamResponses = Arrays.asList(
-        "Ты надоел, давай что-то новенькое!",
-        "Спамить нехорошо, попробуй другой запрос.",
-        "Я устал от твоих повторений!",
-        "Хватит спамить, придумай что-то интересное.",
-        "Эй, не зацикливайся, попробуй другой вопрос!",
-        "Повторяешь одно и то же? Давай разнообразие!",
-        "Слишком много повторов, я же не робот... ну, почти.",
-        "Не спамь, пожалуйста, задай новый вопрос!",
-        "Пять раз одно и то же? Попробуй что-то другое.",
-        "Я уже ответил, давай новый запрос!"
-    );
+    private List<String> antiSpamResponses = new ArrayList<>();
+    {
+        antiSpamResponses.add("Ты надоел, давай что-то новенькое!");
+        antiSpamResponses.add("Спамить нехорошо, попробуй другой запрос.");
+        antiSpamResponses.add("Я устал от твоих повторений!");
+        antiSpamResponses.add("Хватит спамить, придумай что-то интересное.");
+        antiSpamResponses.add("Эй, не зацикливайся, попробуй другой вопрос!");
+        antiSpamResponses.add("Повторяешь одно и то же? Давай разнообразие!");
+        antiSpamResponses.add("Слишком много повторов, я же не робот... ну, почти.");
+        antiSpamResponses.add("Не спамь, пожалуйста, задай новый вопрос!");
+        antiSpamResponses.add("Пять раз одно и то же? Попробуй что-то другое.");
+        antiSpamResponses.add("Я уже ответил, давай новый запрос!");
+    }
 
     private String currentContext = "base.txt";
     private String lastQuery = "";
@@ -280,9 +281,14 @@ public class ChatActivity extends AppCompatActivity {
             currentContext = newContext;
             loadTemplatesFromFile(currentContext);
             updateAutoComplete();
-            responseArea.append("Ты: " + query + "\nBot: Переключено на контекст: " + currentContext + "\n\n");
-            responseScrollView.post(() -> responseScrollView.fullScroll(View.FOCUS_DOWN));
-            return;
+            // Проверяем точный триггер в новом контексте
+            List<String> possibleResponses = templatesMap.get(q);
+            if (possibleResponses != null && !possibleResponses.isEmpty()) {
+                String response = possibleResponses.get(random.nextInt(possibleResponses.size()));
+                responseArea.append("Ты: " + query + "\nBot: " + response + "\n\n");
+                responseScrollView.post(() -> responseScrollView.fullScroll(View.FOCUS_DOWN));
+                return;
+            }
         }
 
         // Проверка ключевых слов (-спасибо=...)
@@ -297,7 +303,7 @@ public class ChatActivity extends AppCompatActivity {
             }
         }
 
-        // Поиск точного триггера
+        // Поиск точного триггера в текущем контексте
         List<String> possibleResponses = templatesMap.get(q);
         if (possibleResponses != null && !possibleResponses.isEmpty()) {
             String response = possibleResponses.get(random.nextInt(possibleResponses.size()));
@@ -306,12 +312,28 @@ public class ChatActivity extends AppCompatActivity {
             return;
         }
 
-        // Если нет ответа и не в base.txt — возвращаемся к base.txt
+        // Если не в base.txt и нет ответа, возвращаемся к base.txt
         if (!"base.txt".equals(currentContext)) {
             currentContext = "base.txt";
             loadTemplatesFromFile(currentContext);
             updateAutoComplete();
-            responseArea.append("Ты: " + query + "\nBot: Не понял по теме. Вернулся к основному меню. Попробуй другой запрос.\n\n");
+            // Проверяем контекст в base.txt
+            newContext = detectContext(q);
+            if (newContext != null && !newContext.equals(currentContext)) {
+                currentContext = newContext;
+                loadTemplatesFromFile(currentContext);
+                updateAutoComplete();
+                // Проверяем точный триггер в новом контексте
+                possibleResponses = templatesMap.get(q);
+                if (possibleResponses != null && !possibleResponses.isEmpty()) {
+                    String response = possibleResponses.get(random.nextInt(possibleResponses.size()));
+                    responseArea.append("Ты: " + query + "\nBot: " + response + "\n\n");
+                    responseScrollView.post(() -> responseScrollView.fullScroll(View.FOCUS_DOWN));
+                    return;
+                }
+            }
+            // Если нет ответа в base.txt или новом контексте
+            responseArea.append("Ты: " + query + "\nBot: Не понял по теме. Попробуй другой запрос.\n\n");
             responseScrollView.post(() -> responseScrollView.fullScroll(View.FOCUS_DOWN));
             return;
         }
