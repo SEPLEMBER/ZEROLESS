@@ -29,14 +29,16 @@ public class ChatActivity extends AppCompatActivity {
     private TextView responseArea;
     private AutoCompleteTextView chatInput;
     private Button chatSend;
-    private Button clearChatButton; // Добавлена для очистки чата
-    private ArrayAdapter<String> adapter; // For autocomplete suggestions
+    private Button clearChatButton;
+    private ArrayAdapter<String> adapter;
 
     // Fallback dummy suggestions
     private String[] fallback = {"Привет", "Как дела?", "Расскажи о себе", "Выход"};
 
     // Templates: trigger -> list of answers
     private Map<String, List<String>> templatesMap = new HashMap<>();
+    // Context map: keyword -> context file (e.g., "сон" -> "health.txt")
+    private Map<String, String> contextMap = new HashMap<>();
     private String currentContext = "base.txt";
     private Random random = new Random();
 
@@ -49,16 +51,16 @@ public class ChatActivity extends AppCompatActivity {
         folderUri = getIntent().getParcelableExtra("folderUri");
         if (folderUri == null) {
             showCustomToast("Папка не выбрана!");
-            finish(); // Закрыть активити, если папка не выбрана
+            finish();
             return;
         }
 
         responseArea = findViewById(R.id.responseArea);
         chatInput = findViewById(R.id.chatInput);
         chatSend = findViewById(R.id.chatSend);
-        clearChatButton = findViewById(R.id.clearChatButton); // Предполагается наличие в layout
+        clearChatButton = findViewById(R.id.clearChatButton);
 
-        // Загрузка base.txt по умолчанию
+        // Загрузка base.txt по умолчанию (с парсингом контекстов)
         loadTemplatesFromFile(currentContext);
 
         // Build suggestions list: keys from templates + fallback
@@ -70,22 +72,17 @@ public class ChatActivity extends AppCompatActivity {
                 String selected = (String) parent.getItemAtPosition(position);
                 chatInput.setText(selected);
                 processQuery(selected);
-                // Убрано showCustomToast, чтобы не засорять
             }
         });
 
-        chatSend.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                String input = chatInput.getText().toString().trim();
-                if (!input.isEmpty()) {
-                    processQuery(input);
-                    chatInput.setText(""); // Clear input, no history save
-                }
+        chatSend.setOnClickListener(v -> {
+            String input = chatInput.getText().toString().trim();
+            if (!input.isEmpty()) {
+                processQuery(input);
+                chatInput.setText("");
             }
         });
 
-        // Обработчик кнопки очистки чата
         if (clearChatButton != null) {
             clearChatButton.setOnClickListener(v -> responseArea.setText(""));
         }
@@ -94,20 +91,23 @@ public class ChatActivity extends AppCompatActivity {
     @Override
     protected void onResume() {
         super.onResume();
-        // Reload templates from current context
+        // Reload templates from current context (с парсингом контекстов, если base.txt)
         loadTemplatesFromFile(currentContext);
-        // Update adapter suggestions dynamically
         updateAutoComplete();
     }
 
     private void loadTemplatesFromFile(String filename) {
         templatesMap.clear();
+        if (!"base.txt".equals(filename)) {
+            contextMap.clear(); // Контексты только из base.txt
+        }
+
         try {
             Uri fileUri = Uri.withAppendedPath(folderUri, filename);
             ParcelFileDescriptor pfd = getContentResolver().openFileDescriptor(fileUri, "r");
             if (pfd == null) {
                 showCustomToast("Файл " + filename + " не найден! Используем базовые ответы.");
-                loadFallbackTemplates(); // Загрузить fallback, если файл отсутствует
+                loadFallbackTemplates();
                 return;
             }
             FileInputStream fileInputStream = new FileInputStream(pfd.getFileDescriptor());
@@ -115,7 +115,26 @@ public class ChatActivity extends AppCompatActivity {
             String line;
             while ((line = reader.readLine()) != null) {
                 String l = line.trim();
-                if (l.isEmpty() || !l.contains("=")) continue;
+                if (l.isEmpty()) continue;
+
+                // Парсинг контекстных ссылок (только в base.txt): :ключ=файл.txt:
+                if ("base.txt".equals(filename) && l.startsWith(":") && l.endsWith(":")) {
+                    String contextLine = l.substring(1, l.length() - 1); // Убираем :
+                    if (contextLine.contains("=")) {
+                        String[] parts = contextLine.split("=", 2);
+                        if (parts.length == 2) {
+                            String keyword = parts[0].trim().toLowerCase();
+                            String contextFile = parts[1].trim();
+                            if (!keyword.isEmpty() && !contextFile.isEmpty()) {
+                                contextMap.put(keyword, contextFile);
+                            }
+                        }
+                    }
+                    continue; // Не добавляем в templatesMap
+                }
+
+                // Обычные шаблоны: trigger=ответ1|ответ2|...
+                if (!l.contains("=")) continue;
                 String[] parts = l.split("=", 2);
                 if (parts.length == 2) {
                     String trigger = parts[0].trim().toLowerCase();
@@ -143,7 +162,8 @@ public class ChatActivity extends AppCompatActivity {
     }
 
     private void loadFallbackTemplates() {
-        // Простые fallback шаблоны в памяти
+        templatesMap.clear();
+        contextMap.clear(); // Очищаем контексты в fallback
         templatesMap.put("привет", new ArrayList<>(List.of("Привет! Чем могу помочь?")));
         templatesMap.put("как дела", new ArrayList<>(List.of("Всё отлично, а у тебя?")));
     }
@@ -170,16 +190,16 @@ public class ChatActivity extends AppCompatActivity {
     private void processQuery(String query) {
         String q = query.toLowerCase().trim();
 
-        // Проверка контекста (ключевые слова)
+        // Проверка на смену контекста (динамически из contextMap)
         String newContext = detectContext(q);
         if (newContext != null && !newContext.equals(currentContext)) {
             currentContext = newContext;
             loadTemplatesFromFile(currentContext);
-            responseArea.append("Bot: Переключено на контекст: " + currentContext + "\n\n");
+            responseArea.append("Ты: " + query + "\nBot: Переключено на контекст: " + currentContext + "\n\n");
             return;
         }
 
-        // Поиск ответа в templatesMap
+        // Поиск ответа в templatesMap (вариативный через random)
         List<String> possibleResponses = templatesMap.get(q);
         if (possibleResponses != null && !possibleResponses.isEmpty()) {
             String response = possibleResponses.get(random.nextInt(possibleResponses.size()));
@@ -187,17 +207,28 @@ public class ChatActivity extends AppCompatActivity {
             return;
         }
 
-        // Fallback rule-based
+        // Если нет ответа и не в base.txt — возвращаемся к base.txt
+        if (!"base.txt".equals(currentContext)) {
+            currentContext = "base.txt";
+            loadTemplatesFromFile(currentContext);
+            responseArea.append("Ты: " + query + "\nBot: Не понял по теме. Вернулся к основному меню. Попробуй другой запрос.\n\n");
+            return;
+        }
+
+        // Fallback в base.txt
         String response = getDummyResponse(q);
         responseArea.append("Ты: " + query + "\nBot: " + response + "\n\n");
     }
 
     private String detectContext(String input) {
-        // Пример логики для определения контекста
-        if (input.contains("сон") || input.contains("сны") || input.contains("про сон")) {
-            return "health.txt";
+        // Динамическая проверка ключевых слов из contextMap
+        for (Map.Entry<String, String> entry : contextMap.entrySet()) {
+            String keyword = entry.getKey();
+            String contextFile = entry.getValue();
+            if (input.contains(keyword)) {
+                return contextFile;
+            }
         }
-        // Другие контексты можно добавить здесь
         return null;
     }
 
