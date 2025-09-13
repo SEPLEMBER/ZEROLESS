@@ -1,12 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">DroidCrypt</string>
-    <string name="settings_title">Настройки</string>
-    <string name="chat_title">Чат</string>
-    <string name="save_templates">Сохранить шаблоны</string>
-    <string name="clear_cache">Очистить SharedPrefs</string>
-    <string name="back">Назад</string>
-    <string name="send">Отправить</string>
-    <string name="templates_hint">Каждый шаблон в новой строке. Формат: триггер=ответ</string>
-    <string name="start_chat">Перейти в чат</string>
-    <string name="open_settings">Открыть настройки</string>
+<color name="background_black">#000000</color>
+<color name="text_green">#00FF00</color>
+<color name="button_transparent">#00000000</color>
+<color name="card_dark">#0A0A0A</color>
 </resources>
