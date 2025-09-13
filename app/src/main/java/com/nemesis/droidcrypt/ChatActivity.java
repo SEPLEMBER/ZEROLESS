@@ -62,7 +62,7 @@ public class ChatActivity extends AppCompatActivity {
     );
 
     private String currentContext = "base.txt";
-    private String lastQuery = ""; // Track last query for repetition
+    private String lastQuery = "";
     private Random random = new Random();
 
     @Override
@@ -117,7 +117,7 @@ public class ChatActivity extends AppCompatActivity {
         if (clearChatButton != null) {
             clearChatButton.setOnClickListener(v -> {
                 responseArea.setText("");
-                queryCountMap.clear(); // Reset query counts on clear
+                queryCountMap.clear();
             });
         }
     }
@@ -259,7 +259,7 @@ public class ChatActivity extends AppCompatActivity {
 
         // Отслеживание повторений
         if (q.equals(lastQuery)) {
-            queryCountMap.put(q, queryCountMap.getOrDefault(q, 0) + 1);
+            queryCountMap.put(q, queryCountMap.containsKey(q) ? queryCountMap.get(q) + 1 : 1);
         } else {
             queryCountMap.clear();
             queryCountMap.put(q, 1);
@@ -267,7 +267,7 @@ public class ChatActivity extends AppCompatActivity {
         }
 
         // Антиспам: если запрос повторён 5 раз подряд
-        if (queryCountMap.getOrDefault(q, 0) >= 5) {
+        if (queryCountMap.containsKey(q) && queryCountMap.get(q) >= 5) {
             String response = antiSpamResponses.get(random.nextInt(antiSpamResponses.size()));
             responseArea.append("Ты: " + query + "\nBot: " + response + "\n\n");
             responseScrollView.post(() -> responseScrollView.fullScroll(View.FOCUS_DOWN));
