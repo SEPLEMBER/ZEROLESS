@@ -31,7 +31,7 @@ android {
         targetCompatibility = JavaVersion.VERSION_1_8
     }
 
-    kotlinOptions {
+    kotlin {
         jvmTarget = "1.8"
     }
 
@@ -44,11 +44,9 @@ android {
 dependencies {
     implementation(libs.appcompat)
     implementation(libs.material)
-    implementation(libs.jargon2.api)
-    implementation(libs.lambdaworks.jargon2.api)
     implementation(libs.bcprov.jdk15on)
-    implementation("androidx.multidex:multidex:2.0.1")
-    implementation("androidx.recyclerview:recyclerview:1.3.2")
+    implementation(libs.multidex)
+    implementation(libs.recyclerview)
     testImplementation(libs.junit)
     androidTestImplementation(libs.ext.junit)
     androidTestImplementation(libs.espresso.core)
