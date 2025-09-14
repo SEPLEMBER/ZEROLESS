@@ -376,14 +376,14 @@ class ChatActivity : AppCompatActivity() {
     private fun spaceView(): View = View(this).apply { layoutParams = LinearLayout.LayoutParams(0, 0, 1f) }
 
     private fun createMessageBubble(sender: String, text: String, isUser: Boolean): LinearLayout {
-        val container = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        val tvSender = TextView(this).apply {
-            text = "$sender:"
-            textSize = 12f
-            setTextColor(Color.parseColor("#AAAAAA"))
-        }
-        val tv = TextView(this).apply {
-            this.text = text
+    val container = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+    val tvSender = TextView(this).apply {
+        setText("$sender:")  // Используем setText() вместо text =
+        textSize = 12f
+        setTextColor(Color.parseColor("#AAAAAA"))
+    }
+    val tv = TextView(this).apply {
+        setText(text)
             textSize = 16f
             setTextIsSelectable(true)
             val pad = dpToPx(10)
