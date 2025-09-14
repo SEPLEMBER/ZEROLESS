@@ -41,17 +41,15 @@ import java.util.Random;
 import java.util.Set;
 
 /**
- * Исправленный ChatActivity
- * - детерминированный поиск ответа по цепочке контекстов (без видимых "Переключаюсь...")
- * - исправлен UI контейнер для сообщений (messages container внутри ScrollView)
- * - исправлен idle/randomreply поведение
- * - восстановлено копирование текста (textIsSelectable для созданных TextView)
- * - скролл вниз теперь через smoothScrollTo
- * - блокировка скриншотов читается из двух возможных prefs и применяется через addFlags/clearFlags
+ * ChatActivity — версия с улучшенным парсером randomreply.txt и исправленным чтением флага блокировки скриншотов.
+ * Минимальные изменения в логике поиска ответов — сохранён последовательный алгоритм.
  *
- * minSdk: 26 (Android 8) — использованы API, доступные на 26+
+ * minSdk: 26+
  */
 public class ChatActivity extends AppCompatActivity {
+
+    private static final String PREF_KEY_FOLDER_URI = "pref_folder_uri";
+    private static final String PREF_KEY_DISABLE_SCREENSHOTS = "pref_disable_screenshots";
 
     private Uri folderUri;
     private ScrollView scrollView;
@@ -59,13 +57,11 @@ public class ChatActivity extends AppCompatActivity {
     private Button sendButton;
     private Button clearButton;
     private ImageView mascotImage;
-    private LinearLayout messagesContainer; // <-- контейнер сообщений внутри ScrollView
+    private LinearLayout messagesContainer;
     private ArrayAdapter<String> adapter;
 
-    // Fallback suggestions
     private String[] fallback = {"Привет", "Как дела?", "Расскажи о себе", "Выход"};
 
-    // Data structures
     private Map<String, List<String>> templatesMap = new HashMap<>();
     private Map<String, String> contextMap = new HashMap<>();
     private Map<String, List<String>> keywordResponses = new HashMap<>();
@@ -82,13 +78,11 @@ public class ChatActivity extends AppCompatActivity {
     private String currentContext = "base.txt";
     private String lastQuery = "";
 
-    // dialogs handling
     private Dialog currentDialog = null;
     private int currentDialogIndex = 0;
     private final Handler dialogHandler = new Handler(Looper.getMainLooper());
     private Runnable dialogRunnable;
 
-    // idle check
     private Runnable idleCheckRunnable;
     private long lastUserInputTime = System.currentTimeMillis();
 
@@ -124,37 +118,46 @@ public class ChatActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_chat);
 
-        // UI refs
+        // UI
         scrollView = findViewById(R.id.scrollView);
         queryInput = findViewById(R.id.queryInput);
         sendButton = findViewById(R.id.sendButton);
         clearButton = findViewById(R.id.clearButton);
         mascotImage = findViewById(R.id.mascot_image);
-        messagesContainer = findViewById(R.id.chatMessagesContainer); // <-- важно: этот id присутствует в XML
+        messagesContainer = findViewById(R.id.chatMessagesContainer);
 
-        // Получаем folderUri из Intent или persisted permissions
+        // Получаем folderUri: сначала из Intent, потом persisted permissions, потом из prefs
         Intent intent = getIntent();
         folderUri = intent != null ? intent.getParcelableExtra("folderUri") : null;
+
         if (folderUri == null) {
             for (android.content.UriPermission p : getContentResolver().getPersistedUriPermissions()) {
                 if (p.isReadPermission()) { folderUri = p.getUri(); break; }
             }
         }
 
-        // Считываем настройку блокировки скриншота из разных источников на всякий случай
-        boolean disableScreenshots = false;
+        // Попытка восстановить из SharedPreferences (если ранее сохранён)
         try {
-            SharedPreferences prefs1 = PreferenceManager.getDefaultSharedPreferences(this);
-            SharedPreferences prefs2 = getSharedPreferences("ChatTribePrefs", MODE_PRIVATE);
-            disableScreenshots = prefs1.getBoolean("disableScreenshots", false) || prefs2.getBoolean("disableScreenshots", false);
+            SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(this);
+            if (folderUri == null) {
+                String saved = prefs.getString(PREF_KEY_FOLDER_URI, null);
+                if (saved != null) {
+                    try {
+                        folderUri = Uri.parse(saved);
+                    } catch (Exception ignored) { folderUri = null; }
+                }
+            }
         } catch (Exception ignored) {}
-        if (disableScreenshots) {
-            getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
-        } else {
-            getWindow().clearFlags(WindowManager.LayoutParams.FLAG_SECURE);
-        }
 
-        // Load initial templates
+        // Блокировка скриншотов — читаем единым ключом
+        try {
+            SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(this);
+            boolean disableScreenshots = prefs.getBoolean(PREF_KEY_DISABLE_SCREENSHOTS, false);
+            if (disableScreenshots) getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
+            else getWindow().clearFlags(WindowManager.LayoutParams.FLAG_SECURE);
+        } catch (Exception ignored) {}
+
+        // Load
         if (folderUri == null) {
             showCustomToast("Папка не выбрана! Откройте настройки и выберите папку.");
             loadFallbackTemplates();
@@ -166,14 +169,12 @@ public class ChatActivity extends AppCompatActivity {
             addChatMessage(currentMascotName, "Добро пожаловать!");
         }
 
-        // Autocomplete click
         queryInput.setOnItemClickListener((parent, view, position, id) -> {
             String selected = (String) parent.getItemAtPosition(position);
             queryInput.setText(selected);
             processUserQuery(selected);
         });
 
-        // Send button
         sendButton.setOnClickListener(v -> {
             String input = queryInput.getText().toString().trim();
             if (!input.isEmpty()) {
@@ -182,22 +183,15 @@ public class ChatActivity extends AppCompatActivity {
             }
         });
 
-        // Clear button
-        if (clearButton != null) {
-            clearButton.setOnClickListener(v -> clearChat());
-        }
+        if (clearButton != null) clearButton.setOnClickListener(v -> clearChat());
 
-        // idle check runnable — каждые 5 с проверяем простое
         idleCheckRunnable = new Runnable() {
             @Override
             public void run() {
                 long idle = System.currentTimeMillis() - lastUserInputTime;
                 if (idle >= 25000) {
-                    if (!dialogs.isEmpty()) {
-                        startRandomDialog();
-                    } else if (!dialogLines.isEmpty()) {
-                        triggerRandomDialog();
-                    }
+                    if (!dialogs.isEmpty()) startRandomDialog();
+                    else if (!dialogLines.isEmpty()) triggerRandomDialog();
                 }
                 dialogHandler.postDelayed(this, 5000);
             }
@@ -229,7 +223,6 @@ public class ChatActivity extends AppCompatActivity {
         lastUserInputTime = System.currentTimeMillis();
         stopDialog();
 
-        // обновляем счетчики повторов
         if (qOrig.equals(lastQuery)) {
             int cnt = queryCountMap.containsKey(qOrig) ? queryCountMap.get(qOrig) : 0;
             queryCountMap.put(qOrig, cnt + 1);
@@ -241,8 +234,7 @@ public class ChatActivity extends AppCompatActivity {
 
         addChatMessage("Ты", userInput);
 
-        // антиспам
-        int repeats = queryCountMap.getOrDefault(qOrig, 0);
+        int repeats = queryCountMap.containsKey(qOrig) ? queryCountMap.get(qOrig) : 0;
         if (repeats >= 5) {
             String spamResp = antiSpamResponses.get(random.nextInt(antiSpamResponses.size()));
             addChatMessage(currentMascotName, spamResp);
@@ -250,7 +242,6 @@ public class ChatActivity extends AppCompatActivity {
             return;
         }
 
-        // deterministic search: последовательность контекстов, чтобы избежать циклов
         Set<String> visited = new HashSet<>();
         String startContext = currentContext != null ? currentContext : "base.txt";
         String context = startContext;
@@ -260,14 +251,13 @@ public class ChatActivity extends AppCompatActivity {
         while (switches <= MAX_CONTEXT_SWITCH && !answered) {
             visited.add(context);
 
-            // загрузим контент для текущего контекста (уже в памяти, но на всякий случай)
             if (!context.equals(currentContext)) {
                 currentContext = context;
                 loadTemplatesFromFile(currentContext);
                 updateAutoComplete();
             }
 
-            // 1) попытка точного триггера (в текущем контексте)
+            // точный триггер
             List<String> possible = templatesMap.get(qOrig);
             if (possible != null && !possible.isEmpty()) {
                 String resp = possible.get(random.nextInt(possible.size()));
@@ -278,7 +268,7 @@ public class ChatActivity extends AppCompatActivity {
                 break;
             }
 
-            // 2) попытка ключевых слов (-ключ=...), ищем в текущем контексте
+            // ключевые слова (-ключ=)
             boolean handledByKeyword = false;
             for (Map.Entry<String, List<String>> e : keywordResponses.entrySet()) {
                 String keyword = e.getKey();
@@ -297,20 +287,18 @@ public class ChatActivity extends AppCompatActivity {
             }
             if (handledByKeyword) break;
 
-            // 3) если мы не в base.txt, то попробуем найти маршрут в base.txt: (не показываем "переключаюсь")
+            // если не в base.txt — попробуем base.txt (без видимой "переключаюсь")
             if (!"base.txt".equals(context)) {
-                // загрузим base.txt (если не в visited)
                 if (!visited.contains("base.txt")) {
                     context = "base.txt";
                     switches++;
-                    continue; // следующая итерация будет в base.txt
+                    continue;
                 } else {
-                    // base уже посещён — нет смысла продолжать
                     break;
                 }
             }
 
-            // 4) Если мы в base.txt и не нашли точный триггер — проверим, какие ключи в base соответствуют словосочетанию.
+            // если в base.txt — ищем маршрут по ключам contextMap
             boolean foundRoute = false;
             for (Map.Entry<String, String> e : contextMap.entrySet()) {
                 String keyword = e.getKey();
@@ -319,12 +307,12 @@ public class ChatActivity extends AppCompatActivity {
                     context = mappedFile;
                     switches++;
                     foundRoute = true;
-                    break; // пройдём в mappedFile на следующей итерации
+                    break;
                 }
             }
             if (foundRoute) continue;
 
-            // 5) Не нашли ничего — fallback
+            // fallback
             String fallbackResp = getDummyResponse(qOrig);
             addChatMessage(currentMascotName, fallbackResp);
             triggerRandomDialog();
@@ -333,12 +321,10 @@ public class ChatActivity extends AppCompatActivity {
             break;
         }
 
-        if (!answered) {
-            addChatMessage(currentMascotName, "Не могу найти ответ, попробуй переформулировать.");
-        }
+        if (!answered) addChatMessage(currentMascotName, "Не могу найти ответ, попробуй переформулировать.");
     }
 
-    // ========== UI сообщений (динамическое добавление View) ==========
+    // ========== UI сообщений ==========
     private void addChatMessage(String sender, String text) {
         if (messagesContainer == null) return;
 
@@ -356,18 +342,17 @@ public class ChatActivity extends AppCompatActivity {
         TextView tv = new TextView(this);
         tv.setText(text);
         tv.setTextSize(16);
-        tv.setTextIsSelectable(true); // <-- копирование восстановлено
+        tv.setTextIsSelectable(true);
         try { tv.setTextColor(Color.parseColor(currentThemeColor)); } catch (Exception e) { tv.setTextColor(Color.WHITE); }
         item.addView(tv, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         messagesContainer.addView(item);
-        // trim old messages
+
         if (messagesContainer.getChildCount() > MAX_MESSAGES) {
             int removeCount = messagesContainer.getChildCount() - MAX_MESSAGES;
             for (int i = 0; i < removeCount; i++) messagesContainer.removeViewAt(0);
         }
 
-        // скроллим вниз (smoothScrollTo по bottom контейнера)
         scrollView.post(() -> scrollView.smoothScrollTo(0, messagesContainer.getBottom()));
     }
 
@@ -394,7 +379,6 @@ public class ChatActivity extends AppCompatActivity {
         dialogLines.clear();
         dialogs.clear();
 
-        // defaults
         currentMascotName = "Racky";
         currentMascotIcon = "raccoon_icon.png";
         currentThemeColor = "#00FF00";
@@ -505,7 +489,7 @@ public class ChatActivity extends AppCompatActivity {
                 }
             }
 
-            // randomreply.txt -> dialogs
+            // ---------- robust parser for randomreply.txt ----------
             DocumentFile dialogFile = dir.findFile("randomreply.txt");
             if (dialogFile != null && dialogFile.exists()) {
                 try (InputStream is = getContentResolver().openInputStream(dialogFile.getUri());
@@ -513,18 +497,31 @@ public class ChatActivity extends AppCompatActivity {
                     String line;
                     Dialog current = null;
                     while ((line = reader.readLine()) != null) {
-                        if (line.startsWith(";")) {
+                        if (line == null) continue;
+                        String l = line.trim();
+                        if (l.isEmpty()) continue;
+                        // section header
+                        if (l.startsWith(";")) {
                             if (current != null) dialogs.add(current);
-                            current = new Dialog(line.substring(1).trim());
-                        } else if (current != null && line.contains(">")) {
-                            String[] parts = line.split(">", 2);
+                            current = new Dialog(l.substring(1).trim());
+                            continue;
+                        }
+                        // mascot>text lines
+                        if (l.contains(">")) {
+                            String[] parts = l.split(">", 2);
                             if (parts.length == 2) {
+                                String mascot = parts[0].trim();
+                                String text = parts[1].trim();
+                                if (current == null) current = new Dialog("default");
                                 Map<String, String> reply = new HashMap<>();
-                                reply.put("mascot", parts[0].trim());
-                                reply.put("text", parts[1].trim());
+                                reply.put("mascot", mascot);
+                                reply.put("text", text);
                                 current.replies.add(reply);
+                                continue;
                             }
                         }
+                        // fallback — treat as dialog line (unstructured short line)
+                        dialogLines.add(l);
                     }
                     if (current != null) dialogs.add(current);
                 } catch (Exception e) {
@@ -535,10 +532,10 @@ public class ChatActivity extends AppCompatActivity {
             // pick random mascot for base
             if ("base.txt".equals(filename) && !mascotList.isEmpty()) {
                 Map<String, String> selectedMascot = mascotList.get(random.nextInt(mascotList.size()));
-                currentMascotName = selectedMascot.get("name");
-                currentMascotIcon = selectedMascot.get("icon");
-                currentThemeColor = selectedMascot.get("color");
-                currentThemeBackground = selectedMascot.get("background");
+                if (selectedMascot.containsKey("name")) currentMascotName = selectedMascot.get("name");
+                if (selectedMascot.containsKey("icon")) currentMascotIcon = selectedMascot.get("icon");
+                if (selectedMascot.containsKey("color")) currentThemeColor = selectedMascot.get("color");
+                if (selectedMascot.containsKey("background")) currentThemeBackground = selectedMascot.get("background");
             }
 
             updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground);
@@ -589,7 +586,7 @@ public class ChatActivity extends AppCompatActivity {
                 String dialog = dialogLines.get(random.nextInt(dialogLines.size()));
                 if (!mascotList.isEmpty()) {
                     Map<String, String> rnd = mascotList.get(random.nextInt(mascotList.size()));
-                    String rndName = rnd.getOrDefault("name", currentMascotName);
+                    String rndName = rnd.containsKey("name") ? rnd.get("name") : currentMascotName;
                     loadMascotMetadata(rndName);
                     addChatMessage(rndName, dialog);
                 } else {
@@ -600,7 +597,7 @@ public class ChatActivity extends AppCompatActivity {
         if (!mascotList.isEmpty() && random.nextDouble() < 0.1) {
             dialogHandler.postDelayed(() -> {
                 Map<String, String> rnd = mascotList.get(random.nextInt(mascotList.size()));
-                String rndName = rnd.getOrDefault("name", currentMascotName);
+                String rndName = rnd.containsKey("name") ? rnd.get("name") : currentMascotName;
                 loadMascotMetadata(rndName);
                 addChatMessage(rndName, "Эй, мы не закончили!");
             }, 2500);
@@ -683,7 +680,6 @@ public class ChatActivity extends AppCompatActivity {
         }
         try {
             if (messagesContainer != null) messagesContainer.setBackgroundColor(Color.parseColor(themeBackground));
-            // цвета текста применяются при создании сообщений
         } catch (Exception e) { /* ignore */ }
     }
 
@@ -717,7 +713,6 @@ public class ChatActivity extends AppCompatActivity {
         }
     }
 
-    // startIdleTimer (расширитель)
     private void startIdleTimer() {
         lastUserInputTime = System.currentTimeMillis();
         dialogHandler.removeCallbacks(idleCheckRunnable);
