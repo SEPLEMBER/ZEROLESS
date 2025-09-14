@@ -50,8 +50,8 @@ dependencies {
     implementation(libs.bcprov.jdk15on)
     
     // ИСПРАВЛЕНО: проверьте, что эти зависимости есть в libs.versions.toml
-    implementation(libs.multidex)
-    implementation(libs.recyclerview)
+    implementation("androidx.multidex:multidex:2.0.1")
+    implementation("androidx.recyclerview:recyclerview:1.3.2")
     
     // Альтернативно, можете использовать прямые зависимости:
     // implementation("androidx.multidex:multidex:2.0.1")
