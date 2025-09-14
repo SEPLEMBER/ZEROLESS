@@ -1,6 +1,7 @@
 package com.nemesis.droidcrypt
 
 import android.animation.ObjectAnimator
+import android.content.Intent
 import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.net.Uri
@@ -8,8 +9,6 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.preference.PreferenceManager
-import android.view.LayoutInflater
-import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.*
@@ -501,9 +500,8 @@ class ChatActivity : AppCompatActivity() {
 
                             // section header
                             if (l.startsWith(";")) {
-                                if (current != null && current.replies.isNotEmpty()) {
-                                    dialogs.add(current)
-                                }
+                                // safe add previous section if it has replies
+                                current?.takeIf { it.replies.isNotEmpty() }?.let { dialogs.add(it) }
                                 current = Dialog(l.substring(1).trim())
                                 return@forEachLine
                             }
@@ -515,12 +513,9 @@ class ChatActivity : AppCompatActivity() {
                                     val mascot = parts[0].trim()
                                     val text = parts[1].trim()
                                     if (mascot.isNotEmpty() && text.isNotEmpty()) {
-                                        if (current == null) current = Dialog("default")
-                                        val reply = mapOf(
-                                            "mascot" to mascot,
-                                            "text" to text
-                                        )
-                                        current.replies.add(reply)
+                                        val cur = current ?: Dialog("default").also { current = it }
+                                        val reply = mapOf("mascot" to mascot, "text" to text)
+                                        cur.replies.add(reply)
                                     }
                                 }
                                 return@forEachLine
@@ -530,9 +525,8 @@ class ChatActivity : AppCompatActivity() {
                             dialogLines.add(l)
                         }
 
-                        if (current != null && current.replies.isNotEmpty()) {
-                            dialogs.add(current)
-                        }
+                        // safe add last section if needed
+                        current?.takeIf { it.replies.isNotEmpty() }?.let { dialogs.add(it) }
                     }
                 } catch (e: Exception) {
                     showCustomToast("Ошибка чтения randomreply.txt: ${e.message}")
