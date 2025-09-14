@@ -1,10 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/chat_layout"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
     android:background="@color/background_black"
     android:padding="16dp">
+
+    <!-- Аватарка маскота -->
+    <ImageView
+        android:id="@+id/mascot_image"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:layout_gravity="center"
+        android:src="@drawable/default_raccoon"
+        android:contentDescription="Mascot Icon"
+        android:layout_marginBottom="8dp" />
 
     <!-- Область отображения чата -->
     <ScrollView
