@@ -43,7 +43,7 @@ class ChatActivity : AppCompatActivity() {
     private lateinit var messagesContainer: LinearLayout
     private var adapter: ArrayAdapter<String>? = null
 
-    // Data structures (логика не изменена)
+    // Data structures
     private val fallback = arrayOf("Привет", "Как дела?", "Расскажи о себе", "Выход")
     private val templatesMap = HashMap<String, MutableList<String>>()
     private val contextMap = HashMap<String, String>()
@@ -119,7 +119,7 @@ class ChatActivity : AppCompatActivity() {
             }
         } catch (_: Exception) {}
 
-        // screenshots lock from prefs (unchanged behaviour)
+        // screenshots lock from prefs
         try {
             val prefs = PreferenceManager.getDefaultSharedPreferences(this)
             val disable = prefs.getBoolean(PREF_KEY_DISABLE_SCREENSHOTS, false)
@@ -135,7 +135,6 @@ class ChatActivity : AppCompatActivity() {
         setupIconTouchEffect(envelopeInputButton)
 
         // icon actions
-        // Lock — возвращение назад (MainActivity). По желанию можно сделать finish() или startActivity(MainActivity).
         btnLock?.setOnClickListener { finish() }
         btnTrash?.setOnClickListener { clearChat() }
         btnSettings?.setOnClickListener { startActivity(Intent(this, SettingsActivity::class.java)) }
@@ -244,7 +243,7 @@ class ChatActivity : AppCompatActivity() {
         } catch (_: Exception) {}
     }
 
-    // === core: process user query (логика старая, без изменений по смыслу) ===
+    // === core: process user query ===
     private fun processUserQuery(userInput: String) {
         val qOrig = userInput.trim().lowercase(Locale.getDefault())
         if (qOrig.isEmpty()) return
@@ -335,7 +334,6 @@ class ChatActivity : AppCompatActivity() {
 
     // === UI: add message with avatar left for mascots, right-aligned for user ===
     private fun addChatMessage(sender: String, text: String) {
-        // container for row
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             val pad = dpToPx(6)
@@ -346,21 +344,18 @@ class ChatActivity : AppCompatActivity() {
         val isUser = sender.equals("Ты", ignoreCase = true)
 
         if (isUser) {
-            // user message -> align right
             val bubble = createMessageBubble(sender, text, isUser)
             val lp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
             lp.gravity = Gravity.END
             lp.marginStart = dpToPx(48)
-            row.addView(spaceView(), LinearLayout.LayoutParams(0, 0, 1f)) // spacer
+            row.addView(spaceView(), LinearLayout.LayoutParams(0, 0, 1f))
             row.addView(bubble, lp)
         } else {
-            // mascot message -> avatar left + bubble
             val avatarView = ImageView(this).apply {
                 val size = dpToPx(64)
                 layoutParams = LinearLayout.LayoutParams(size, size)
                 scaleType = ImageView.ScaleType.CENTER_CROP
                 adjustViewBounds = true
-                // load avatar bitmap for this sender if available
                 loadAvatarInto(this, sender)
             }
             val bubble = createMessageBubble(sender, text, isUser)
@@ -378,7 +373,6 @@ class ChatActivity : AppCompatActivity() {
         scrollView.post { scrollView.smoothScrollTo(0, messagesContainer.bottom) }
     }
 
-    // small spacer
     private fun spaceView(): View = View(this).apply { layoutParams = LinearLayout.LayoutParams(0, 0, 1f) }
 
     private fun createMessageBubble(sender: String, text: String, isUser: Boolean): LinearLayout {
@@ -394,7 +388,6 @@ class ChatActivity : AppCompatActivity() {
             setTextIsSelectable(true)
             val pad = dpToPx(10)
             setPadding(pad, pad, pad, pad)
-            // bubble background & text color
             val accent = safeParseColorOrDefault(currentThemeColor, Color.parseColor("#00FF00"))
             background = createBubbleDrawable(accent)
             try { setTextColor(Color.parseColor(currentThemeColor)) } catch (_: Exception) { setTextColor(Color.WHITE) }
@@ -414,7 +407,6 @@ class ChatActivity : AppCompatActivity() {
     }
 
     private fun loadAvatarInto(target: ImageView, sender: String) {
-        // try a few filename patterns in SAF
         val uri = folderUri ?: return
         try {
             val dir = DocumentFile.fromTreeUri(this, uri) ?: return
@@ -431,7 +423,6 @@ class ChatActivity : AppCompatActivity() {
                 }
             }
         } catch (_: Exception) {}
-        // fallback: set tint circle
         target.setImageResource(android.R.color.transparent)
     }
 
