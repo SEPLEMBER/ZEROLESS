@@ -60,6 +60,18 @@
             android:background="@color/button_transparent"
             android:layout_marginTop="8dp" />
 
+        <!-- Переключатель для запрета/разрешения скриншотов -->
+        <Switch
+            android:id="@+id/disableScreenshotsSwitch"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Запретить скриншоты"
+            android:textColor="@color/text_green"
+            android:textSize="16sp"
+            android:layout_marginTop="12dp"
+            android:thumbTint="@color/text_green"
+            android:trackTint="#809F809F" />
+
         <Button
             android:id="@+id/backButton"
             android:layout_width="match_parent"
