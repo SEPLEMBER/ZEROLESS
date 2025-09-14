@@ -5,14 +5,14 @@
     android:layout_height="match_parent"
     android:orientation="vertical"
     android:background="@color/mascot_racky_background"
-    android:padding="16dp">
+    android:padding="12dp">
 
     <!-- Аватарка маскота -->
     <ImageView
         android:id="@+id/mascot_image"
         android:layout_width="48dp"
         android:layout_height="48dp"
-        android:layout_gravity="center"
+        android:layout_gravity="center_horizontal"
         android:contentDescription="Mascot Icon"
         android:layout_marginBottom="8dp" />
 
@@ -24,20 +24,14 @@
         android:layout_weight="1"
         android:fillViewport="true">
 
-        <TextView
-            android:id="@+id/responseArea"
+        <LinearLayout
+            android:id="@+id/chatMessagesContainer"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Bot: Добро пожаловать!\n"
-            android:textColor="@color/mascot_racky_text"
-            android:textIsSelectable="true"
-            android:textSize="18sp"
-            android:padding="8dp"
-            android:background="@color/card_dark"
-            android:minHeight="200dp"
-            android:scrollbars="vertical"
-            android:fadeScrollbars="false" />
-
+            android:orientation="vertical"
+            android:padding="8dp" >
+            <!-- сообщения будут добавляться динамически сюда -->
+        </LinearLayout>
     </ScrollView>
 
     <!-- Поле ввода с автодополнением -->
@@ -45,7 +39,7 @@
         android:id="@+id/queryInput"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="12dp"
+        android:layout_marginTop="8dp"
         android:hint="Напиши сообщение..."
         android:textColor="@color/mascot_racky_text"
         android:textColorHint="@color/mascot_racky_text"
