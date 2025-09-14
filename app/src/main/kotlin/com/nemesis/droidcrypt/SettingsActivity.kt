@@ -59,14 +59,16 @@ class SettingsActivity : AppCompatActivity() {
         if (saved != null) {
             try {
                 folderUri = Uri.parse(saved)
-                // use safe let to avoid passing nullable Uri
+                // SAFE: call takePersistableUriPermission only when folderUri != null
                 folderUri?.let { uri ->
                     try {
                         contentResolver.takePersistableUriPermission(
                             uri,
                             Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
                         )
-                    } catch (_: SecurityException) { }
+                    } catch (_: SecurityException) {
+                        // ignore
+                    }
                 }
                 loadTemplatesFromFile("base.txt")
             } catch (e: Exception) {
@@ -151,15 +153,17 @@ class SettingsActivity : AppCompatActivity() {
             val uri = data.data
             if (uri != null) {
                 folderUri = uri
-                // safe non-null pass
-                try {
-                    folderUri?.let { u ->
+                // SAFE: call takePersistableUriPermission only when folderUri != null
+                folderUri?.let { safeUri ->
+                    try {
                         contentResolver.takePersistableUriPermission(
-                            u,
+                            safeUri,
                             Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
                         )
+                    } catch (_: SecurityException) {
+                        // ignore
                     }
-                } catch (_: SecurityException) { }
+                }
                 // Save chosen folder URI to SharedPreferences (same key as ChatActivity reads)
                 prefs.edit().putString(PREF_KEY_FOLDER_URI, folderUri.toString()).apply()
 
