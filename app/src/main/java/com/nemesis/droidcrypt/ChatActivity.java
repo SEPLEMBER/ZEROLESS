@@ -11,7 +11,6 @@ import android.os.Handler;
 import android.os.Looper;
 import android.view.LayoutInflater;
 import android.view.View;
-import android.view.animation.AlphaAnimation;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.AutoCompleteTextView;
@@ -39,10 +38,10 @@ public class ChatActivity extends AppCompatActivity {
 
     private Uri folderUri;
     private TextView responseArea;
-    private ScrollView responseScrollView;
-    private AutoCompleteTextView chatInput;
-    private Button chatSend;
-    private Button clearChatButton;
+    private ScrollView scrollView;
+    private AutoCompleteTextView queryInput;
+    private Button sendButton;
+    private Button clearButton;
     private ImageView mascotImage;
     private LinearLayout chatLayout;
     private ArrayAdapter<String> adapter;
@@ -80,6 +79,8 @@ public class ChatActivity extends AppCompatActivity {
     private String currentMascotIcon = "raccoon_icon.png";
     private String currentThemeColor = "#00FF00";
     private String currentThemeBackground = "#000000";
+    private String currentContext = "base.txt"; // Добавлено
+    private String lastQuery = ""; // Добавлено
 
     // Для диалогов
     private List<Dialog> dialogs = new ArrayList<>();
@@ -111,10 +112,10 @@ public class ChatActivity extends AppCompatActivity {
 
         responseArea = findViewById(R.id.responseArea);
         responseArea.setTextIsSelectable(true); // Поддержка копирования текста
-        responseScrollView = findViewById(R.id.responseScrollView);
-        chatInput = findViewById(R.id.chatInput);
-        chatSend = findViewById(R.id.chatSend);
-        clearChatButton = findViewById(R.id.clearChatButton);
+        scrollView = findViewById(R.id.scrollView);
+        queryInput = findViewById(R.id.queryInput);
+        sendButton = findViewById(R.id.sendButton);
+        clearButton = findViewById(R.id.clearButton);
         mascotImage = findViewById(R.id.mascot_image);
         chatLayout = findViewById(R.id.chat_layout);
 
@@ -145,22 +146,22 @@ public class ChatActivity extends AppCompatActivity {
             updateAutoComplete();
         }
 
-        chatInput.setOnItemClickListener((parent, view, position, id) -> {
+        queryInput.setOnItemClickListener((parent, view, position, id) -> {
             String selected = (String) parent.getItemAtPosition(position);
-            chatInput.setText(selected);
+            queryInput.setText(selected);
             processQuery(selected);
         });
 
-        chatSend.setOnClickListener(v -> {
-            String input = chatInput.getText().toString().trim();
+        sendButton.setOnClickListener(v -> {
+            String input = queryInput.getText().toString().trim();
             if (!input.isEmpty()) {
                 processQuery(input);
-                chatInput.setText("");
+                queryInput.setText("");
             }
         });
 
-        if (clearChatButton != null) {
-            clearChatButton.setOnClickListener(v -> {
+        if (clearButton != null) {
+            clearButton.setOnClickListener(v -> {
                 responseArea.setText("");
                 queryCountMap.clear();
             });
@@ -393,8 +394,8 @@ public class ChatActivity extends AppCompatActivity {
 
         if (adapter == null) {
             adapter = new ArrayAdapter<>(this, android.R.layout.simple_dropdown_item_1line, suggestionsList);
-            chatInput.setAdapter(adapter);
-            chatInput.setThreshold(1);
+            queryInput.setAdapter(adapter);
+            queryInput.setThreshold(1);
         } else {
             adapter.clear();
             adapter.addAll(suggestionsList);
@@ -421,7 +422,7 @@ public class ChatActivity extends AppCompatActivity {
         if (queryCountMap.get(q) >= 5) {
             String response = antiSpamResponses.get(random.nextInt(antiSpamResponses.size()));
             responseArea.append("Ты: " + query + "\n" + currentMascotName + ": " + response + "\n\n");
-            responseScrollView.post(() -> responseScrollView.fullScroll(View.FOCUS_DOWN));
+            scrollView.post(() -> scrollView.fullScroll(View.FOCUS_DOWN));
             startIdleTimer();
             return;
         }
@@ -433,7 +434,7 @@ public class ChatActivity extends AppCompatActivity {
             loadTemplatesFromFile(currentContext);
             updateAutoComplete();
             responseArea.append("Ты: " + query + "\n" + currentMascotName + ": Переключаюсь на " + currentContext + "...\n\n");
-            responseScrollView.post(() -> responseScrollView.fullScroll(View.FOCUS_DOWN));
+            scrollView.post(() -> scrollView.fullScroll(View.FOCUS_DOWN));
             processQuery(query); // Повторить запрос
             return;
         }
@@ -445,7 +446,7 @@ public class ChatActivity extends AppCompatActivity {
                 List<String> responses = entry.getValue();
                 String response = responses.get(random.nextInt(responses.size()));
                 responseArea.append("Ты: " + query + "\n" + currentMascotName + ": " + response + "\n\n");
-                responseScrollView.post(() -> responseScrollView.fullScroll(View.FOCUS_DOWN));
+                scrollView.post(() -> scrollView.fullScroll(View.FOCUS_DOWN));
                 triggerRandomDialog();
                 startIdleTimer();
                 return;
@@ -457,7 +458,7 @@ public class ChatActivity extends AppCompatActivity {
         if (possibleResponses != null && !possibleResponses.isEmpty()) {
             String response = possibleResponses.get(random.nextInt(possibleResponses.size()));
             responseArea.append("Ты: " + query + "\n" + currentMascotName + ": " + response + "\n\n");
-            responseScrollView.post(() -> responseScrollView.fullScroll(View.FOCUS_DOWN));
+            scrollView.post(() -> scrollView.fullScroll(View.FOCUS_DOWN));
             triggerRandomDialog();
             startIdleTimer();
             return;
@@ -469,7 +470,7 @@ public class ChatActivity extends AppCompatActivity {
             loadTemplatesFromFile(currentContext);
             updateAutoComplete();
             responseArea.append("Ты: " + query + "\n" + currentMascotName + ": Возвращаюсь к общей теме...\n\n");
-            responseScrollView.post(() -> responseScrollView.fullScroll(View.FOCUS_DOWN));
+            scrollView.post(() -> scrollView.fullScroll(View.FOCUS_DOWN));
             processQuery(query);
             return;
         }
@@ -477,7 +478,7 @@ public class ChatActivity extends AppCompatActivity {
         // Fallback в base.txt
         String response = getDummyResponse(q);
         responseArea.append("Ты: " + query + "\n" + currentMascotName + ": " + response + "\n\n");
-        responseScrollView.post(() -> responseScrollView.fullScroll(View.FOCUS_DOWN));
+        scrollView.post(() -> scrollView.fullScroll(View.FOCUS_DOWN));
         triggerRandomDialog();
         startIdleTimer();
     }
@@ -490,7 +491,7 @@ public class ChatActivity extends AppCompatActivity {
                 String randomMascot = mascotList.get(random.nextInt(mascotList.size())).get("name");
                 loadMascotMetadata(randomMascot);
                 responseArea.append(randomMascot + ": " + dialog + "\n\n");
-                responseScrollView.post(() -> responseScrollView.fullScroll(View.FOCUS_DOWN));
+                scrollView.post(() -> scrollView.fullScroll(View.FOCUS_DOWN));
             }, 2000);
         }
 
@@ -500,7 +501,7 @@ public class ChatActivity extends AppCompatActivity {
                 String randomMascot = mascotList.get(random.nextInt(mascotList.size())).get("name");
                 loadMascotMetadata(randomMascot);
                 responseArea.append(randomMascot + ": Эй, мы не закончили!\n\n");
-                responseScrollView.post(() -> responseScrollView.fullScroll(View.FOCUS_DOWN));
+                scrollView.post(() -> scrollView.fullScroll(View.FOCUS_DOWN));
             }, 3000);
         }
     }
@@ -553,7 +554,7 @@ public class ChatActivity extends AppCompatActivity {
                     String text = reply.get("text");
                     loadMascotMetadata(mascot);
                     responseArea.append(mascot + ": " + text + "\n\n");
-                    responseScrollView.post(() -> responseScrollView.fullScroll(View.FOCUS_DOWN));
+                    scrollView.post(() -> scrollView.fullScroll(View.FOCUS_DOWN));
                     currentDialogIndex++;
                     dialogHandler.postDelayed(this, random.nextInt(15000) + 10000); // 10-25 сек
                 } else {
@@ -582,7 +583,7 @@ public class ChatActivity extends AppCompatActivity {
                         Bitmap bitmap = BitmapFactory.decodeStream(is);
                         mascotImage.setImageBitmap(bitmap);
                         // Анимация fade-in
-                        AlphaAnimation fadeIn = new AlphaAnimation(0.0f, 1.0f);
+                        android.view.animation.AlphaAnimation fadeIn = new android.view.animation.AlphaAnimation(0.0f, 1.0f);
                         fadeIn.setDuration(500);
                         mascotImage.startAnimation(fadeIn);
                     }
@@ -601,9 +602,9 @@ public class ChatActivity extends AppCompatActivity {
             if (responseArea != null) {
                 responseArea.setTextColor(Color.parseColor(themeColor));
             }
-            if (chatInput != null) {
-                chatInput.setTextColor(Color.parseColor(themeColor));
-                chatInput.setHintTextColor(Color.parseColor(themeColor));
+            if (queryInput != null) {
+                queryInput.setTextColor(Color.parseColor(themeColor));
+                queryInput.setHintTextColor(Color.parseColor(themeColor));
             }
         } catch (Exception e) {
             showCustomToast("Ошибка применения темы: " + e.getMessage());
