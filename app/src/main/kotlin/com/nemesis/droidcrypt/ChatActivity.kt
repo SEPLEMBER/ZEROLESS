@@ -9,6 +9,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.preference.PreferenceManager
+import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
@@ -17,19 +18,9 @@ import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.graphics.ColorUtils
 import androidx.documentfile.provider.DocumentFile
-import java.io.InputStreamReader
 import java.util.*
 import kotlin.math.roundToInt
 
-/**
- * ChatActivity — полный файл.
- * - объединены все функции: парсинг, dialogs, idle, metadata, UI.
- * - toolbar icons: lock/trash/envelope/settings (загружаются из SAF как lock.png / trash.png / envelope.png / settings.png)
- * - bubble styling: каждое сообщение оформляется как bubble с неоновой обводкой цвета currentThemeColor
- * - MAX_MESSAGES = 250
- *
- * Примечание: логика парсинга и маршрутизации оставлена близкой к твоему коду.
- */
 class ChatActivity : AppCompatActivity() {
 
     companion object {
@@ -43,19 +34,16 @@ class ChatActivity : AppCompatActivity() {
     private var folderUri: Uri? = null
     private lateinit var scrollView: ScrollView
     private lateinit var queryInput: AutoCompleteTextView
-    private lateinit var sendButton: Button
-    private var clearButton: Button? = null
-    private var mascotImage: ImageView? = null
+    private var envelopeInputButton: ImageButton? = null
+    private var mascotTopImage: ImageView? = null
+    private var btnLock: ImageButton? = null
+    private var btnTrash: ImageButton? = null
+    private var btnEnvelopeTop: ImageButton? = null
+    private var btnSettings: ImageButton? = null
     private lateinit var messagesContainer: LinearLayout
     private var adapter: ArrayAdapter<String>? = null
 
-    // toolbar icons
-    private var btnLock: ImageButton? = null
-    private var btnTrash: ImageButton? = null
-    private var btnEnvelope: ImageButton? = null
-    private var btnSettings: ImageButton? = null
-
-    // data
+    // Data structures (логика не изменена)
     private val fallback = arrayOf("Привет", "Как дела?", "Расскажи о себе", "Выход")
     private val templatesMap = HashMap<String, MutableList<String>>()
     private val contextMap = HashMap<String, String>()
@@ -72,26 +60,22 @@ class ChatActivity : AppCompatActivity() {
     private var currentContext = "base.txt"
     private var lastQuery = ""
 
-    // dialogs idle
+    // Dialogs / idle
     private var currentDialog: Dialog? = null
     private var currentDialogIndex = 0
     private val dialogHandler = Handler(Looper.getMainLooper())
     private var dialogRunnable: Runnable? = null
     private var idleCheckRunnable: Runnable? = null
     private var lastUserInputTime = System.currentTimeMillis()
-
     private val random = Random()
     private val queryCountMap = HashMap<String, Int>()
 
-    private data class Dialog(
-        val name: String,
-        val replies: MutableList<Map<String, String>> = mutableListOf()
-    )
+    private data class Dialog(val name: String, val replies: MutableList<Map<String, String>> = mutableListOf())
 
     init {
         antiSpamResponses.addAll(
             listOf(
-                "Ты надоел, давай что-то новенькое!",
+                "Ты надоел, давай что-то новенького!",
                 "Спамить нехорошо, попробуй другой запрос.",
                 "Я устал от твоих повторений!",
                 "Хватит спамить, придумай что-то интересное.",
@@ -109,69 +93,66 @@ class ChatActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_chat)
 
-        // UI refs
+        // refs
         scrollView = findViewById(R.id.scrollView)
         queryInput = findViewById(R.id.queryInput)
-        sendButton = findViewById(R.id.sendButton)
-        clearButton = findViewById(R.id.clearButton)
-        mascotImage = findViewById(R.id.mascot_image)
-        messagesContainer = findViewById(R.id.chatMessagesContainer)
-
+        envelopeInputButton = findViewById(R.id.envelope_button)
+        mascotTopImage = findViewById(R.id.mascot_top_image)
         btnLock = findViewById(R.id.btn_lock)
         btnTrash = findViewById(R.id.btn_trash)
-        btnEnvelope = findViewById(R.id.btn_envelope)
+        btnEnvelopeTop = findViewById(R.id.btn_envelope_top)
         btnSettings = findViewById(R.id.btn_settings)
+        messagesContainer = findViewById(R.id.chatMessagesContainer)
 
-        // SAF folder retrieval (Intent -> persisted)
+        // SAF Uri: Intent -> persisted -> prefs
         folderUri = intent?.getParcelableExtra("folderUri")
         if (folderUri == null) {
             for (perm in contentResolver.persistedUriPermissions) {
-                if (perm.isReadPermission) {
-                    folderUri = perm.uri
-                    break
-                }
+                if (perm.isReadPermission) { folderUri = perm.uri; break }
             }
         }
-
-        // if saved in prefs
         try {
             val prefs = PreferenceManager.getDefaultSharedPreferences(this)
             if (folderUri == null) {
                 val saved = prefs.getString(PREF_KEY_FOLDER_URI, null)
-                if (saved != null) {
-                    try { folderUri = Uri.parse(saved) } catch (_: Exception) { folderUri = null }
-                }
+                if (saved != null) folderUri = Uri.parse(saved)
             }
-        } catch (_: Exception) { }
+        } catch (_: Exception) {}
 
-        // screenshot lock
+        // screenshots lock from prefs (unchanged behaviour)
         try {
             val prefs = PreferenceManager.getDefaultSharedPreferences(this)
             val disable = prefs.getBoolean(PREF_KEY_DISABLE_SCREENSHOTS, false)
-            if (disable) window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
-            else window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
-        } catch (_: Exception) { }
+            if (disable) window.addFlags(WindowManager.LayoutParams.FLAG_SECURE) else window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        } catch (_: Exception) {}
 
-        // toolbar icons load
+        // load icons
         loadToolbarIcons()
         setupIconTouchEffect(btnLock)
         setupIconTouchEffect(btnTrash)
-        setupIconTouchEffect(btnEnvelope)
+        setupIconTouchEffect(btnEnvelopeTop)
         setupIconTouchEffect(btnSettings)
+        setupIconTouchEffect(envelopeInputButton)
 
         // icon actions
+        // Lock — возвращение назад (MainActivity). По желанию можно сделать finish() или startActivity(MainActivity).
+        btnLock?.setOnClickListener { finish() }
         btnTrash?.setOnClickListener { clearChat() }
-        btnSettings?.setOnClickListener {
-            try { startActivity(Intent(this, SettingsActivity::class.java)) } catch (e: Exception) {
-                showCustomToast("Не могу открыть настройки: ${e.message}")
+        btnSettings?.setOnClickListener { startActivity(Intent(this, SettingsActivity::class.java)) }
+        btnEnvelopeTop?.setOnClickListener { showCustomToast("Envelope top — заглушка") }
+
+        // envelope near input — отправка
+        envelopeInputButton?.setOnClickListener {
+            val input = queryInput.text.toString().trim()
+            if (input.isNotEmpty()) {
+                processUserQuery(input)
+                queryInput.setText("")
             }
         }
-        btnEnvelope?.setOnClickListener { showCustomToast("Envelope — пока заглушка") }
-        btnLock?.setOnClickListener { toggleScreenshotLock() }
 
-        // initial load
+        // initial parse / fallback
         if (folderUri == null) {
-            showCustomToast("Папка не выбрана! Откройте настройки и выберите папку.")
+            showCustomToast("Папка не выбрана! Открой настройки и выбери папку.")
             loadFallbackTemplates()
             updateAutoComplete()
             addChatMessage(currentMascotName, "Добро пожаловать!")
@@ -181,29 +162,18 @@ class ChatActivity : AppCompatActivity() {
             addChatMessage(currentMascotName, "Добро пожаловать!")
         }
 
-        queryInput.onItemClickListener = AdapterView.OnItemClickListener { parent, _, position, _ ->
+        queryInput.setOnItemClickListener { parent, _, position, _ ->
             val selected = parent.getItemAtPosition(position) as String
             queryInput.setText(selected)
             processUserQuery(selected)
         }
 
-        sendButton.setOnClickListener {
-            val input = queryInput.text.toString().trim()
-            if (input.isNotEmpty()) {
-                processUserQuery(input)
-                queryInput.setText("")
-            }
-        }
-
-        clearButton?.setOnClickListener { clearChat() }
-
-        // idle runnable (checks every 5s)
+        // idle runnable
         idleCheckRunnable = object : Runnable {
             override fun run() {
                 val idle = System.currentTimeMillis() - lastUserInputTime
                 if (idle >= 25000) {
-                    if (dialogs.isNotEmpty()) startRandomDialog()
-                    else if (dialogLines.isNotEmpty()) triggerRandomDialog()
+                    if (dialogs.isNotEmpty()) startRandomDialog() else if (dialogLines.isNotEmpty()) triggerRandomDialog()
                 }
                 dialogHandler.postDelayed(this, 5000)
             }
@@ -228,7 +198,7 @@ class ChatActivity : AppCompatActivity() {
         dialogHandler.removeCallbacksAndMessages(null)
     }
 
-    // ---------------- toolbar helpers ----------------
+    // --- toolbar helpers ---
     private fun setupIconTouchEffect(btn: ImageButton?) {
         btn?.setOnTouchListener { v, event ->
             when (event.action) {
@@ -254,29 +224,29 @@ class ChatActivity : AppCompatActivity() {
                     }
                 } catch (_: Exception) {}
             }
+            // top icons expected names
             tryLoad("lock.png", btnLock)
             tryLoad("trash.png", btnTrash)
-            tryLoad("envelope.png", btnEnvelope)
+            tryLoad("envelope.png", btnEnvelopeTop)
             tryLoad("settings.png", btnSettings)
+            // load top mascot image if available (use currentMascotIcon file)
+            try {
+                val iconFile = dir.findFile(currentMascotIcon)
+                if (iconFile != null && iconFile.exists()) {
+                    contentResolver.openInputStream(iconFile.uri)?.use { ins ->
+                        val bmp = BitmapFactory.decodeStream(ins)
+                        mascotTopImage?.setImageBitmap(bmp)
+                        mascotTopImage?.alpha = 0f
+                        ObjectAnimator.ofFloat(mascotTopImage, "alpha", 0f, 1f).setDuration(400).start()
+                    }
+                }
+            } catch (_: Exception) {}
         } catch (_: Exception) {}
     }
 
-    private fun toggleScreenshotLock() {
-        try {
-            val prefs = PreferenceManager.getDefaultSharedPreferences(this)
-            val current = prefs.getBoolean(PREF_KEY_DISABLE_SCREENSHOTS, false)
-            val next = !current
-            prefs.edit().putBoolean(PREF_KEY_DISABLE_SCREENSHOTS, next).apply()
-            if (next) window.addFlags(WindowManager.LayoutParams.FLAG_SECURE) else window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
-            showCustomToast(if (next) "Скриншоты отключены" else "Скриншоты разрешены")
-        } catch (e: Exception) {
-            showCustomToast("Ошибка: ${e.message}")
-        }
-    }
-
-    // ================= core: processing user queries =================
+    // === core: process user query (логика старая, без изменений по смыслу) ===
     private fun processUserQuery(userInput: String) {
-        val qOrig = userInput.trim().lowercase(Locale.ROOT)
+        val qOrig = userInput.trim().lowercase(Locale.getDefault())
         if (qOrig.isEmpty()) return
 
         lastUserInputTime = System.currentTimeMillis()
@@ -302,14 +272,12 @@ class ChatActivity : AppCompatActivity() {
         }
 
         val visited = HashSet<String>()
-        val startContext = currentContext
-        var context = startContext
+        var context = currentContext
         var answered = false
         var switches = 0
 
         while (switches <= MAX_CONTEXT_SWITCH && !answered) {
             visited.add(context)
-
             if (context != currentContext) {
                 currentContext = context
                 loadTemplatesFromFile(currentContext)
@@ -343,20 +311,13 @@ class ChatActivity : AppCompatActivity() {
             if (handledByKeyword) break
 
             if (context != "base.txt") {
-                if (!visited.contains("base.txt")) {
-                    context = "base.txt"
-                    switches++
-                    continue
-                } else break
+                if (!visited.contains("base.txt")) { context = "base.txt"; switches++; continue } else break
             }
 
             var foundRoute = false
             for ((keyword, mappedFile) in contextMap) {
                 if (qOrig.contains(keyword) && mappedFile != null && !visited.contains(mappedFile)) {
-                    context = mappedFile
-                    switches++
-                    foundRoute = true
-                    break
+                    context = mappedFile; switches++; foundRoute = true; break
                 }
             }
             if (foundRoute) continue
@@ -369,63 +330,109 @@ class ChatActivity : AppCompatActivity() {
             break
         }
 
-        if (!answered) {
-            addChatMessage(currentMascotName, "Не могу найти ответ, попробуй переформулировать.")
-        }
+        if (!answered) addChatMessage(currentMascotName, "Не могу найти ответ, попробуй переформулировать.")
     }
 
-    // ========== UI: add message as bubble ==========
+    // === UI: add message with avatar left for mascots, right-aligned for user ===
     private fun addChatMessage(sender: String, text: String) {
-        val item = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            val pad = dpToPx(8)
-            setPadding(pad, pad / 2, pad, pad / 2)
+        // container for row
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            val pad = dpToPx(6)
+            setPadding(pad, pad/2, pad, pad/2)
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
         }
 
-        val tvSender = TextView(this).apply {
-            this.text = "$sender:"
-            textSize = 12f
-            setTextColor(Color.parseColor("#AAAAAA"))
+        val isUser = sender.equals("Ты", ignoreCase = true)
+
+        if (isUser) {
+            // user message -> align right
+            val bubble = createMessageBubble(sender, text, isUser)
+            val lp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+            lp.gravity = Gravity.END
+            lp.marginStart = dpToPx(48)
+            row.addView(spaceView(), LinearLayout.LayoutParams(0, 0, 1f)) // spacer
+            row.addView(bubble, lp)
+        } else {
+            // mascot message -> avatar left + bubble
+            val avatarView = ImageView(this).apply {
+                val size = dpToPx(64)
+                layoutParams = LinearLayout.LayoutParams(size, size)
+                scaleType = ImageView.ScaleType.CENTER_CROP
+                adjustViewBounds = true
+                // load avatar bitmap for this sender if available
+                loadAvatarInto(this, sender)
+            }
+            val bubble = createMessageBubble(sender, text, isUser)
+            val bubbleLp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+            bubbleLp.marginStart = dpToPx(8)
+            row.addView(avatarView)
+            row.addView(bubble, bubbleLp)
         }
-        item.addView(tvSender, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
 
-        val tv = TextView(this).apply {
-            this.text = text
-            textSize = 16f
-            setTextIsSelectable(true)
-            // bubble style: background with rounded corners + neon stroke (accent)
-            val accent = safeParseColorOrDefault(currentThemeColor, Color.parseColor("#00FF00"))
-            background = createBubbleDrawable(accent)
-            val pad = dpToPx(10)
-            setPadding(pad, pad, pad, pad)
-            try { setTextColor(Color.parseColor(currentThemeColor)) } catch (e: Exception) { setTextColor(Color.WHITE) }
-        }
-        val lp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-        lp.setMargins(0, dpToPx(4), 0, dpToPx(6))
-        item.addView(tv, lp)
-
-        messagesContainer.addView(item)
-
+        messagesContainer.addView(row)
         if (messagesContainer.childCount > MAX_MESSAGES) {
             val removeCount = messagesContainer.childCount - MAX_MESSAGES
             repeat(removeCount) { messagesContainer.removeViewAt(0) }
         }
-
-        // smooth scroll
         scrollView.post { scrollView.smoothScrollTo(0, messagesContainer.bottom) }
+    }
+
+    // small spacer
+    private fun spaceView(): View = View(this).apply { layoutParams = LinearLayout.LayoutParams(0, 0, 1f) }
+
+    private fun createMessageBubble(sender: String, text: String, isUser: Boolean): LinearLayout {
+        val container = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val tvSender = TextView(this).apply {
+            text = "$sender:"
+            textSize = 12f
+            setTextColor(Color.parseColor("#AAAAAA"))
+        }
+        val tv = TextView(this).apply {
+            this.text = text
+            textSize = 16f
+            setTextIsSelectable(true)
+            val pad = dpToPx(10)
+            setPadding(pad, pad, pad, pad)
+            // bubble background & text color
+            val accent = safeParseColorOrDefault(currentThemeColor, Color.parseColor("#00FF00"))
+            background = createBubbleDrawable(accent)
+            try { setTextColor(Color.parseColor(currentThemeColor)) } catch (_: Exception) { setTextColor(Color.WHITE) }
+        }
+        container.addView(tvSender)
+        container.addView(tv)
+        return container
     }
 
     private fun createBubbleDrawable(accentColor: Int): GradientDrawable {
         val drawable = GradientDrawable()
-        // background: slightly dark, slightly tinted by accent
         val bg = blendColors(Color.parseColor("#0A0A0A"), accentColor, 0.06f)
         drawable.setColor(bg)
-        val radius = dpToPx(8).toFloat()
-        drawable.cornerRadius = radius
-        // stroke neon accent with low alpha
-        val strokeColor = ColorUtils.setAlphaComponent(accentColor, 180)
-        drawable.setStroke(dpToPx(2), strokeColor)
+        drawable.cornerRadius = dpToPx(10).toFloat()
+        drawable.setStroke(dpToPx(2), ColorUtils.setAlphaComponent(accentColor, 180))
         return drawable
+    }
+
+    private fun loadAvatarInto(target: ImageView, sender: String) {
+        // try a few filename patterns in SAF
+        val uri = folderUri ?: return
+        try {
+            val dir = DocumentFile.fromTreeUri(this, uri) ?: return
+            val s = sender.lowercase(Locale.getDefault())
+            val candidates = listOf("${s}_icon.png", "${s}_avatar.png", "${s}.png", currentMascotIcon)
+            for (name in candidates) {
+                val f = dir.findFile(name) ?: continue
+                if (f.exists()) {
+                    contentResolver.openInputStream(f.uri)?.use { ins ->
+                        val bmp = BitmapFactory.decodeStream(ins)
+                        target.setImageBitmap(bmp)
+                        return
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+        // fallback: set tint circle
+        target.setImageResource(android.R.color.transparent)
     }
 
     private fun blendColors(base: Int, accent: Int, ratio: Float): Int {
