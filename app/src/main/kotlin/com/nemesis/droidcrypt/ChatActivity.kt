@@ -230,17 +230,21 @@ class ChatActivity : AppCompatActivity() {
             tryLoad("settings.png", btnSettings)
             // load top mascot image if available (use currentMascotIcon file)
             try {
-                val iconFile = dir.findFile(currentMascotIcon)
-                if (iconFile != null && iconFile.exists()) {
-                    contentResolver.openInputStream(iconFile.uri)?.use { ins ->
-                        val bmp = BitmapFactory.decodeStream(ins)
-                        mascotTopImage?.setImageBitmap(bmp)
-                        mascotTopImage?.alpha = 0f
-                        ObjectAnimator.ofFloat(mascotTopImage, "alpha", 0f, 1f).setDuration(400).start()
-                    }
+    val iconFile = dir.findFile(currentMascotIcon)
+    if (iconFile != null && iconFile.exists()) {
+        contentResolver.openInputStream(iconFile.uri)?.use { ins ->
+            val bmp = BitmapFactory.decodeStream(ins)
+            mascotTopImage?.let { imageView ->
+                imageView.setImageBitmap(bmp)
+                imageView.alpha = 0f
+                ObjectAnimator.ofFloat(imageView, "alpha", 0f, 1f).apply {
+                    duration = 400
+                    start()
                 }
-            } catch (_: Exception) {}
-        } catch (_: Exception) {}
+            }
+        }
+    }
+} catch (_: Exception) {}
     }
 
     // === core: process user query ===
