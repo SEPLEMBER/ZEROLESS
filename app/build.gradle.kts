@@ -18,25 +18,21 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
-    buildFeatures {
-        viewBinding = true // Added for UI improvements
-    }
-
     buildTypes {
         release {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            signingConfig = null // Unsigned APK
+            signingConfig = null // Убрана подпись для неподписанного APK
         }
     }
 
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_17
-        targetCompatibility = JavaVersion.VERSION_17
+        sourceCompatibility = JavaVersion.VERSION_1_8
+        targetCompatibility = JavaVersion.VERSION_1_8
     }
 
-    kotlin {
-        jvmToolchain(17)
+    kotlinOptions {
+        jvmTarget = "1.8"
     }
 
     dependenciesInfo {
@@ -48,11 +44,11 @@ android {
 dependencies {
     implementation(libs.appcompat)
     implementation(libs.material)
-    implementation(libs.bcprov.jdk15on)
-    implementation(libs.multidex)
-    implementation(libs.recyclerview)
     implementation(libs.jargon2.api)
-    implementation(libs.kotlinx.coroutines.android) // Added for async operations
+    implementation(libs.lambdaworks.jargon2.api)
+    implementation(libs.bcprov.jdk15on)
+    implementation("androidx.multidex:multidex:2.0.1")
+    implementation("androidx.recyclerview:recyclerview:1.3.2")
     testImplementation(libs.junit)
     androidTestImplementation(libs.ext.junit)
     androidTestImplementation(libs.espresso.core)
