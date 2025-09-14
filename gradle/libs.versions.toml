@@ -1,10 +1,10 @@
 [versions]
 agp = "8.4.0"
-kotlin = "1.9.0"
+kotlin = "2.0.20" # Обновлено до совместимой с AGP 8.4.0
 junit = "4.13.2"
 extJunit = "1.2.1"
-espressoCore = "3.6.1" # Обновлено до последней версии
-appcompat = "1.7.0" # Обновлено до последней версии
+espressoCore = "3.6.1"
+appcompat = "1.7.0"
 material = "1.12.0"
 multidex = "2.0.1"
 recyclerview = "1.3.2"
