@@ -79,8 +79,8 @@ public class ChatActivity extends AppCompatActivity {
     private String currentMascotIcon = "raccoon_icon.png";
     private String currentThemeColor = "#00FF00";
     private String currentThemeBackground = "#000000";
-    private String currentContext = "base.txt"; // Добавлено
-    private String lastQuery = ""; // Добавлено
+    private String currentContext = "base.txt";
+    private String lastQuery = "";
 
     // Для диалогов
     private List<Dialog> dialogs = new ArrayList<>();
@@ -411,7 +411,8 @@ public class ChatActivity extends AppCompatActivity {
 
         // Отслеживание повторений
         if (q.equals(lastQuery)) {
-            queryCountMap.put(q, queryCountMap.getOrDefault(q, 0) + 1);
+            Integer count = queryCountMap.get(q);
+            queryCountMap.put(q, (count != null ? count : 0) + 1);
         } else {
             queryCountMap.clear();
             queryCountMap.put(q, 1);
