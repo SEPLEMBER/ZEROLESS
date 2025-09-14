@@ -1,14 +1,22 @@
 package com.nemesis.droidcrypt;
 
 import android.content.Intent;
+import android.content.SharedPreferences;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.graphics.Color;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.AutoCompleteTextView;
 import android.widget.Button;
+import android.widget.ImageView;
+import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -66,6 +74,32 @@ public class ChatActivity extends AppCompatActivity {
     private String lastQuery = "";
     private Random random = new Random();
 
+    // Для маскотов
+    private List<Map<String, String>> mascotList = new ArrayList<>();
+    private List<String> dialogLines = new ArrayList<>();
+    private String currentMascotName = "Racky";
+    private String currentMascotIcon = "default_raccoon";
+    private String currentThemeColor = "#00FF00";
+    private String currentThemeBackground = "#000000";
+
+    // Для диалогов
+    private List<Dialog> dialogs = new ArrayList<>();
+    private Dialog currentDialog = null;
+    private int currentDialogIndex = 0;
+    private Handler dialogHandler = new Handler(Looper.getMainLooper());
+    private Runnable dialogRunnable;
+    private long lastUserInputTime = System.currentTimeMillis();
+
+    // Класс Dialog для хранения диалогов
+    private static class Dialog {
+        String name;
+        List<Map<String, String>> replies;
+        Dialog(String name) {
+            this.name = name;
+            this.replies = new ArrayList<>();
+        }
+    }
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -76,10 +110,17 @@ public class ChatActivity extends AppCompatActivity {
         folderUri = intent != null ? intent.getParcelableExtra("folderUri") : null;
 
         responseArea = findViewById(R.id.responseArea);
+        responseArea.setTextIsSelectable(true); // Добавлено для копирования текста
         responseScrollView = findViewById(R.id.responseScrollView);
         chatInput = findViewById(R.id.chatInput);
         chatSend = findViewById(R.id.chatSend);
         clearChatButton = findViewById(R.id.clearChatButton);
+
+        // Применение запрета скриншотов из настроек
+        SharedPreferences prefs = getSharedPreferences("ChatTribePrefs", MODE_PRIVATE);
+        if (prefs.getBoolean("disableScreenshots", false)) {
+            getWindow().setFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE, android.view.WindowManager.LayoutParams.FLAG_SECURE);
+        }
 
         // Если folderUri == null — попробуем найти сохранённый persisted Uri
         if (folderUri == null) {
@@ -130,6 +171,14 @@ public class ChatActivity extends AppCompatActivity {
             loadTemplatesFromFile(currentContext);
         }
         updateAutoComplete();
+        startIdleTimer(); // Запуск таймера для диалогов
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        stopDialog(); // Остановка диалогов
+        dialogHandler.removeCallbacksAndMessages(null);
     }
 
     private void loadTemplatesFromFile(String filename) {
@@ -220,6 +269,89 @@ public class ChatActivity extends AppCompatActivity {
                         }
                     }
                 }
+            }
+
+            // Загрузка метаданных
+            String metadataFilename = filename.replace(".txt", "_metadata.txt");
+            DocumentFile metadataFile = dir.findFile(metadataFilename);
+            if (metadataFile != null && metadataFile.exists()) {
+                try (InputStream is = getContentResolver().openInputStream(metadataFile.getUri());
+                     BufferedReader reader = new BufferedReader(new InputStreamReader(is))) {
+                    String line;
+                    while ((line = reader.readLine()) != null) {
+                        if (line.startsWith("mascot_list=")) {
+                            String[] mascots = line.substring("mascot_list=".length()).split("\\|");
+                            for (String mascot : mascots) {
+                                String[] parts = mascot.split(":");
+                                if (parts.length == 4) {
+                                    Map<String, String> mascotData = new HashMap<>();
+                                    mascotData.put("name", parts[0].trim());
+                                    mascotData.put("icon", parts[1].trim());
+                                    mascotData.put("color", parts[2].trim());
+                                    mascotData.put("background", parts[3].trim());
+                                    mascotList.add(mascotData);
+                                }
+                            }
+                        } else if (line.startsWith("mascot_name=")) {
+                            currentMascotName = line.substring("mascot_name=".length()).trim();
+                        } else if (line.startsWith("mascot_icon=")) {
+                            currentMascotIcon = line.substring("mascot_icon=".length()).trim();
+                        } else if (line.startsWith("theme_color=")) {
+                            currentThemeColor = line.substring("theme_color=".length()).trim();
+                        } else if (line.startsWith("theme_background=")) {
+                            currentThemeBackground = line.substring("theme_background=".length()).trim();
+                        } else if (line.startsWith("dialog_lines=")) {
+                            String[] lines = line.substring("dialog_lines=".length()).split("\\|");
+                            for (String dialog : lines) {
+                                String d = dialog.trim();
+                                if (!d.isEmpty()) dialogLines.add(d);
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Загрузка randomreply.txt
+            DocumentFile dialogFile = dir.findFile("randomreply.txt");
+            if (dialogFile != null && dialogFile.exists()) {
+                try (InputStream is = getContentResolver().openInputStream(dialogFile.getUri());
+                     BufferedReader reader = new BufferedReader(new InputStreamReader(is))) {
+                    String line;
+                    Dialog current = null;
+                    while ((line = reader.readLine()) != null) {
+                        if (line.startsWith(";")) {
+                            if (current != null) dialogs.add(current);
+                            current = new Dialog(line.substring(1).trim());
+                        } else if (current != null && line.contains(">")) {
+                            String[] parts = line.split(">", 2);
+                            if (parts.length == 2) {
+                                Map<String, String> reply = new HashMap<>();
+                                reply.put("mascot", parts[0].trim());
+                                reply.put("text", parts[1].trim());
+                                current.replies.add(reply);
+                            }
+                        }
+                    }
+                    if (current != null) dialogs.add(current);
+                } catch (Exception e) {
+                    showCustomToast("Ошибка чтения randomreply.txt: " + e.getMessage());
+                }
+            }
+
+            // Выбор случайного маскота для base.txt
+            if ("base.txt".equals(filename) && !mascotList.isEmpty()) {
+                Map<String, String> selectedMascot = mascotList.get(random.nextInt(mascotList.size()));
+                currentMascotName = selectedMascot.get("name");
+                currentMascotIcon = selectedMascot.get("icon");
+                currentThemeColor = selectedMascot.get("color");
+                currentThemeBackground = selectedMascot.get("background");
+            }
+
+            updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground);
+
+            // Запуск таймера для диалогов только для base.txt
+            if ("base.txt".equals(filename)) {
+                startIdleTimer();
             }
         } catch (Exception e) {
             e.printStackTrace();
