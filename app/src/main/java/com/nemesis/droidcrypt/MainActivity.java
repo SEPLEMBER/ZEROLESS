@@ -1,57 +1,38 @@
-package com.nemesis.droidcrypt;
+package com.nemesis.droidcrypt
 
-import android.content.Intent;
-import android.net.Uri;
-import android.os.Bundle;
-import android.view.View;
-import android.widget.Button;
+import android.content.Intent
+import android.net.Uri
+import android.os.Bundle
+import android.widget.Button
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AppCompatActivity
 
-import androidx.annotation.Nullable;
-import androidx.appcompat.app.AppCompatActivity;
+class MainActivity : AppCompatActivity() {
 
-public class MainActivity extends AppCompatActivity {
-
-    private static final int REQUEST_CODE_SETTINGS = 1001;
-
-    @Override
-    protected void onCreate(Bundle savedInstanceState) {
-        super.onCreate(savedInstanceState);
-        setContentView(R.layout.activity_main);
-
-        Button startChat = findViewById(R.id.startChatButton);
-        Button openSettings = findViewById(R.id.openSettingsButton);
-
-        startChat.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                // Просто стартуем ChatActivity — он сам попытается взять folderUri из SharedPreferences / persisted permissions
-                Intent i = new Intent(MainActivity.this, ChatActivity.class);
-                startActivity(i);
-            }
-        });
-
-        openSettings.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                // Запускаем SettingsActivity для выбора папки и редактирования шаблонов.
-                // Ожидаем результат — при возвращении можем сразу открыть чат с переданным folderUri.
-                Intent i = new Intent(MainActivity.this, SettingsActivity.class);
-                startActivityForResult(i, REQUEST_CODE_SETTINGS);
-            }
-        });
+    companion object {
+        private const val REQUEST_CODE_SETTINGS = 1001
     }
 
-    @Override
-    protected void onActivityResult(int requestCode, int resultCode, @Nullable Intent data) {
-        super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode == REQUEST_CODE_SETTINGS && resultCode == RESULT_OK && data != null) {
-            // Если Settings вернул folderUri — передаём его в ChatActivity и открываем чат
-            Uri folderUri = data.getParcelableExtra("folderUri");
-            Intent i = new Intent(MainActivity.this, ChatActivity.class);
-            if (folderUri != null) {
-                i.putExtra("folderUri", folderUri);
+    private val settingsResultLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (result.resultCode == RESULT_OK) {
+            result.data?.getParcelableExtra<Uri>("folderUri")?.let { folderUri ->
+                startActivity(Intent(this, ChatActivity::class.java).apply {
+                    putExtra("folderUri", folderUri)
+                })
             }
-            startActivity(i);
+        }
+    }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContentView(R.layout.activity_main)
+
+        findViewById<Button>(R.id.startChatButton).setOnClickListener {
+            startActivity(Intent(this, ChatActivity::class.java))
+        }
+
+        findViewById<Button>(R.id.openSettingsButton).setOnClickListener {
+            settingsResultLauncher.launch(Intent(this, SettingsActivity::class.java))
         }
     }
 }
