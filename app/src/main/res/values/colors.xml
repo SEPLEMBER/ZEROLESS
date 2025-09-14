@@ -4,14 +4,24 @@
     <color name="text_green">#00FF00</color>
     <color name="button_transparent">#00000000</color>
     <color name="card_dark">#0A0A0A</color>
+
+    <!-- Mascot specific -->
     <color name="mascot_racky_text">#00FF00</color>
     <color name="mascot_racky_background">#000000</color>
+
     <color name="mascot_wise_text">#FFD700</color>
     <color name="mascot_wise_background">#1A1A1A</color>
+
     <color name="mascot_paws_text">#0000FF</color>
     <color name="mascot_paws_background">#000000</color>
+
     <color name="mascot_swift_text">#FFA500</color>
     <color name="mascot_swift_background">#000000</color>
+
     <color name="mascot_crow_text">#800080</color>
     <color name="mascot_crow_background">#000000</color>
+
+    <!-- UI accents -->
+    <color name="neon_accent">#39FF14</color> <!-- яркий лайм -->
+    <color name="bubble_bg">#0B0B0D</color> <!-- темный фон пузыря (под тон темы) -->
 </resources>
