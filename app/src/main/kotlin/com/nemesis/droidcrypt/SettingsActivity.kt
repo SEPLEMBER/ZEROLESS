@@ -6,7 +6,6 @@ import android.net.Uri
 import android.os.Bundle
 import android.os.ParcelFileDescriptor
 import android.preference.PreferenceManager
-import android.view.View
 import android.widget.Button
 import android.widget.EditText
 import android.widget.Switch
@@ -60,14 +59,15 @@ class SettingsActivity : AppCompatActivity() {
         if (saved != null) {
             try {
                 folderUri = Uri.parse(saved)
-                try {
-                    folderUri?.let { uri ->
+                // use safe let to avoid passing nullable Uri
+                folderUri?.let { uri ->
+                    try {
                         contentResolver.takePersistableUriPermission(
                             uri,
                             Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
                         )
-                    }
-                } catch (_: SecurityException) { }
+                    } catch (_: SecurityException) { }
+                }
                 loadTemplatesFromFile("base.txt")
             } catch (e: Exception) {
                 folderUri = null
@@ -121,7 +121,7 @@ class SettingsActivity : AppCompatActivity() {
 
         disableScreenshotsSwitch.setOnCheckedChangeListener { _, isChecked ->
             prefs.edit().putBoolean(PREF_KEY_DISABLE_SCREENSHOTS, isChecked).apply()
-            Toast.makeText(this@SettingsActivity, if (isChecked) "Скриншоты запрещены" else "Скриншоты разрешены", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, if (isChecked) "Скриншоты запрещены" else "Скриншоты разрешены", Toast.LENGTH_SHORT).show()
         }
 
         backButton.setOnClickListener {
@@ -151,11 +151,14 @@ class SettingsActivity : AppCompatActivity() {
             val uri = data.data
             if (uri != null) {
                 folderUri = uri
+                // safe non-null pass
                 try {
-                    contentResolver.takePersistableUriPermission(
-                        folderUri!!,
-                        Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-                    )
+                    folderUri?.let { u ->
+                        contentResolver.takePersistableUriPermission(
+                            u,
+                            Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                        )
+                    }
                 } catch (_: SecurityException) { }
                 // Save chosen folder URI to SharedPreferences (same key as ChatActivity reads)
                 prefs.edit().putString(PREF_KEY_FOLDER_URI, folderUri.toString()).apply()
