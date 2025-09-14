@@ -41,10 +41,7 @@ import java.util.Random;
 import java.util.Set;
 
 /**
- * ChatActivity — версия с улучшенным парсером randomreply.txt и исправленным чтением флага блокировки скриншотов.
- * Минимальные изменения в логике поиска ответов — сохранён последовательный алгоритм.
- *
- * minSdk: 26+
+ * ChatActivity — версия с исправленным парсером randomreply.txt
  */
 public class ChatActivity extends AppCompatActivity {
 
@@ -118,7 +115,6 @@ public class ChatActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_chat);
 
-        // UI
         scrollView = findViewById(R.id.scrollView);
         queryInput = findViewById(R.id.queryInput);
         sendButton = findViewById(R.id.sendButton);
@@ -126,7 +122,6 @@ public class ChatActivity extends AppCompatActivity {
         mascotImage = findViewById(R.id.mascot_image);
         messagesContainer = findViewById(R.id.chatMessagesContainer);
 
-        // Получаем folderUri: сначала из Intent, потом persisted permissions, потом из prefs
         Intent intent = getIntent();
         folderUri = intent != null ? intent.getParcelableExtra("folderUri") : null;
 
@@ -136,20 +131,16 @@ public class ChatActivity extends AppCompatActivity {
             }
         }
 
-        // Попытка восстановить из SharedPreferences (если ранее сохранён)
         try {
             SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(this);
             if (folderUri == null) {
                 String saved = prefs.getString(PREF_KEY_FOLDER_URI, null);
                 if (saved != null) {
-                    try {
-                        folderUri = Uri.parse(saved);
-                    } catch (Exception ignored) { folderUri = null; }
+                    try { folderUri = Uri.parse(saved); } catch (Exception ignored) { folderUri = null; }
                 }
             }
         } catch (Exception ignored) {}
 
-        // Блокировка скриншотов — читаем единым ключом
         try {
             SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(this);
             boolean disableScreenshots = prefs.getBoolean(PREF_KEY_DISABLE_SCREENSHOTS, false);
@@ -157,7 +148,6 @@ public class ChatActivity extends AppCompatActivity {
             else getWindow().clearFlags(WindowManager.LayoutParams.FLAG_SECURE);
         } catch (Exception ignored) {}
 
-        // Load
         if (folderUri == null) {
             showCustomToast("Папка не выбрана! Откройте настройки и выберите папку.");
             loadFallbackTemplates();
@@ -215,7 +205,6 @@ public class ChatActivity extends AppCompatActivity {
         dialogHandler.removeCallbacksAndMessages(null);
     }
 
-    // ========== основной алгоритм поиска ответа ==========
     private void processUserQuery(String userInput) {
         String qOrig = userInput.trim().toLowerCase();
         if (qOrig.isEmpty()) return;
@@ -257,7 +246,6 @@ public class ChatActivity extends AppCompatActivity {
                 updateAutoComplete();
             }
 
-            // точный триггер
             List<String> possible = templatesMap.get(qOrig);
             if (possible != null && !possible.isEmpty()) {
                 String resp = possible.get(random.nextInt(possible.size()));
@@ -268,7 +256,6 @@ public class ChatActivity extends AppCompatActivity {
                 break;
             }
 
-            // ключевые слова (-ключ=)
             boolean handledByKeyword = false;
             for (Map.Entry<String, List<String>> e : keywordResponses.entrySet()) {
                 String keyword = e.getKey();
@@ -287,18 +274,14 @@ public class ChatActivity extends AppCompatActivity {
             }
             if (handledByKeyword) break;
 
-            // если не в base.txt — попробуем base.txt (без видимой "переключаюсь")
             if (!"base.txt".equals(context)) {
                 if (!visited.contains("base.txt")) {
                     context = "base.txt";
                     switches++;
                     continue;
-                } else {
-                    break;
-                }
+                } else break;
             }
 
-            // если в base.txt — ищем маршрут по ключам contextMap
             boolean foundRoute = false;
             for (Map.Entry<String, String> e : contextMap.entrySet()) {
                 String keyword = e.getKey();
@@ -312,7 +295,6 @@ public class ChatActivity extends AppCompatActivity {
             }
             if (foundRoute) continue;
 
-            // fallback
             String fallbackResp = getDummyResponse(qOrig);
             addChatMessage(currentMascotName, fallbackResp);
             triggerRandomDialog();
@@ -324,7 +306,6 @@ public class ChatActivity extends AppCompatActivity {
         if (!answered) addChatMessage(currentMascotName, "Не могу найти ответ, попробуй переформулировать.");
     }
 
-    // ========== UI сообщений ==========
     private void addChatMessage(String sender, String text) {
         if (messagesContainer == null) return;
 
@@ -371,7 +352,7 @@ public class ChatActivity extends AppCompatActivity {
         addChatMessage(currentMascotName, "Чат очищен. Возвращаюсь к началу.");
     }
 
-    // ========== загрузка / парсинг ==========
+    // ========================== Загрузка шаблонов ==========================
     private void loadTemplatesFromFile(String filename) {
         templatesMap.clear();
         keywordResponses.clear();
@@ -489,41 +470,53 @@ public class ChatActivity extends AppCompatActivity {
                 }
             }
 
-            // ---------- robust parser for randomreply.txt ----------
+            // ---------- исправленный парсер randomreply.txt ----------
             DocumentFile dialogFile = dir.findFile("randomreply.txt");
             if (dialogFile != null && dialogFile.exists()) {
                 try (InputStream is = getContentResolver().openInputStream(dialogFile.getUri());
                      BufferedReader reader = new BufferedReader(new InputStreamReader(is))) {
+
                     String line;
                     Dialog current = null;
+
                     while ((line = reader.readLine()) != null) {
-                        if (line == null) continue;
-                        String l = line.trim();
-                        if (l.isEmpty()) continue;
+                        line = line.trim();
+                        if (line.isEmpty()) continue;
+
                         // section header
-                        if (l.startsWith(";")) {
-                            if (current != null) dialogs.add(current);
-                            current = new Dialog(l.substring(1).trim());
+                        if (line.startsWith(";")) {
+                            if (current != null && !current.replies.isEmpty()) {
+                                dialogs.add(current);
+                            }
+                            current = new Dialog(line.substring(1).trim());
                             continue;
                         }
-                        // mascot>text lines
-                        if (l.contains(">")) {
-                            String[] parts = l.split(">", 2);
+
+                        // mascot>text
+                        if (line.contains(">")) {
+                            String[] parts = line.split(">", 2);
                             if (parts.length == 2) {
                                 String mascot = parts[0].trim();
                                 String text = parts[1].trim();
-                                if (current == null) current = new Dialog("default");
-                                Map<String, String> reply = new HashMap<>();
-                                reply.put("mascot", mascot);
-                                reply.put("text", text);
-                                current.replies.add(reply);
-                                continue;
+                                if (!mascot.isEmpty() && !text.isEmpty()) {
+                                    if (current == null) current = new Dialog("default");
+                                    Map<String, String> reply = new HashMap<>();
+                                    reply.put("mascot", mascot);
+                                    reply.put("text", text);
+                                    current.replies.add(reply);
+                                }
                             }
+                            continue;
                         }
+
                         // fallback — treat as dialog line (unstructured short line)
-                        dialogLines.add(l);
+                        dialogLines.add(line);
                     }
-                    if (current != null) dialogs.add(current);
+
+                    if (current != null && !current.replies.isEmpty()) {
+                        dialogs.add(current);
+                    }
+
                 } catch (Exception e) {
                     showCustomToast("Ошибка чтения randomreply.txt: " + e.getMessage());
                 }
@@ -578,7 +571,7 @@ public class ChatActivity extends AppCompatActivity {
         }
     }
 
-    // idle / random dialogs
+    // ======= Idle / random dialogs =======
     private void triggerRandomDialog() {
         if (!dialogLines.isEmpty() && random.nextDouble() < 0.3) {
             dialogHandler.postDelayed(() -> {
@@ -636,7 +629,6 @@ public class ChatActivity extends AppCompatActivity {
         }
     }
 
-    // Mascot metadata & UI
     private void loadMascotMetadata(String mascotName) {
         if (folderUri == null) return;
         String metadataFilename = mascotName.toLowerCase() + "_metadata.txt";
