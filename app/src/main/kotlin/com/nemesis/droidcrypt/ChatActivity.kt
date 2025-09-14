@@ -537,7 +537,7 @@ class ChatActivity : AppCompatActivity() {
             if (metadataFile != null && metadataFile.exists()) {
                 contentResolver.openInputStream(metadataFile.uri)?.bufferedReader()?.use { reader ->
                     reader.forEachLine { raw ->
-                        val line = raw
+                        val line = raw.trim()
                         when {
                             line.startsWith("mascot_list=") -> {
                                 val mascots = line.substring("mascot_list=".length).split("\\|".toRegex())
@@ -572,14 +572,14 @@ class ChatActivity : AppCompatActivity() {
             if (dialogFile != null && dialogFile.exists()) {
                 try {
                     contentResolver.openInputStream(dialogFile.uri)?.bufferedReader()?.use { reader ->
-                        var current: Dialog? = null
+                        var currentDialogParser: Dialog? = null
                         reader.forEachLine { raw ->
                             val l = raw.trim()
                             if (l.isEmpty()) return@forEachLine
 
                             if (l.startsWith(";")) {
-                                current?.takeIf { it.replies.isNotEmpty() }?.let { dialogs.add(it) }
-                                current = Dialog(l.substring(1).trim())
+                                currentDialogParser?.takeIf { it.replies.isNotEmpty() }?.let { dialogs.add(it) }
+                                currentDialogParser = Dialog(l.substring(1).trim())
                                 return@forEachLine
                             }
 
@@ -589,7 +589,7 @@ class ChatActivity : AppCompatActivity() {
                                     val mascot = parts[0].trim()
                                     val text = parts[1].trim()
                                     if (mascot.isNotEmpty() && text.isNotEmpty()) {
-                                        val cur = current ?: Dialog("default").also { current = it }
+                                        val cur = currentDialogParser ?: Dialog("default").also { currentDialogParser = it }
                                         cur.replies.add(mapOf("mascot" to mascot, "text" to text))
                                     }
                                 }
@@ -599,7 +599,7 @@ class ChatActivity : AppCompatActivity() {
                             // fallback short dialog line
                             dialogLines.add(l)
                         }
-                        current?.takeIf { it.replies.isNotEmpty() }?.let { dialogs.add(it) }
+                        currentDialogParser?.takeIf { it.replies.isNotEmpty() }?.let { dialogs.add(it) }
                     }
                 } catch (e: Exception) {
                     showCustomToast("Ошибка чтения randomreply.txt: ${e.message}")
@@ -719,7 +719,7 @@ class ChatActivity : AppCompatActivity() {
             try {
                 contentResolver.openInputStream(metadataFile.uri)?.bufferedReader()?.use { reader ->
                     reader.forEachLine { raw ->
-                        val line = raw
+                        val line = raw.trim()
                         when {
                             line.startsWith("mascot_name=") -> currentMascotName = line.substring("mascot_name=".length).trim()
                             line.startsWith("mascot_icon=") -> currentMascotIcon = line.substring("mascot_icon=".length).trim()
@@ -737,7 +737,7 @@ class ChatActivity : AppCompatActivity() {
 
     private fun updateUI(mascotName: String, mascotIcon: String, themeColor: String, themeBackground: String) {
         title = "Pawstribe - $mascotName"
-        mascotImage?.let { imageView ->
+        mascotTopImage?.let { imageView: ImageView ->
             folderUri?.let { uri ->
                 try {
                     val dir = DocumentFile.fromTreeUri(this, uri)
