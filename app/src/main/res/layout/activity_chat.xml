@@ -7,16 +7,72 @@
     android:background="@color/mascot_racky_background"
     android:padding="12dp">
 
-    <!-- Аватарка маскота -->
+    <!-- Top matte bar with title + icons on the right -->
+    <LinearLayout
+        android:id="@+id/topBar"
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingStart="12dp"
+        android:paddingEnd="8dp"
+        android:background="@color/card_dark">
+
+        <TextView
+            android:id="@+id/topTitle"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="Pawstribe"
+            android:textColor="@color/mascot_racky_text"
+            android:textSize="18sp"
+            android:padding="4dp" />
+
+        <!-- Icons row (try to load from SAF: lock.png, trash.png, envelope.png, settings.png) -->
+        <ImageButton
+            android:id="@+id/btn_lock"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:layout_marginStart="8dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="Lock" />
+
+        <ImageButton
+            android:id="@+id/btn_trash"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:layout_marginStart="8dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="Trash" />
+
+        <ImageButton
+            android:id="@+id/btn_envelope"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:layout_marginStart="8dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="Envelope" />
+
+        <ImageButton
+            android:id="@+id/btn_settings"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:layout_marginStart="8dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="Settings" />
+    </LinearLayout>
+
+    <!-- Mascot avatar -->
     <ImageView
         android:id="@+id/mascot_image"
         android:layout_width="48dp"
         android:layout_height="48dp"
         android:layout_gravity="center_horizontal"
         android:contentDescription="Mascot Icon"
+        android:layout_marginTop="8dp"
         android:layout_marginBottom="8dp" />
 
-    <!-- Область отображения чата -->
+    <!-- Chat area -->
     <ScrollView
         android:id="@+id/scrollView"
         android:layout_width="match_parent"
@@ -29,27 +85,43 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
-            android:padding="8dp" >
-            <!-- сообщения будут добавляться динамически сюда -->
+            android:padding="8dp">
+            <!-- messages added dynamically -->
         </LinearLayout>
     </ScrollView>
 
-    <!-- Поле ввода с автодополнением -->
-    <AutoCompleteTextView
-        android:id="@+id/queryInput"
+    <!-- Input row -->
+    <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
-        android:hint="Напиши сообщение..."
-        android:textColor="@color/mascot_racky_text"
-        android:textColorHint="@color/mascot_racky_text"
-        android:background="@color/card_dark"
-        android:padding="8dp"
-        android:inputType="textMultiLine"
-        android:maxLines="3"
-        android:scrollbars="vertical" />
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingTop="8dp">
 
-    <!-- Кнопка отправки -->
+        <AutoCompleteTextView
+            android:id="@+id/queryInput"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:hint="Напиши сообщение..."
+            android:textColor="@color/mascot_racky_text"
+            android:textColorHint="@color/mascot_racky_text"
+            android:background="@color/card_dark"
+            android:padding="12dp"
+            android:inputType="textMultiLine"
+            android:maxLines="3"
+            android:scrollbars="vertical" />
+
+        <ImageButton
+            android:id="@+id/envelope_button"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:layout_marginStart="8dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="Send via envelope" />
+    </LinearLayout>
+
+    <!-- Send / Clear buttons (kept for backward compatibility) -->
     <Button
         android:id="@+id/sendButton"
         android:layout_width="match_parent"
@@ -59,7 +131,6 @@
         android:background="@color/button_transparent"
         android:layout_marginTop="8dp" />
 
-    <!-- Кнопка очистки чата -->
     <Button
         android:id="@+id/clearButton"
         android:layout_width="match_parent"
