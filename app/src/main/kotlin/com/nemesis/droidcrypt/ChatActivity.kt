@@ -26,7 +26,7 @@ class ChatActivity : AppCompatActivity() {
     companion object {
         private const val PREF_KEY_FOLDER_URI = "pref_folder_uri"
         private const val PREF_KEY_DISABLE_SCREENSHOTS = "pref_disable_screenshots"
-        private const val MAX_CONTEXT_SWITCH = 6
+        private const val MAX_CONTEXT_SWITCH = 6 // Note: This is now unused due to logic simplification
         private const val MAX_MESSAGES = 250
     }
 
@@ -108,7 +108,9 @@ class ChatActivity : AppCompatActivity() {
         folderUri = intent?.getParcelableExtra("folderUri")
         if (folderUri == null) {
             for (perm in contentResolver.persistedUriPermissions) {
-                if (perm.isReadPermission) { folderUri = perm.uri; break }
+                if (perm.isReadPermission) {
+                    folderUri = perm.uri; break
+                }
             }
         }
         try {
@@ -117,14 +119,18 @@ class ChatActivity : AppCompatActivity() {
                 val saved = prefs.getString(PREF_KEY_FOLDER_URI, null)
                 if (saved != null) folderUri = Uri.parse(saved)
             }
-        } catch (_: Exception) {}
+        } catch (_: Exception) {
+        }
 
         // screenshots lock from prefs
         try {
             val prefs = PreferenceManager.getDefaultSharedPreferences(this)
             val disable = prefs.getBoolean(PREF_KEY_DISABLE_SCREENSHOTS, false)
-            if (disable) window.addFlags(WindowManager.LayoutParams.FLAG_SECURE) else window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
-        } catch (_: Exception) {}
+            if (disable) window.addFlags(WindowManager.LayoutParams.FLAG_SECURE) else window.clearFlags(
+                WindowManager.LayoutParams.FLAG_SECURE
+            )
+        } catch (_: Exception) {
+        }
 
         // load icons
         loadToolbarIcons()
@@ -212,6 +218,7 @@ class ChatActivity : AppCompatActivity() {
         val uri = folderUri ?: return
         try {
             val dir = DocumentFile.fromTreeUri(this, uri) ?: return
+
             fun tryLoad(name: String, target: ImageButton?) {
                 try {
                     val file = dir.findFile(name)
@@ -221,7 +228,8 @@ class ChatActivity : AppCompatActivity() {
                             target?.setImageBitmap(bmp)
                         }
                     }
-                } catch (_: Exception) {}
+                } catch (_: Exception) {
+                }
             }
             // top icons expected names
             tryLoad("lock.png", btnLock)
@@ -229,23 +237,27 @@ class ChatActivity : AppCompatActivity() {
             tryLoad("envelope.png", btnEnvelopeTop)
             tryLoad("settings.png", btnSettings)
             // load top mascot image if available (use currentMascotIcon file)
-            try {
-    val iconFile = dir.findFile(currentMascotIcon)
-    if (iconFile != null && iconFile.exists()) {
-        contentResolver.openInputStream(iconFile.uri)?.use { ins ->
-            val bmp = BitmapFactory.decodeStream(ins)
-            mascotTopImage?.let { imageView ->
-                imageView.setImageBitmap(bmp)
-                imageView.alpha = 0f
-                ObjectAnimator.ofFloat(imageView, "alpha", 0f, 1f).apply {
-                    duration = 400
-                    start()
+            val iconFile = dir.findFile(currentMascotIcon)
+            if (iconFile != null && iconFile.exists()) {
+                contentResolver.openInputStream(iconFile.uri)?.use { ins ->
+                    val bmp = BitmapFactory.decodeStream(ins)
+                    mascotTopImage?.let { imageView ->
+                        imageView.setImageBitmap(bmp)
+                        imageView.alpha = 0f
+                        ObjectAnimator.ofFloat(imageView, "alpha", 0f, 1f).apply {
+                            duration = 400
+                            start()
+                        }
+                    }
                 }
             }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            // Optionally show a toast on error
+            // showCustomToast("Ошибка загрузки иконок")
         }
     }
-} catch (_: Exception) {}
-    }
+
 
     // === core: process user query ===
     private fun processUserQuery(userInput: String) {
@@ -256,7 +268,7 @@ class ChatActivity : AppCompatActivity() {
         stopDialog()
 
         if (qOrig == lastQuery) {
-            val cnt = queryCountMap[qOrig] ?: 0
+            val cnt = queryCountMap.getOrDefault(qOrig, 0)
             queryCountMap[qOrig] = cnt + 1
         } else {
             queryCountMap.clear()
@@ -266,74 +278,62 @@ class ChatActivity : AppCompatActivity() {
 
         addChatMessage("Ты", userInput)
 
-        val repeats = queryCountMap[qOrig] ?: 0
+        val repeats = queryCountMap.getOrDefault(qOrig, 0)
         if (repeats >= 5) {
-            val spamResp = antiSpamResponses[random.nextInt(antiSpamResponses.size)]
+            val spamResp = antiSpamResponses.random()
             addChatMessage(currentMascotName, spamResp)
             startIdleTimer()
             return
         }
 
-        val visited = HashSet<String>()
-        var context = currentContext
         var answered = false
-        var switches = 0
 
-        while (switches <= MAX_CONTEXT_SWITCH && !answered) {
-            visited.add(context)
-            if (context != currentContext) {
-                currentContext = context
-                loadTemplatesFromFile(currentContext)
-                updateAutoComplete()
-            }
-
-            val possible = templatesMap[qOrig]
-            if (possible != null && possible.isNotEmpty()) {
-                val resp = possible[random.nextInt(possible.size)]
-                addChatMessage(currentMascotName, resp)
-                triggerRandomDialog()
-                startIdleTimer()
+        // 1. Check for an exact match in the current context
+        templatesMap[qOrig]?.let { possible ->
+            if (possible.isNotEmpty()) {
+                addChatMessage(currentMascotName, possible.random())
                 answered = true
-                break
             }
+        }
 
-            var handledByKeyword = false
+        // 2. If no exact match, check for keywords in the current context
+        if (!answered) {
             for ((keyword, responses) in keywordResponses) {
-                if (qOrig.contains(keyword)) {
-                    if (responses.isNotEmpty()) {
-                        val resp = responses[random.nextInt(responses.size)]
-                        addChatMessage(currentMascotName, resp)
-                        triggerRandomDialog()
-                        startIdleTimer()
-                        handledByKeyword = true
-                        answered = true
-                        break
+                if (qOrig.contains(keyword) && responses.isNotEmpty()) {
+                    addChatMessage(currentMascotName, responses.random())
+                    answered = true
+                    break
+                }
+            }
+        }
+
+        // 3. If still no answer, try to switch context
+        if (!answered) {
+            detectContext(qOrig)?.let { newContext ->
+                if (newContext != currentContext) {
+                    currentContext = newContext
+                    loadTemplatesFromFile(currentContext)
+                    updateAutoComplete()
+                    // Re-check for an answer in the new context after switching
+                    templatesMap[qOrig]?.let { possible ->
+                        if (possible.isNotEmpty()) {
+                            addChatMessage(currentMascotName, possible.random())
+                            answered = true
+                        }
                     }
                 }
             }
-            if (handledByKeyword) break
-
-            if (context != "base.txt") {
-                if (!visited.contains("base.txt")) { context = "base.txt"; switches++; continue } else break
-            }
-
-            var foundRoute = false
-            for ((keyword, mappedFile) in contextMap) {
-                if (qOrig.contains(keyword) && mappedFile != null && !visited.contains(mappedFile)) {
-                    context = mappedFile; switches++; foundRoute = true; break
-                }
-            }
-            if (foundRoute) continue
-
-            val fallbackResp = getDummyResponse(qOrig)
-            addChatMessage(currentMascotName, fallbackResp)
-            triggerRandomDialog()
-            startIdleTimer()
-            answered = true
-            break
         }
 
-        if (!answered) addChatMessage(currentMascotName, "Не могу найти ответ, попробуй переформулировать.")
+        // 4. If nothing worked, use a fallback response
+        if (!answered) {
+            val fallbackResp = getDummyResponse(qOrig)
+            addChatMessage(currentMascotName, fallbackResp)
+        }
+
+        // Trigger idle events after processing the query
+        triggerRandomDialog()
+        startIdleTimer()
     }
 
     // === UI: add message with avatar left for mascots, right-aligned for user ===
@@ -341,15 +341,23 @@ class ChatActivity : AppCompatActivity() {
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             val pad = dpToPx(6)
-            setPadding(pad, pad/2, pad, pad/2)
-            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+            setPadding(pad, pad / 2, pad, pad / 2)
+            layoutParams =
+                LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                )
         }
 
         val isUser = sender.equals("Ты", ignoreCase = true)
 
         if (isUser) {
             val bubble = createMessageBubble(sender, text, isUser)
-            val lp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+            val lp =
+                LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                )
             lp.gravity = Gravity.END
             lp.marginStart = dpToPx(48)
             row.addView(spaceView(), LinearLayout.LayoutParams(0, 0, 1f))
@@ -363,7 +371,11 @@ class ChatActivity : AppCompatActivity() {
                 loadAvatarInto(this, sender)
             }
             val bubble = createMessageBubble(sender, text, isUser)
-            val bubbleLp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+            val bubbleLp =
+                LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                )
             bubbleLp.marginStart = dpToPx(8)
             row.addView(avatarView)
             row.addView(bubble, bubbleLp)
@@ -377,24 +389,34 @@ class ChatActivity : AppCompatActivity() {
         scrollView.post { scrollView.smoothScrollTo(0, messagesContainer.bottom) }
     }
 
-    private fun spaceView(): View = View(this).apply { layoutParams = LinearLayout.LayoutParams(0, 0, 1f) }
-
-    private fun createMessageBubble(sender: String, text: String, isUser: Boolean): LinearLayout {
-    val container = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-    val tvSender = TextView(this).apply {
-        setText("$sender:")  // Используем setText() вместо text =
-        textSize = 12f
-        setTextColor(Color.parseColor("#AAAAAA"))
+    private fun spaceView(): View = View(this).apply {
+        layoutParams = LinearLayout.LayoutParams(0, 0, 1f)
     }
-    val tv = TextView(this).apply {
-        setText(text)
+
+    private fun createMessageBubble(
+        sender: String,
+        text: String,
+        isUser: Boolean
+    ): LinearLayout {
+        val container = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val tvSender = TextView(this).apply {
+            this.text = "$sender:"
+            textSize = 12f
+            setTextColor(Color.parseColor("#AAAAAA"))
+        }
+        val tv = TextView(this).apply {
+            this.text = text
             textSize = 16f
             setTextIsSelectable(true)
             val pad = dpToPx(10)
             setPadding(pad, pad, pad, pad)
             val accent = safeParseColorOrDefault(currentThemeColor, Color.parseColor("#00FF00"))
             background = createBubbleDrawable(accent)
-            try { setTextColor(Color.parseColor(currentThemeColor)) } catch (_: Exception) { setTextColor(Color.WHITE) }
+            try {
+                setTextColor(Color.parseColor(currentThemeColor))
+            } catch (_: Exception) {
+                setTextColor(Color.WHITE)
+            }
         }
         container.addView(tvSender)
         container.addView(tv)
@@ -402,12 +424,12 @@ class ChatActivity : AppCompatActivity() {
     }
 
     private fun createBubbleDrawable(accentColor: Int): GradientDrawable {
-        val drawable = GradientDrawable()
-        val bg = blendColors(Color.parseColor("#0A0A0A"), accentColor, 0.06f)
-        drawable.setColor(bg)
-        drawable.cornerRadius = dpToPx(10).toFloat()
-        drawable.setStroke(dpToPx(2), ColorUtils.setAlphaComponent(accentColor, 180))
-        return drawable
+        return GradientDrawable().apply {
+            val bg = blendColors(Color.parseColor("#0A0A0A"), accentColor, 0.06f)
+            setColor(bg)
+            cornerRadius = dpToPx(10).toFloat()
+            setStroke(dpToPx(2), ColorUtils.setAlphaComponent(accentColor, 180))
+        }
     }
 
     private fun loadAvatarInto(target: ImageView, sender: String) {
@@ -415,7 +437,8 @@ class ChatActivity : AppCompatActivity() {
         try {
             val dir = DocumentFile.fromTreeUri(this, uri) ?: return
             val s = sender.lowercase(Locale.getDefault())
-            val candidates = listOf("${s}_icon.png", "${s}_avatar.png", "${s}.png", currentMascotIcon)
+            val candidates =
+                listOf("${s}_icon.png", "${s}_avatar.png", "${s}.png", currentMascotIcon)
             for (name in candidates) {
                 val f = dir.findFile(name) ?: continue
                 if (f.exists()) {
@@ -426,7 +449,8 @@ class ChatActivity : AppCompatActivity() {
                     }
                 }
             }
-        } catch (_: Exception) {}
+        } catch (_: Exception) {
+        }
         target.setImageResource(android.R.color.transparent)
     }
 
@@ -438,7 +462,11 @@ class ChatActivity : AppCompatActivity() {
     }
 
     private fun safeParseColorOrDefault(spec: String?, fallback: Int): Int {
-        return try { Color.parseColor(spec ?: "") } catch (_: Exception) { fallback }
+        return try {
+            Color.parseColor(spec ?: "")
+        } catch (_: Exception) {
+            fallback
+        }
     }
 
     private fun dpToPx(dp: Int): Int {
@@ -464,6 +492,11 @@ class ChatActivity : AppCompatActivity() {
         dialogLines.clear()
         dialogs.clear()
 
+        // Reset to default before parsing, especially contextMap for base.txt
+        if (filename == "base.txt") {
+            contextMap.clear()
+        }
+
         currentMascotName = "Racky"
         currentMascotIcon = "raccoon_icon.png"
         currentThemeColor = "#00FF00"
@@ -471,21 +504,36 @@ class ChatActivity : AppCompatActivity() {
 
         if (folderUri == null) {
             loadFallbackTemplates()
-            updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
+            updateUI(
+                currentMascotName,
+                currentMascotIcon,
+                currentThemeColor,
+                currentThemeBackground
+            )
             return
         }
 
         try {
             val dir = DocumentFile.fromTreeUri(this, folderUri!!) ?: run {
                 loadFallbackTemplates()
-                updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
+                updateUI(
+                    currentMascotName,
+                    currentMascotIcon,
+                    currentThemeColor,
+                    currentThemeBackground
+                )
                 return
             }
 
             val file = dir.findFile(filename)
             if (file == null || !file.exists()) {
                 loadFallbackTemplates()
-                updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
+                updateUI(
+                    currentMascotName,
+                    currentMascotIcon,
+                    currentThemeColor,
+                    currentThemeBackground
+                )
                 return
             }
 
@@ -503,7 +551,8 @@ class ChatActivity : AppCompatActivity() {
                             if (parts.size == 2) {
                                 val keyword = parts[0].trim().lowercase(Locale.ROOT)
                                 val contextFile = parts[1].trim()
-                                if (keyword.isNotEmpty() && contextFile.isNotEmpty()) contextMap[keyword] = contextFile
+                                if (keyword.isNotEmpty() && contextFile.isNotEmpty()) contextMap[keyword] =
+                                    contextFile
                             }
                         }
                         return@forEachLine
@@ -516,9 +565,12 @@ class ChatActivity : AppCompatActivity() {
                             val parts = keywordLine.split("=", limit = 2)
                             if (parts.size == 2) {
                                 val keyword = parts[0].trim().lowercase(Locale.ROOT)
-                                val responses = parts[1].split("\\|".toRegex())
-                                val responseList = responses.mapNotNull { it.trim().takeIf { s -> s.isNotEmpty() } }.toMutableList()
-                                if (keyword.isNotEmpty() && responseList.isNotEmpty()) keywordResponses[keyword] = responseList
+                                val responses = parts[1].split("|")
+                                val responseList =
+                                    responses.mapNotNull { it.trim().takeIf { s -> s.isNotEmpty() } }
+                                        .toMutableList()
+                                if (keyword.isNotEmpty() && responseList.isNotEmpty()) keywordResponses[keyword] =
+                                    responseList
                             }
                         }
                         return@forEachLine
@@ -528,9 +580,12 @@ class ChatActivity : AppCompatActivity() {
                     val parts = l.split("=", limit = 2)
                     if (parts.size == 2) {
                         val trigger = parts[0].trim().lowercase(Locale.ROOT)
-                        val responses = parts[1].split("\\|".toRegex())
-                        val responseList = responses.mapNotNull { it.trim().takeIf { s -> s.isNotEmpty() } }.toMutableList()
-                        if (trigger.isNotEmpty() && responseList.isNotEmpty()) templatesMap[trigger] = responseList
+                        val responses = parts[1].split("|")
+                        val responseList =
+                            responses.mapNotNull { it.trim().takeIf { s -> s.isNotEmpty() } }
+                                .toMutableList()
+                        if (trigger.isNotEmpty() && responseList.isNotEmpty()) templatesMap[trigger] =
+                            responseList
                     }
                 }
             }
@@ -544,7 +599,7 @@ class ChatActivity : AppCompatActivity() {
                         val line = raw.trim()
                         when {
                             line.startsWith("mascot_list=") -> {
-                                val mascots = line.substring("mascot_list=".length).split("\\|".toRegex())
+                                val mascots = line.substring("mascot_list=".length).split("|")
                                 for (mascot in mascots) {
                                     val parts = mascot.split(":")
                                     if (parts.size == 4) {
@@ -558,13 +613,20 @@ class ChatActivity : AppCompatActivity() {
                                     }
                                 }
                             }
-                            line.startsWith("mascot_name=") -> currentMascotName = line.substring("mascot_name=".length).trim()
-                            line.startsWith("mascot_icon=") -> currentMascotIcon = line.substring("mascot_icon=".length).trim()
-                            line.startsWith("theme_color=") -> currentThemeColor = line.substring("theme_color=".length).trim()
-                            line.startsWith("theme_background=") -> currentThemeBackground = line.substring("theme_background=".length).trim()
+                            line.startsWith("mascot_name=") -> currentMascotName =
+                                line.substring("mascot_name=".length).trim()
+                            line.startsWith("mascot_icon=") -> currentMascotIcon =
+                                line.substring("mascot_icon=".length).trim()
+                            line.startsWith("theme_color=") -> currentThemeColor =
+                                line.substring("theme_color=".length).trim()
+                            line.startsWith("theme_background=") -> currentThemeBackground =
+                                line.substring("theme_background=".length).trim()
                             line.startsWith("dialog_lines=") -> {
-                                val lines = line.substring("dialog_lines=".length).split("\\|".toRegex())
-                                for (d in lines) { val t = d.trim(); if (t.isNotEmpty()) dialogLines.add(t) }
+                                val lines =
+                                    line.substring("dialog_lines=".length).split("|")
+                                for (d in lines) {
+                                    val t = d.trim(); if (t.isNotEmpty()) dialogLines.add(t)
+                                }
                             }
                         }
                     }
@@ -575,36 +637,40 @@ class ChatActivity : AppCompatActivity() {
             val dialogFile = dir.findFile("randomreply.txt")
             if (dialogFile != null && dialogFile.exists()) {
                 try {
-                    contentResolver.openInputStream(dialogFile.uri)?.bufferedReader()?.use { reader ->
-                        var currentDialogParser: Dialog? = null
-                        reader.forEachLine { raw ->
-                            val l = raw.trim()
-                            if (l.isEmpty()) return@forEachLine
+                    contentResolver.openInputStream(dialogFile.uri)?.bufferedReader()
+                        ?.use { reader ->
+                            var currentDialogParser: Dialog? = null
+                            reader.forEachLine { raw ->
+                                val l = raw.trim()
+                                if (l.isEmpty()) return@forEachLine
 
-                            if (l.startsWith(";")) {
-                                currentDialogParser?.takeIf { it.replies.isNotEmpty() }?.let { dialogs.add(it) }
-                                currentDialogParser = Dialog(l.substring(1).trim())
-                                return@forEachLine
-                            }
-
-                            if (l.contains(">")) {
-                                val parts = l.split(">", limit = 2)
-                                if (parts.size == 2) {
-                                    val mascot = parts[0].trim()
-                                    val text = parts[1].trim()
-                                    if (mascot.isNotEmpty() && text.isNotEmpty()) {
-                                        val cur = currentDialogParser ?: Dialog("default").also { currentDialogParser = it }
-                                        cur.replies.add(mapOf("mascot" to mascot, "text" to text))
-                                    }
+                                if (l.startsWith(";")) {
+                                    currentDialogParser?.takeIf { it.replies.isNotEmpty() }
+                                        ?.let { dialogs.add(it) }
+                                    currentDialogParser = Dialog(l.substring(1).trim())
+                                    return@forEachLine
                                 }
-                                return@forEachLine
-                            }
 
-                            // fallback short dialog line
-                            dialogLines.add(l)
+                                if (l.contains(">")) {
+                                    val parts = l.split(">", limit = 2)
+                                    if (parts.size == 2) {
+                                        val mascot = parts[0].trim()
+                                        val text = parts[1].trim()
+                                        if (mascot.isNotEmpty() && text.isNotEmpty()) {
+                                            val cur = currentDialogParser
+                                                ?: Dialog("default").also { currentDialogParser = it }
+                                            cur.replies.add(mapOf("mascot" to mascot, "text" to text))
+                                        }
+                                    }
+                                    return@forEachLine
+                                }
+
+                                // fallback short dialog line
+                                dialogLines.add(l)
+                            }
+                            currentDialogParser?.takeIf { it.replies.isNotEmpty() }
+                                ?.let { dialogs.add(it) }
                         }
-                        currentDialogParser?.takeIf { it.replies.isNotEmpty() }?.let { dialogs.add(it) }
-                    }
                 } catch (e: Exception) {
                     showCustomToast("Ошибка чтения randomreply.txt: ${e.message}")
                 }
@@ -612,20 +678,30 @@ class ChatActivity : AppCompatActivity() {
 
             // choose random mascot for base
             if (filename == "base.txt" && mascotList.isNotEmpty()) {
-                val selected = mascotList[random.nextInt(mascotList.size)]
+                val selected = mascotList.random()
                 selected["name"]?.let { currentMascotName = it }
                 selected["icon"]?.let { currentMascotIcon = it }
                 selected["color"]?.let { currentThemeColor = it }
                 selected["background"]?.let { currentThemeBackground = it }
             }
 
-            updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
+            updateUI(
+                currentMascotName,
+                currentMascotIcon,
+                currentThemeColor,
+                currentThemeBackground
+            )
 
         } catch (e: Exception) {
             e.printStackTrace()
             showCustomToast("Ошибка чтения файла: ${e.message}")
             loadFallbackTemplates()
-            updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
+            updateUI(
+                currentMascotName,
+                currentMascotIcon,
+                currentThemeColor,
+                currentThemeBackground
+            )
         }
     }
 
@@ -649,7 +725,8 @@ class ChatActivity : AppCompatActivity() {
             if (!suggestions.contains(low)) suggestions.add(low)
         }
         if (adapter == null) {
-            adapter = ArrayAdapter(this, android.R.layout.simple_dropdown_item_1line, suggestions)
+            adapter =
+                ArrayAdapter(this, android.R.layout.simple_dropdown_item_1line, suggestions)
             queryInput.setAdapter(adapter)
             queryInput.threshold = 1
         } else {
@@ -664,9 +741,9 @@ class ChatActivity : AppCompatActivity() {
         if (dialogLines.isNotEmpty() && random.nextDouble() < 0.3) {
             dialogHandler.postDelayed({
                 if (dialogLines.isEmpty()) return@postDelayed
-                val dialog = dialogLines[random.nextInt(dialogLines.size)]
+                val dialog = dialogLines.random()
                 if (mascotList.isNotEmpty()) {
-                    val rnd = mascotList[random.nextInt(mascotList.size)]
+                    val rnd = mascotList.random()
                     val rndName = rnd["name"] ?: currentMascotName
                     loadMascotMetadata(rndName)
                     addChatMessage(rndName, dialog)
@@ -675,7 +752,7 @@ class ChatActivity : AppCompatActivity() {
         }
         if (mascotList.isNotEmpty() && random.nextDouble() < 0.1) {
             dialogHandler.postDelayed({
-                val rnd = mascotList[random.nextInt(mascotList.size)]
+                val rnd = mascotList.random()
                 val rndName = rnd["name"] ?: currentMascotName
                 loadMascotMetadata(rndName)
                 addChatMessage(rndName, "Эй, мы не закончили!")
@@ -686,7 +763,7 @@ class ChatActivity : AppCompatActivity() {
     private fun startRandomDialog() {
         if (dialogs.isEmpty()) return
         stopDialog()
-        currentDialog = dialogs[random.nextInt(dialogs.size)]
+        currentDialog = dialogs.random()
         currentDialogIndex = 0
         dialogRunnable = object : Runnable {
             override fun run() {
@@ -700,11 +777,19 @@ class ChatActivity : AppCompatActivity() {
                     currentDialogIndex++
                     dialogHandler.postDelayed(this, (random.nextInt(15000) + 10000).toLong())
                 } else {
-                    dialogHandler.postDelayed({ startRandomDialog() }, (random.nextInt(20000) + 5000).toLong())
+                    dialogHandler.postDelayed(
+                        { startRandomDialog() },
+                        (random.nextInt(20000) + 5000).toLong()
+                    )
                 }
             }
         }
-        dialogRunnable?.let { dialogHandler.postDelayed(it, (random.nextInt(15000) + 10000).toLong()) }
+        dialogRunnable?.let {
+            dialogHandler.postDelayed(
+                it,
+                (random.nextInt(15000) + 10000).toLong()
+            )
+        }
     }
 
     private fun stopDialog() {
@@ -725,13 +810,22 @@ class ChatActivity : AppCompatActivity() {
                     reader.forEachLine { raw ->
                         val line = raw.trim()
                         when {
-                            line.startsWith("mascot_name=") -> currentMascotName = line.substring("mascot_name=".length).trim()
-                            line.startsWith("mascot_icon=") -> currentMascotIcon = line.substring("mascot_icon=".length).trim()
-                            line.startsWith("theme_color=") -> currentThemeColor = line.substring("theme_color=".length).trim()
-                            line.startsWith("theme_background=") -> currentThemeBackground = line.substring("theme_background=".length).trim()
+                            line.startsWith("mascot_name=") -> currentMascotName =
+                                line.substring("mascot_name=".length).trim()
+                            line.startsWith("mascot_icon=") -> currentMascotIcon =
+                                line.substring("mascot_icon=".length).trim()
+                            line.startsWith("theme_color=") -> currentThemeColor =
+                                line.substring("theme_color=".length).trim()
+                            line.startsWith("theme_background=") -> currentThemeBackground =
+                                line.substring("theme_background=".length).trim()
                         }
                     }
-                    updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
+                    updateUI(
+                        currentMascotName,
+                        currentMascotIcon,
+                        currentThemeColor,
+                        currentThemeBackground
+                    )
                 }
             } catch (e: Exception) {
                 showCustomToast("Ошибка загрузки метаданных маскота: ${e.message}")
@@ -739,7 +833,12 @@ class ChatActivity : AppCompatActivity() {
         }
     }
 
-    private fun updateUI(mascotName: String, mascotIcon: String, themeColor: String, themeBackground: String) {
+    private fun updateUI(
+        mascotName: String,
+        mascotIcon: String,
+        themeColor: String,
+        themeBackground: String
+    ) {
         title = "Pawstribe - $mascotName"
         mascotTopImage?.let { imageView: ImageView ->
             folderUri?.let { uri ->
@@ -751,13 +850,18 @@ class ChatActivity : AppCompatActivity() {
                             val bitmap = BitmapFactory.decodeStream(inputStream)
                             imageView.setImageBitmap(bitmap)
                             imageView.alpha = 0f
-                            ObjectAnimator.ofFloat(imageView, "alpha", 0f, 1f).setDuration(450).start()
+                            ObjectAnimator.ofFloat(imageView, "alpha", 0f, 1f).setDuration(450)
+                                .start()
                         }
                     }
-                } catch (_: Exception) {}
+                } catch (_: Exception) {
+                }
             }
         }
-        try { messagesContainer.setBackgroundColor(Color.parseColor(themeBackground)) } catch (_: Exception) {}
+        try {
+            messagesContainer.setBackgroundColor(Color.parseColor(themeBackground))
+        } catch (_: Exception) {
+        }
     }
 
     private fun detectContext(input: String): String? {
@@ -794,6 +898,11 @@ class ChatActivity : AppCompatActivity() {
 
     private fun startIdleTimer() {
         lastUserInputTime = System.currentTimeMillis()
-        idleCheckRunnable?.let { dialogHandler.removeCallbacks(it); dialogHandler.postDelayed(it, 5000) }
+        idleCheckRunnable?.let {
+            dialogHandler.removeCallbacks(it); dialogHandler.postDelayed(
+                it,
+                5000
+            )
+        }
     }
 }
