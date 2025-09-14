@@ -8,6 +8,7 @@ import android.os.ParcelFileDescriptor;
 import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.Switch;
 import android.widget.Toast;
 
 import androidx.appcompat.app.AppCompatActivity;
@@ -27,9 +28,11 @@ public class SettingsActivity extends AppCompatActivity {
     private Button backButton;
     private Button saveTemplatesButton;
     private EditText templatesInput;
+    private Switch disableScreenshotsSwitch;
 
     private static final int REQUEST_CODE_OPEN_DIRECTORY = 1;
     private static final String PREF_KEY_FOLDER_URI = "pref_folder_uri";
+    private static final String PREF_KEY_DISABLE_SCREENSHOTS = "pref_disable_screenshots";
 
     private SharedPreferences prefs;
 
@@ -45,9 +48,13 @@ public class SettingsActivity extends AppCompatActivity {
         backButton = findViewById(R.id.backButton);
         saveTemplatesButton = findViewById(R.id.saveTemplatesButton);
         templatesInput = findViewById(R.id.templatesInput);
+        disableScreenshotsSwitch = findViewById(R.id.disableScreenshotsSwitch);
 
         // Initially clear input
         templatesInput.setText("");
+
+        // Load screenshot disable setting
+        disableScreenshotsSwitch.setChecked(prefs.getBoolean(PREF_KEY_DISABLE_SCREENSHOTS, false));
 
         // Try to restore previously persisted folder URI from SharedPreferences
         String saved = prefs.getString(PREF_KEY_FOLDER_URI, null);
@@ -115,9 +122,18 @@ public class SettingsActivity extends AppCompatActivity {
             Toast.makeText(SettingsActivity.this, "Сохранено: " + savedCount + ", пропущено: " + skipped, Toast.LENGTH_SHORT).show();
         });
 
+        disableScreenshotsSwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
+            prefs.edit().putBoolean(PREF_KEY_DISABLE_SCREENSHOTS, isChecked).apply();
+            Toast.makeText(this, isChecked ? "Скриншоты запрещены" : "Скриншоты разрешены", Toast.LENGTH_SHORT).show();
+        });
+
         backButton.setOnClickListener(v -> {
+            // Save screenshot setting before going back
+            prefs.edit().putBoolean(PREF_KEY_DISABLE_SCREENSHOTS, disableScreenshotsSwitch.isChecked()).apply();
+
             Intent resultIntent = new Intent();
             resultIntent.putExtra("folderUri", folderUri);
+            resultIntent.putExtra("disableScreenshots", disableScreenshotsSwitch.isChecked());
             setResult(RESULT_OK, resultIntent);
             finish();
         });
