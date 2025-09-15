@@ -755,7 +755,7 @@ class ChatActivity : AppCompatActivity() {
                     val mascot = parts[0].trim()
                     val text = parts[1].trim()
                     if (mascot.isNotEmpty() && text.isNotEmpty()) {
-                        val cur = currentDialogParser ?: Dialog("default").also { currentDialogParser = it }
+                        var cur = currentDialogParser ?: Dialog("default").also { currentDialogParser = it }
                         cur.replies.add(mapOf("mascot" to mascot, "text" to text))
                     }
                 }
