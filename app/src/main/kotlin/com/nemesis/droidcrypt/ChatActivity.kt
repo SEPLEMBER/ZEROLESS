@@ -167,8 +167,8 @@ class ChatActivity : AppCompatActivity() {
         btnLock?.setOnClickListener { finish() }
         btnTrash?.setOnClickListener { clearChat() }
         btnSettings?.setOnClickListener { startActivity(Intent(this, SettingsActivity::class.java)) }
-        // <-- CHANGED: top envelope opens PostActivity (was toast)
-        btnEnvelopeTop?.setOnClickListener { startActivity(Intent(this, PostActivity::class.java)) }
+        // <-- CHANGED: top envelope opens PostsActivity (was toast)
+        btnEnvelopeTop?.setOnClickListener { startActivity(Intent(this, PostsActivity::class.java)) }
 
         // envelope near input — отправка (send)
         envelopeInputButton?.setOnClickListener {
