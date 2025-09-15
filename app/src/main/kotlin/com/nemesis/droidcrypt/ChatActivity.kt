@@ -4,6 +4,8 @@ import android.animation.ObjectAnimator
 import android.content.Intent
 import android.graphics.*
 import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.ColorDrawable // <-- ADDED
+import android.media.MediaPlayer // <-- ADDED
 import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
@@ -37,7 +39,7 @@ class ChatActivity : AppCompatActivity() {
         private const val MAX_CANDIDATES_FOR_LEV = 40 // <-- ADDED: ограничение числа кандидатов для Levenshtein
 
         // <-- ADDED: Jaccard threshold
-        private const val JACCARD_THRESHOLD = 0.50
+        private const val JACCARD_THRESHOLD = 0.35
     }
 
     /// SECTION: UI и Data — Объявление переменных (UI-элементы, карты шаблонов, состояния маскотов/контекста, idle-данные)
@@ -70,6 +72,10 @@ class ChatActivity : AppCompatActivity() {
     // <-- ADDED: synonyms and stopwords storage
     private val synonymsMap = HashMap<String, String>() // synonym -> canonical
     private val stopwords = HashSet<String>() // normalized stopwords set
+
+    // <-- ADDED: temporary storage for typing indicator view and slash icons
+    private var typingOrangeView: View? = null
+    private val slashTags = "user_slash"
 
     private var currentMascotName = "Racky"
     private var currentMascotIcon = "raccoon_icon.png"
@@ -166,7 +172,8 @@ class ChatActivity : AppCompatActivity() {
         btnLock?.setOnClickListener { finish() }
         btnTrash?.setOnClickListener { clearChat() }
         btnSettings?.setOnClickListener { startActivity(Intent(this, SettingsActivity::class.java)) }
-        btnEnvelopeTop?.setOnClickListener { showCustomToast("Envelope top — заглушка") }
+        // <-- CHANGED: make top envelope open PostActivity (was placeholder)
+        btnEnvelopeTop?.setOnClickListener { startActivity(Intent(this, PostActivity::class.java)) }
 
         // envelope near input — отправка
         envelopeInputButton?.setOnClickListener {
@@ -208,6 +215,9 @@ class ChatActivity : AppCompatActivity() {
             }
         }
         idleCheckRunnable?.let { dialogHandler.postDelayed(it, 5000) }
+
+        // <-- CHANGED: hide actionbar big avatar (we keep side avatars)
+        mascotTopImage?.visibility = View.GONE
     }
 
     override fun onResume() {
@@ -262,21 +272,13 @@ class ChatActivity : AppCompatActivity() {
             tryLoad("trash.png", btnTrash)
             tryLoad("envelope.png", btnEnvelopeTop)
             tryLoad("settings.png", btnSettings)
-            // load top mascot image if available (use currentMascotIcon file)
-            val iconFile = dir.findFile(currentMascotIcon)
-            if (iconFile != null && iconFile.exists()) {
-                contentResolver.openInputStream(iconFile.uri)?.use { ins ->
-                    val bmp = BitmapFactory.decodeStream(ins)
-                    mascotTopImage?.let { imageView ->
-                        imageView.setImageBitmap(bmp)
-                        imageView.alpha = 0f
-                        ObjectAnimator.ofFloat(imageView, "alpha", 0f, 1f).apply {
-                            duration = 400
-                            start()
-                        }
-                    }
-                }
-            }
+
+            // <-- CHANGED: load send.png into the input-area button (if present)
+            tryLoad("send.png", envelopeInputButton)
+
+            // <-- CHANGED: DO NOT load mascotTopImage from folder (we removed big avatar from actionbar)
+            // previous code loaded currentMascotIcon into mascotTopImage — intentionally skipped.
+
         } catch (e: Exception) {
             e.printStackTrace()
             // Optionally show a toast on error
@@ -307,24 +309,25 @@ class ChatActivity : AppCompatActivity() {
             queryCountMap[qKeyForCount] = 1
             lastQuery = qKeyForCount
         }
+        // add user's message immediately (and the UI will add the slashes icon)
         addChatMessage("Ты", userInput)
-        
-        // Показать уведомление "Печатает..." с рандомной задержкой
-        showTypingIndicator()
-        
+
         val repeats = queryCountMap.getOrDefault(qKeyForCount, 0)
         if (repeats >= 5) {
             val spamResp = antiSpamResponses.random()
-            addChatMessage(currentMascotName, spamResp)
+            addChatMessage(currentMascotName, spamResp) // immediate spam response
             startIdleTimer()
             return
         }
+
+        // We'll compute response text but send it with requested delays + typing indicator + sound
         var answered = false
+        var responseToSend: String? = null
 
         // 1. Check for an exact match in the current context (templatesMap keys are normalized)
         templatesMap[qFiltered]?.let { possible ->
             if (possible.isNotEmpty()) {
-                addChatMessage(currentMascotName, possible.random())
+                responseToSend = possible.random()
                 answered = true
             }
         }
@@ -334,7 +337,7 @@ class ChatActivity : AppCompatActivity() {
             for ((keyword, responses) in keywordResponses) {
                 // normalize keyword check
                 if (qFiltered.contains(keyword) && responses.isNotEmpty()) {
-                    addChatMessage(currentMascotName, responses.random())
+                    responseToSend = responses.random()
                     answered = true
                     break
                 }
@@ -382,7 +385,7 @@ class ChatActivity : AppCompatActivity() {
             if (bestByJaccard != null && bestJaccard >= JACCARD_THRESHOLD) {
                 val possible = templatesMap[bestByJaccard]
                 if (!possible.isNullOrEmpty()) {
-                    addChatMessage(currentMascotName, possible.random())
+                    responseToSend = possible.random()
                     answered = true
                 }
             }
@@ -404,7 +407,7 @@ class ChatActivity : AppCompatActivity() {
                 if (bestKey != null && bestDist <= MAX_FUZZY_DISTANCE) {
                     val possible = templatesMap[bestKey]
                     if (!possible.isNullOrEmpty()) {
-                        addChatMessage(currentMascotName, possible.random())
+                        responseToSend = possible.random()
                         answered = true
                     }
                 }
@@ -422,7 +425,7 @@ class ChatActivity : AppCompatActivity() {
                     // Re-check for an answer in the new context after switching
                     templatesMap[qFiltered]?.let { possible ->
                         if (possible.isNotEmpty()) {
-                            addChatMessage(currentMascotName, possible.random())
+                            responseToSend = possible.random()
                             answered = true
                         }
                     }
@@ -430,16 +433,118 @@ class ChatActivity : AppCompatActivity() {
             }
         }
         // 4. If nothing worked, use a fallback response
-        if (!answered) {
-            val fallbackResp = getDummyResponse(qOrig)
-            addChatMessage(currentMascotName, fallbackResp)
+        if (responseToSend == null) {
+            responseToSend = getDummyResponse(qOrig)
         }
+
+        // --- SCHEDULED BEHAVIOR: slashes (added in addChatMessage), orange typing after 5s, bot reply after +4..7s
+        scheduleBotReply(responseToSend)
+
         // Trigger idle events after processing the query
         triggerRandomDialog()
         startIdleTimer()
     }
-    
-    // Новый метод для показа полупрозрачного уведомления "Печатает..."
+
+    // schedule bot reply: show orange typing after 5 sec, then reply after additional 4..7 sec, play sound
+    private fun scheduleBotReply(response: String?) {
+        if (response == null) return
+        // remove any leftover typing view from previous
+        typingOrangeView?.let { v ->
+            (v.parent as? ViewGroup)?.removeView(v)
+            typingOrangeView = null
+        }
+
+        // Show orange typing after 5 seconds
+        dialogHandler.postDelayed({
+            if (typingOrangeView == null) typingOrangeView = showTypingIndicatorOrange()
+        }, 5000)
+
+        // reply after 5s + random(4..7)s
+        val extra = (4000..7000).random()
+        dialogHandler.postDelayed({
+            // remove orange typing
+            typingOrangeView?.let { v ->
+                (v.parent as? ViewGroup)?.removeView(v)
+                typingOrangeView = null
+            }
+            // remove slash icons near user messages
+            removeAllUserSlashIcons()
+            // play Notify.ogg from SAF (best-effort)
+            playNotifySound()
+            // finally add bot message
+            addChatMessage(currentMascotName, response)
+        }, 5000 + extra.toLong())
+    }
+
+    // show orange semi-transparent typing indicator (persistent until removed) — returns the view so caller can remove it
+    private fun showTypingIndicatorOrange(): View {
+        val typingView = TextView(this).apply {
+            text = "печатает..."
+            textSize = 14f
+            setTextColor(Color.parseColor("#FFFFFF"))
+            setBackgroundColor(0x00FFFFFF) // fully transparent background, text is orange
+            alpha = 0.85f
+            setPadding(16, 8, 16, 8)
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                setMargins(0, 16, 0, 0)
+            }
+            // orange text color
+            setTextColor(Color.parseColor("#FFA500"))
+        }
+        messagesContainer.addView(typingView, 0)
+        return typingView
+    }
+
+    // best-effort play Notify.ogg from SAF folder
+    private fun playNotifySound() {
+        val uri = folderUri ?: return
+        try {
+            val dir = DocumentFile.fromTreeUri(this, uri) ?: return
+            val f = dir.findFile("Notify.ogg") ?: dir.findFile("notify.ogg")
+            if (f != null && f.exists()) {
+                val pfd = contentResolver.openFileDescriptor(f.uri, "r") ?: return
+                val mp = MediaPlayer()
+                try {
+                    mp.setDataSource(pfd.fileDescriptor)
+                    pfd.close()
+                    mp.setOnCompletionListener { it.release() }
+                    mp.prepare()
+                    mp.start()
+                } catch (e: Exception) {
+                    try { mp.release() } catch (_: Exception) {}
+                }
+            }
+        } catch (_: Exception) {
+        }
+    }
+
+    // удалить все slash иконки рядом с пользователем (ищем View с tag == slashTags)
+    private fun removeAllUserSlashIcons() {
+        // walk children and remove any view with tag
+        val toRemove = mutableListOf<View>()
+        for (i in 0 until messagesContainer.childCount) {
+            val child = messagesContainer.getChildAt(i)
+            // search recursively for tagged views
+            findTaggedViews(child, toRemove)
+        }
+        for (v in toRemove) {
+            (v.parent as? ViewGroup)?.removeView(v)
+        }
+    }
+    private fun findTaggedViews(view: View, out: MutableList<View>) {
+        if (view.tag == slashTags) {
+            out.add(view)
+            return
+        }
+        if (view is ViewGroup) {
+            for (i in 0 until view.childCount) findTaggedViews(view.getChildAt(i), out)
+        }
+    }
+
+    // Новый метод для показа полупрозрачного уведомления "Печатает..." (старую функцию не трогаю — она используется в другом контексте)
     private fun showTypingIndicator() {
         val typingView = TextView(this).apply {
             text = "печатает..."
@@ -456,14 +561,14 @@ class ChatActivity : AppCompatActivity() {
             }
         }
         messagesContainer.addView(typingView, 0) // Добавляем в начало контейнера (вверху)
-        
+
         // Рандомная задержка 1–3 секунды перед удалением
         val randomDelay = (1000..3000).random().toLong()
         Handler(Looper.getMainLooper()).postDelayed({
             messagesContainer.removeView(typingView)
         }, randomDelay)
     }
-    
+
     private fun clearChat() {
         messagesContainer.removeAllViews()
         queryCountMap.clear()
@@ -641,6 +746,27 @@ class ChatActivity : AppCompatActivity() {
             lp.marginStart = dpToPx(48)
             row.addView(spaceView(), LinearLayout.LayoutParams(0, 0, 1f))
             row.addView(bubble, lp)
+
+            // <-- ADDED: add small slash icon next to user's message (first "/", after 2s -> "//")
+            val slashView = TextView(this).apply {
+                text = "/"
+                textSize = 14f
+                setPadding(dpToPx(6), dpToPx(4), dpToPx(6), dpToPx(4))
+                // small appearance
+                layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                    gravity = Gravity.CENTER_VERTICAL
+                    marginStart = dpToPx(6)
+                }
+                tag = slashTags
+            }
+            row.addView(slashView)
+            // after 2 seconds switch to "//"
+            dialogHandler.postDelayed({
+                try {
+                    slashView.text = "//"
+                } catch (_: Exception) {
+                }
+            }, 2000)
         } else {
             val avatarView = ImageView(this).apply {
                 val size = dpToPx(64)
@@ -913,48 +1039,9 @@ class ChatActivity : AppCompatActivity() {
                 }
             }
 
-            // ---- randomreply.txt parsing (robust)
-            val dialogFile = dir.findFile("randomreply.txt")
-            if (dialogFile != null && dialogFile.exists()) {
-                try {
-                    contentResolver.openInputStream(dialogFile.uri)?.bufferedReader()
-                        ?.use { reader ->
-                            var currentDialogParser: Dialog? = null
-                            reader.forEachLine { raw ->
-                                val l = raw.trim()
-                                if (l.isEmpty()) return@forEachLine
-
-                                if (l.startsWith(";")) {
-                                    currentDialogParser?.takeIf { it.replies.isNotEmpty() }
-                                        ?.let { dialogs.add(it) }
-                                    currentDialogParser = Dialog(l.substring(1).trim())
-                                    return@forEachLine
-                                }
-
-                                if (l.contains(">")) {
-                                    val parts = l.split(">", limit = 2)
-                                    if (parts.size == 2) {
-                                        val mascot = parts[0].trim()
-                                        val text = parts[1].trim()
-                                        if (mascot.isNotEmpty() && text.isNotEmpty()) {
-                                            val cur = currentDialogParser
-                                                ?: Dialog("default").also { currentDialogParser = it }
-                                            cur.replies.add(mapOf("mascot" to mascot, "text" to text))
-                                        }
-                                    }
-                                    return@forEachLine
-                                }
-
-                                // fallback short dialog line
-                                dialogLines.add(l)
-                            }
-                            currentDialogParser?.takeIf { it.replies.isNotEmpty() }
-                                ?.let { dialogs.add(it) }
-                        }
-                } catch (e: Exception) {
-                    showCustomToast("Ошибка чтения randomreply.txt: ${e.message}")
-                }
-            }
+            // ---- randomreply.txt parsing (removed) <-- CHANGED
+            // блок чтения randomreply.txt удалён, т.к. эти случайные реплики не требуются
+            // (dialogFile parser intentionally omitted here)
 
             // choose random mascot for base
             if (filename == "base.txt" && mascotList.isNotEmpty()) {
@@ -1012,10 +1099,18 @@ class ChatActivity : AppCompatActivity() {
             if (!suggestions.contains(low)) suggestions.add(low)
         }
         if (adapter == null) {
-            adapter =
-                ArrayAdapter(this, android.R.layout.simple_dropdown_item_1line, suggestions)
+            // <-- CHANGED: make adapter produce white text for dropdown items
+            adapter = object : ArrayAdapter<String>(this, android.R.layout.simple_dropdown_item_1line, suggestions) {
+                override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
+                    val v = super.getView(position, convertView, parent) as TextView
+                    v.setTextColor(Color.WHITE)
+                    return v
+                }
+            }
             queryInput.setAdapter(adapter)
             queryInput.threshold = 1
+            // set dropdown background to semi-transparent dark so white text is readable
+            queryInput.setDropDownBackgroundDrawable(ColorDrawable(Color.parseColor("#80000000")))
         } else {
             adapter?.clear()
             adapter?.addAll(suggestions)
@@ -1128,24 +1223,9 @@ class ChatActivity : AppCompatActivity() {
         themeBackground: String
     ) {
         title = "Pawstribe - $mascotName"
-        mascotTopImage?.let { imageView: ImageView ->
-            folderUri?.let { uri ->
-                try {
-                    val dir = DocumentFile.fromTreeUri(this, uri)
-                    val iconFile = dir?.findFile(mascotIcon)
-                    if (iconFile != null && iconFile.exists()) {
-                        contentResolver.openInputStream(iconFile.uri)?.use { inputStream ->
-                            val bitmap = BitmapFactory.decodeStream(inputStream)
-                            imageView.setImageBitmap(bitmap)
-                            imageView.alpha = 0f
-                            ObjectAnimator.ofFloat(imageView, "alpha", 0f, 1f).setDuration(450)
-                                .start()
-                        }
-                    }
-                } catch (_: Exception) {
-                }
-            }
-        }
+        // <-- CHANGED: we hide actionbar mascotTopImage (no big avatar)
+        mascotTopImage?.visibility = View.GONE
+
         try {
             messagesContainer.setBackgroundColor(Color.parseColor(themeBackground))
         } catch (_: Exception) {
