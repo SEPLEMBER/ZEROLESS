@@ -20,6 +20,10 @@ import androidx.core.graphics.ColorUtils
 import androidx.documentfile.provider.DocumentFile
 import java.util.*
 import kotlin.math.roundToInt
+import java.util.*
+import kotlin.math.roundToInt
+import kotlin.math.min // <-- ADDED
+import kotlin.math.abs // <-- ADDED
 
 class ChatActivity : AppCompatActivity() {
 
@@ -28,6 +32,9 @@ class ChatActivity : AppCompatActivity() {
         private const val PREF_KEY_DISABLE_SCREENSHOTS = "pref_disable_screenshots"
         private const val MAX_CONTEXT_SWITCH = 6 // Note: This is now unused due to logic simplification
         private const val MAX_MESSAGES = 250
+        private const val MAX_FUZZY_DISTANCE = 2 // <-- ADDED: допустимая дистанция для фаззи-матчинга
+        private const val CANDIDATE_TOKEN_THRESHOLD = 1 // <-- ADDED: минимальное число общих токенов для кандидата
+        private const val MAX_CANDIDATES_FOR_LEV = 40 // <-- ADDED: ограничение числа кандидатов для Levenshtein
     }
 
     /// SECTION: UI и Data — Объявление переменных (UI-элементы, карты шаблонов, состояния маскотов/контекста, idle-данные)
@@ -46,13 +53,16 @@ class ChatActivity : AppCompatActivity() {
 
     // Data structures
     private val fallback = arrayOf("Привет", "Как дела?", "Расскажи о себе", "Выход")
-    private val templatesMap = HashMap<String, MutableList<String>>()
+    private val templatesMap = HashMap<String, MutableList<String>>() // keys are normalized triggers now
     private val contextMap = HashMap<String, String>()
     private val keywordResponses = HashMap<String, MutableList<String>>()
     private val antiSpamResponses = mutableListOf<String>()
     private val mascotList = mutableListOf<Map<String, String>>()
     private val dialogLines = mutableListOf<String>()
     private val dialogs = mutableListOf<Dialog>()
+
+    // <-- ADDED: inverted index token -> list of triggers (normalized)
+    private val invertedIndex = HashMap<String, MutableList<String>>() // token -> list of trigger keys
 
     private var currentMascotName = "Racky"
     private var currentMascotIcon = "raccoon_icon.png"
@@ -161,10 +171,12 @@ class ChatActivity : AppCompatActivity() {
         if (folderUri == null) {
             showCustomToast("Папка не выбрана! Открой настройки и выбери папку.")
             loadFallbackTemplates()
+            rebuildInvertedIndex() // <-- ADDED: build index for fallback
             updateAutoComplete()
             addChatMessage(currentMascotName, "Добро пожаловать!")
         } else {
             loadTemplatesFromFile(currentContext)
+            rebuildInvertedIndex() // <-- ADDED: build index after load
             updateAutoComplete()
             addChatMessage(currentMascotName, "Добро пожаловать!")
         }
@@ -191,6 +203,7 @@ class ChatActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         folderUri?.let { loadTemplatesFromFile(currentContext) }
+        rebuildInvertedIndex() // <-- ADDED: ensure index fresh on resume
         updateAutoComplete()
         idleCheckRunnable?.let {
             dialogHandler.removeCallbacks(it)
@@ -264,24 +277,29 @@ class ChatActivity : AppCompatActivity() {
 /// SECTION: Core Chat Logic — Основная логика чата (processUserQuery, clearChat) — Обработка ввода, антиспам, смена контекста, dummy-ответы; использует templatesMap, keywordResponses
     // === core: process user query ===
     private fun processUserQuery(userInput: String) {
-        val qOrig = userInput.trim().lowercase(Locale.getDefault())
+        // <-- ADDED: normalize input early (remove punctuation, collapse spaces)
+        val qOrigRaw = userInput.trim()
+        val qOrig = normalizeText(qOrigRaw)
+        // store/use normalized keys in queryCountMap to count repeats robustly
+        val qKeyForCount = qOrig
+
         if (qOrig.isEmpty()) return
         lastUserInputTime = System.currentTimeMillis()
         stopDialog()
-        if (qOrig == lastQuery) {
-            val cnt = queryCountMap.getOrDefault(qOrig, 0)
-            queryCountMap[qOrig] = cnt + 1
+        if (qKeyForCount == lastQuery) {
+            val cnt = queryCountMap.getOrDefault(qKeyForCount, 0)
+            queryCountMap[qKeyForCount] = cnt + 1
         } else {
             queryCountMap.clear()
-            queryCountMap[qOrig] = 1
-            lastQuery = qOrig
+            queryCountMap[qKeyForCount] = 1
+            lastQuery = qKeyForCount
         }
         addChatMessage("Ты", userInput)
         
         // Показать уведомление "Печатает..." с рандомной задержкой
         showTypingIndicator()
         
-        val repeats = queryCountMap.getOrDefault(qOrig, 0)
+        val repeats = queryCountMap.getOrDefault(qKeyForCount, 0)
         if (repeats >= 5) {
             val spamResp = antiSpamResponses.random()
             addChatMessage(currentMascotName, spamResp)
@@ -289,16 +307,19 @@ class ChatActivity : AppCompatActivity() {
             return
         }
         var answered = false
-        // 1. Check for an exact match in the current context
+
+        // 1. Check for an exact match in the current context (templatesMap keys are normalized)
         templatesMap[qOrig]?.let { possible ->
             if (possible.isNotEmpty()) {
                 addChatMessage(currentMascotName, possible.random())
                 answered = true
             }
         }
+
         // 2. If no exact match, check for keywords in the current context
         if (!answered) {
             for ((keyword, responses) in keywordResponses) {
+                // normalize keyword check
                 if (qOrig.contains(keyword) && responses.isNotEmpty()) {
                     addChatMessage(currentMascotName, responses.random())
                     answered = true
@@ -306,12 +327,58 @@ class ChatActivity : AppCompatActivity() {
                 }
             }
         }
+
+        // 2.5 FUZZY: Use inverted index to collect candidates and run Levenshtein only on them
+        if (!answered) {
+            // tokenize normalized query
+            val qTokens = tokenize(qOrig)
+            val candidateCounts = HashMap<String, Int>()
+            for (tok in qTokens) {
+                invertedIndex[tok]?.forEach { trig ->
+                    candidateCounts[trig] = candidateCounts.getOrDefault(trig, 0) + 1
+                }
+            }
+            // Prefer candidates with more shared tokens
+            val candidates = if (candidateCounts.isNotEmpty()) {
+                candidateCounts.entries
+                    .filter { it.value >= CANDIDATE_TOKEN_THRESHOLD }
+                    .sortedByDescending { it.value }
+                    .map { it.key }
+                    .take(MAX_CANDIDATES_FOR_LEV)
+            } else {
+                // fallback: if no token overlap, consider all keys but with quick length filter
+                templatesMap.keys.filter { abs(it.length - qOrig.length) <= MAX_FUZZY_DISTANCE }
+                    .take(MAX_CANDIDATES_FOR_LEV)
+            }
+
+            var bestKey: String? = null
+            var bestDist = Int.MAX_VALUE
+            for (key in candidates) {
+                // quick length filter
+                if (abs(key.length - qOrig.length) > MAX_FUZZY_DISTANCE + 1) continue
+                val d = levenshtein(qOrig, key)
+                if (d < bestDist) {
+                    bestDist = d
+                    bestKey = key
+                }
+                if (bestDist == 0) break
+            }
+            if (bestKey != null && bestDist <= MAX_FUZZY_DISTANCE) {
+                val possible = templatesMap[bestKey]
+                if (!possible.isNullOrEmpty()) {
+                    addChatMessage(currentMascotName, possible.random())
+                    answered = true
+                }
+            }
+        } // <-- FUZZY BLOCK ADDED
+
         // 3. If still no answer, try to switch context
         if (!answered) {
             detectContext(qOrig)?.let { newContext ->
                 if (newContext != currentContext) {
                     currentContext = newContext
                     loadTemplatesFromFile(currentContext)
+                    rebuildInvertedIndex() // <-- ADDED: rebuild index after switching context
                     updateAutoComplete()
                     // Re-check for an answer in the new context after switching
                     templatesMap[qOrig]?.let { possible ->
@@ -364,11 +431,12 @@ class ChatActivity : AppCompatActivity() {
         lastQuery = ""
         currentContext = "base.txt"
         loadTemplatesFromFile(currentContext)
+        rebuildInvertedIndex() // <-- ADDED
         updateAutoComplete()
         addChatMessage(currentMascotName, "Чат очищен. Возвращаюсь к началу.")
     }
     private fun detectContext(input: String): String? {
-        val lower = input.lowercase(Locale.ROOT)
+        val lower = normalizeText(input) // <-- ADDED: normalize when detecting context
         for ((keyword, value) in contextMap) {
             if (lower.contains(keyword)) return value
         }
@@ -382,6 +450,70 @@ class ChatActivity : AppCompatActivity() {
             else -> "Не понял запрос. Попробуй другой вариант."
         }
     }
+
+    // <-- ADDED: normalize text (remove punctuation, collapse spaces)
+    private fun normalizeText(s: String): String {
+        // keep letters, digits and spaces only
+        val lower = s.lowercase(Locale.getDefault())
+        val cleaned = lower.replace(Regex("[^\\p{L}\\p{Nd}\\s]"), " ")
+        val collapsed = cleaned.replace(Regex("\\s+"), " ").trim()
+        return collapsed
+    }
+
+    // <-- ADDED: tokenize (split normalized text to tokens)
+    private fun tokenize(s: String): List<String> {
+        if (s.isBlank()) return emptyList()
+        return s.split(Regex("\\s+")).map { it.trim() }.filter { it.isNotEmpty() }
+    }
+
+    // <-- ADDED: rebuild inverted index from current templatesMap
+    private fun rebuildInvertedIndex() {
+        invertedIndex.clear()
+        for (key in templatesMap.keys) {
+            val toks = tokenize(key)
+            for (t in toks) {
+                val list = invertedIndex.getOrPut(t) { mutableListOf() }
+                // avoid duplicates
+                if (!list.contains(key)) list.add(key)
+            }
+        }
+    }
+
+    // <-- ADDED: Levenshtein implementation (optimized with rolling rows and early exit)
+    private fun levenshtein(s: String, t: String): Int {
+        // quick shortcuts
+        if (s == t) return 0
+        val n = s.length
+        val m = t.length
+        if (n == 0) return m
+        if (m == 0) return n
+        // optional early exit if difference too big (speedup)
+        if (abs(n - m) > MAX_FUZZY_DISTANCE + 2) return Int.MAX_VALUE / 2
+
+        // use two rolling rows to save memory
+        val prev = IntArray(m + 1) { it }
+        val curr = IntArray(m + 1)
+
+        for (i in 1..n) {
+            curr[0] = i
+            var minInRow = curr[0]
+            val si = s[i - 1]
+            for (j in 1..m) {
+                val cost = if (si == t[j - 1]) 0 else 1
+                val deletion = prev[j] + 1
+                val insertion = curr[j - 1] + 1
+                val substitution = prev[j - 1] + cost
+                curr[j] = min(min(deletion, insertion), substitution)
+                if (curr[j] < minInRow) minInRow = curr[j]
+            }
+            // early stop if minimum in this row already exceeds threshold
+            if (minInRow > MAX_FUZZY_DISTANCE + 2) return Int.MAX_VALUE / 2
+            // copy curr -> prev
+            for (k in 0..m) prev[k] = curr[k]
+        }
+        return prev[m]
+    }
+    // <-- END ADDED
 
     /// SECTION: UI Messages — Создание и добавление сообщений в чат (addChatMessage, createMessageBubble и утилиты) — UI-логика пузырей, аватаров, скролла; использует currentThemeColor
     // === UI: add message with avatar left for mascots, right-aligned for user ===
@@ -543,6 +675,7 @@ class ChatActivity : AppCompatActivity() {
 
         if (folderUri == null) {
             loadFallbackTemplates()
+            rebuildInvertedIndex() // <-- ADDED
             updateUI(
                 currentMascotName,
                 currentMascotIcon,
@@ -555,6 +688,7 @@ class ChatActivity : AppCompatActivity() {
         try {
             val dir = DocumentFile.fromTreeUri(this, folderUri!!) ?: run {
                 loadFallbackTemplates()
+                rebuildInvertedIndex() // <-- ADDED
                 updateUI(
                     currentMascotName,
                     currentMascotIcon,
@@ -567,6 +701,7 @@ class ChatActivity : AppCompatActivity() {
             val file = dir.findFile(filename)
             if (file == null || !file.exists()) {
                 loadFallbackTemplates()
+                rebuildInvertedIndex() // <-- ADDED
                 updateUI(
                     currentMascotName,
                     currentMascotIcon,
@@ -618,7 +753,9 @@ class ChatActivity : AppCompatActivity() {
                     if (!l.contains("=")) return@forEachLine
                     val parts = l.split("=", limit = 2)
                     if (parts.size == 2) {
-                        val trigger = parts[0].trim().lowercase(Locale.ROOT)
+                        // <-- ADDED: normalize trigger key (remove punctuation etc)
+                        val triggerRaw = parts[0].trim()
+                        val trigger = normalizeText(triggerRaw)
                         val responses = parts[1].split("|")
                         val responseList =
                             responses.mapNotNull { it.trim().takeIf { s -> s.isNotEmpty() } }
@@ -724,6 +861,9 @@ class ChatActivity : AppCompatActivity() {
                 selected["background"]?.let { currentThemeBackground = it }
             }
 
+            // <-- ADDED: build inverted index once templatesMap filled
+            rebuildInvertedIndex()
+
             updateUI(
                 currentMascotName,
                 currentMascotIcon,
@@ -735,6 +875,7 @@ class ChatActivity : AppCompatActivity() {
             e.printStackTrace()
             showCustomToast("Ошибка чтения файла: ${e.message}")
             loadFallbackTemplates()
+            rebuildInvertedIndex() // <-- ADDED
             updateUI(
                 currentMascotName,
                 currentMascotIcon,
@@ -751,14 +892,15 @@ class ChatActivity : AppCompatActivity() {
         dialogs.clear()
         dialogLines.clear()
         mascotList.clear()
-        templatesMap["привет"] = mutableListOf("Привет! Чем могу помочь?", "Здравствуй!")
-        templatesMap["как дела"] = mutableListOf("Всё отлично, а у тебя?", "Нормально, как дела?")
+        // <-- ADDED: store normalized keys in fallback as well
+        templatesMap[normalizeText("привет")] = mutableListOf("Привет! Чем могу помочь?", "Здравствуй!")
+        templatesMap[normalizeText("как дела")] = mutableListOf("Всё отлично, а у тебя?", "Нормально, как дела?")
         keywordResponses["спасибо"] = mutableListOf("Рад, что помог!", "Всегда пожалуйста!")
     }
 
     private fun updateAutoComplete() {
         val suggestions = mutableListOf<String>()
-        suggestions.addAll(templatesMap.keys)
+        suggestions.addAll(templatesMap.keys) // keys are normalized triggers
         for (s in fallback) {
             val low = s.lowercase(Locale.ROOT)
             if (!suggestions.contains(low)) suggestions.add(low)
