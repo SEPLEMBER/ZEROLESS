@@ -932,8 +932,8 @@ class ChatActivity : AppCompatActivity() {
                 }
                 // simple background for better readability (fallback)
                 try {
-                    val isUser = sender.lowercase(Locale.getDefault()) == "ты"
-                    setBackgroundResource(if (isUser) R.drawable.bg_message_user else R.drawable.bg_message_bot)
+                    val accent = safeParseColorOrDefault(currentThemeColor, Color.parseColor("#00FF00"))
+tv.background = createBubbleDrawable(accent)
                 } catch (_: Exception) {}
             }
             messagesContainer.addView(tv)
