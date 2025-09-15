@@ -22,14 +22,14 @@ class PostsActivity : AppCompatActivity() {
 
         startChat.setOnClickListener {
             // Просто стартуем ChatActivity — он сам попытается взять folderUri из SharedPreferences / persisted permissions
-            val i = Intent(this@MainActivity, ChatActivity::class.java)
+            val i = Intent(this@PostsActivity, ChatActivity::class.java)
             startActivity(i)
         }
 
         openSettings.setOnClickListener {
             // Запускаем SettingsActivity для выбора папки и редактирования шаблонов.
             // Ожидаем результат — при возвращении можем сразу открыть чат с переданным folderUri.
-            val i = Intent(this@MainActivity, SettingsActivity::class.java)
+            val i = Intent(this@PostsActivity, SettingsActivity::class.java)
             startActivityForResult(i, REQUEST_CODE_SETTINGS)
         }
     }
@@ -40,7 +40,7 @@ class PostsActivity : AppCompatActivity() {
         if (requestCode == REQUEST_CODE_SETTINGS && resultCode == RESULT_OK && data != null) {
             // Если Settings вернул folderUri — передаём его в ChatActivity и открываем чат
             val folderUri = data.getParcelableExtra<Uri>("folderUri")
-            val i = Intent(this@MainActivity, ChatActivity::class.java)
+            val i = Intent(this@PostsActivity, ChatActivity::class.java)
             if (folderUri != null) {
                 i.putExtra("folderUri", folderUri)
             }
