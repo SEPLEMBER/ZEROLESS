@@ -1,84 +1,119 @@
 <?xml version="1.0" encoding="utf-8"?>
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/chat_layout"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    android:orientation="vertical"
     android:background="@color/background_black"
-    android:padding="16dp">
+    android:padding="8dp">
 
+    <!-- Top matte bar: icons right (no title, no large mascot image, no AppCompat left icon) -->
+    <LinearLayout
+        android:id="@+id/topBar"
+        android:layout_width="match_parent"
+        android:layout_height="72dp"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingStart="8dp"
+        android:paddingEnd="8dp"
+        android:background="@color/card_dark">
+
+        <View
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1" />
+
+        <ImageButton
+            android:id="@+id/btn_lock"
+            android:layout_width="56dp"
+            android:layout_height="56dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="Lock"
+            android:scaleType="centerInside"
+            android:adjustViewBounds="true" />
+
+        <ImageButton
+            android:id="@+id/btn_trash"
+            android:layout_width="56dp"
+            android:layout_height="56dp"
+            android:layout_marginStart="6dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="Trash"
+            android:scaleType="centerInside"
+            android:adjustViewBounds="true" />
+
+        <ImageButton
+            android:id="@+id/btn_envelope_top"
+            android:layout_width="56dp"
+            android:layout_height="56dp"
+            android:layout_marginStart="6dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="Envelope"
+            android:scaleType="centerInside"
+            android:adjustViewBounds="true" />
+
+        <ImageButton
+            android:id="@+id/btn_settings"
+            android:layout_width="56dp"
+            android:layout_height="56dp"
+            android:layout_marginStart="6dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="Settings"
+            android:scaleType="centerInside"
+            android:adjustViewBounds="true" />
+    </LinearLayout>
+
+    <!-- Chat area background slightly lighter than page -->
+    <ScrollView
+        android:id="@+id/scrollView"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:fillViewport="true"
+        android:background="@color/chat_area_bg"
+        android:padding="8dp">
+
+        <LinearLayout
+            android:id="@+id/chatMessagesContainer"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical" />
+    </ScrollView>
+
+    <!-- Input row: text + envelope (send) -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="vertical">
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingTop="8dp"
+        android:background="@color/input_bg"
+        android:padding="8dp">
 
-        <TextView
-            android:id="@+id/settingsTitle"
-            android:layout_width="wrap_content"
+        <AutoCompleteTextView
+            android:id="@+id/queryInput"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:text="Настройки"
-            android:textColor="@color/text_green"
-            android:textSize="20sp"
-            android:layout_marginBottom="12dp" />
-
-        <!-- Кнопка выбора папки на SD -->
-        <Button
-            android:id="@+id/selectFolderButton"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Выбрать папку на SD"
-            android:textColor="@color/text_green"
-            android:background="@color/button_transparent"
-            android:layout_marginBottom="12dp" />
-
-        <EditText
-            android:id="@+id/templatesInput"
-            android:layout_width="match_parent"
-            android:layout_height="200dp"
-            android:gravity="top|start"
+            android:layout_weight="1"
+            android:hint="Напиши сообщение..."
+            android:textColor="@color/mascot_racky_text"
+            android:textColorHint="@color/mascot_racky_text"
+            android:background="@android:color/transparent"
+            android:padding="8dp"
             android:inputType="textMultiLine"
+            android:maxLines="3"
             android:scrollbars="vertical"
-            android:hint="@string/templates_hint"
-            android:textColor="@color/text_green"
-            android:textColorHint="#809F809F"
-            android:background="@color/card_dark"
-            android:padding="8dp" />
+            android:popupBackground="#80000000" />
 
-        <Button
-            android:id="@+id/saveTemplatesButton"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="@string/save_templates"
-            android:textColor="@color/text_green"
-            android:background="@color/button_transparent"
-            android:layout_marginTop="12dp" />
-
-        <Button
-            android:id="@+id/clearTemplatesButton"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Очистить шаблоны"
-            android:textColor="@color/text_green"
-            android:background="@color/button_transparent"
-            android:layout_marginTop="8dp" />
-
-        <!-- Переключатель для запрета/разрешения скриншотов -->
-        <Switch
-            android:id="@+id/disableScreenshotsSwitch"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Запретить скриншоты"
-            android:textColor="@color/text_green"
-            android:textSize="16sp"
-            android:layout_marginTop="12dp"
-            android:thumbTint="@color/text_green"
-            android:trackTint="#809F809F" />
-
-        <Button
-            android:id="@+id/backButton"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="@string/back"
-            android:textColor="@color/text_green"
-            android:background="@color/button_transparent"
-            android:layout_marginTop="8dp" />
+        <ImageButton
+            android:id="@+id/envelope_button"
+            android:layout_width="56dp"
+            android:layout_height="56dp"
+            android:layout_marginStart="8dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="Send"
+            android:scaleType="centerInside"
+            android:adjustViewBounds="true" />
     </LinearLayout>
-</ScrollView>
+
+</LinearLayout>
