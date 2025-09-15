@@ -7,7 +7,7 @@
     android:background="@color/background_black"
     android:padding="8dp">
 
-    <!-- Top matte bar: icons right (no title, no large mascot image, no AppCompat left icon) -->
+    <!-- Top bar: Mascot image + icons -->
     <LinearLayout
         android:id="@+id/topBar"
         android:layout_width="match_parent"
@@ -17,6 +17,15 @@
         android:paddingStart="8dp"
         android:paddingEnd="8dp"
         android:background="@color/card_dark">
+
+        <!-- Mascot Image -->
+        <ImageView
+            android:id="@+id/mascot_top_image"
+            android:layout_width="64dp"
+            android:layout_height="64dp"
+            android:layout_marginEnd="8dp"
+            android:scaleType="centerCrop"
+            android:contentDescription="Mascot Top"/>
 
         <View
             android:layout_width="0dp"
