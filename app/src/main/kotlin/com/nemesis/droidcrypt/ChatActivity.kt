@@ -568,18 +568,20 @@ class ChatActivity : AppCompatActivity() {
 
     private fun createMessageBubble(sender: String, text: String): LinearLayout {
         val accent = safeParseColorOrDefault(currentThemeColor, Color.parseColor("#00FF00"))
-        return LinearLayout(this).apply {
+        return LinearLayout(this@ChatActivity).apply {
             orientation = LinearLayout.VERTICAL
             background = createBubbleDrawable(accent)
             val pad = dpToPx(10)
             setPadding(pad, pad, pad, pad)
 
-            addView(TextView(this).apply {
+            // <-- FIXED: Explicitly use Activity context for TextViews
+            addView(TextView(this@ChatActivity).apply {
                 this.text = "$sender:"
                 textSize = 12f
                 setTextColor(Color.parseColor("#AAAAAA"))
             })
-            addView(TextView(this).apply {
+            // <-- FIXED: Explicitly use Activity context for TextViews
+            addView(TextView(this@ChatActivity).apply {
                 this.text = text
                 textSize = 16f
                 setTextIsSelectable(true)
@@ -884,10 +886,12 @@ class ChatActivity : AppCompatActivity() {
     /// SECTION: Utils
     private fun showCustomToast(message: String) {
         try {
-            val layout = layoutInflater.inflate(R.layout.custom_toast, findViewById(R.id.custom_toast_container))
+            // <-- FIXED: The second argument for inflate should be null for a Toast.
+            val layout = layoutInflater.inflate(R.layout.custom_toast, null)
             layout.findViewById<TextView>(R.id.customToastText).text = message
             Toast(applicationContext).apply {
                 duration = Toast.LENGTH_SHORT
+                @Suppress("DEPRECATION")
                 view = layout
                 show()
             }
