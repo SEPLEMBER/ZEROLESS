@@ -35,6 +35,9 @@ class ChatActivity : AppCompatActivity() {
         private const val MAX_FUZZY_DISTANCE = 5 // <-- ADDED: допустимая дистанция для фаззи-матчинга
         private const val CANDIDATE_TOKEN_THRESHOLD = 1 // <-- ADDED: минимальное число общих токенов для кандидата
         private const val MAX_CANDIDATES_FOR_LEV = 40 // <-- ADDED: ограничение числа кандидатов для Levenshtein
+
+        // <-- ADDED: Jaccard threshold
+        private const val JACCARD_THRESHOLD = 0.50
     }
 
     /// SECTION: UI и Data — Объявление переменных (UI-элементы, карты шаблонов, состояния маскотов/контекста, idle-данные)
@@ -63,6 +66,10 @@ class ChatActivity : AppCompatActivity() {
 
     // <-- ADDED: inverted index token -> list of triggers (normalized)
     private val invertedIndex = HashMap<String, MutableList<String>>() // token -> list of trigger keys
+
+    // <-- ADDED: synonyms and stopwords storage
+    private val synonymsMap = HashMap<String, String>() // synonym -> canonical
+    private val stopwords = HashSet<String>() // normalized stopwords set
 
     private var currentMascotName = "Racky"
     private var currentMascotIcon = "raccoon_icon.png"
@@ -133,6 +140,9 @@ class ChatActivity : AppCompatActivity() {
             }
         } catch (_: Exception) {
         }
+
+        // <-- ADDED: load synonyms & stopwords early (if folderUri available this will read files)
+        loadSynonymsAndStopwords()
 
         // screenshots lock from prefs
         try {
@@ -280,10 +290,13 @@ class ChatActivity : AppCompatActivity() {
         // <-- ADDED: normalize input early (remove punctuation, collapse spaces)
         val qOrigRaw = userInput.trim()
         val qOrig = normalizeText(qOrigRaw)
-        // store/use normalized keys in queryCountMap to count repeats robustly
-        val qKeyForCount = qOrig
+        // <-- ADDED: filter stopwords and map synonyms producing tokens and joined string
+        val (qTokensFiltered, qFiltered) = filterStopwordsAndMapSynonyms(qOrig)
 
-        if (qOrig.isEmpty()) return
+        // store/use normalized keys in queryCountMap to count repeats robustly
+        val qKeyForCount = qFiltered
+
+        if (qFiltered.isEmpty()) return
         lastUserInputTime = System.currentTimeMillis()
         stopDialog()
         if (qKeyForCount == lastQuery) {
@@ -309,7 +322,7 @@ class ChatActivity : AppCompatActivity() {
         var answered = false
 
         // 1. Check for an exact match in the current context (templatesMap keys are normalized)
-        templatesMap[qOrig]?.let { possible ->
+        templatesMap[qFiltered]?.let { possible ->
             if (possible.isNotEmpty()) {
                 addChatMessage(currentMascotName, possible.random())
                 answered = true
@@ -320,7 +333,7 @@ class ChatActivity : AppCompatActivity() {
         if (!answered) {
             for ((keyword, responses) in keywordResponses) {
                 // normalize keyword check
-                if (qOrig.contains(keyword) && responses.isNotEmpty()) {
+                if (qFiltered.contains(keyword) && responses.isNotEmpty()) {
                     addChatMessage(currentMascotName, responses.random())
                     answered = true
                     break
@@ -330,8 +343,8 @@ class ChatActivity : AppCompatActivity() {
 
         // 2.5 FUZZY: Use inverted index to collect candidates and run Levenshtein only on them
         if (!answered) {
-            // tokenize normalized query
-            val qTokens = tokenize(qOrig)
+            // tokenize normalized query (we already have filtered tokens)
+            val qTokens = if (qTokensFiltered.isNotEmpty()) qTokensFiltered else tokenize(qFiltered)
             val candidateCounts = HashMap<String, Int>()
             for (tok in qTokens) {
                 invertedIndex[tok]?.forEach { trig ->
@@ -347,41 +360,67 @@ class ChatActivity : AppCompatActivity() {
                     .take(MAX_CANDIDATES_FOR_LEV)
             } else {
                 // fallback: if no token overlap, consider all keys but with quick length filter
-                templatesMap.keys.filter { abs(it.length - qOrig.length) <= MAX_FUZZY_DISTANCE }
+                templatesMap.keys.filter { abs(it.length - qFiltered.length) <= MAX_FUZZY_DISTANCE }
                     .take(MAX_CANDIDATES_FOR_LEV)
             }
 
-            var bestKey: String? = null
-            var bestDist = Int.MAX_VALUE
+            // <-- ADDED: Try Jaccard first on token-sets (stopwords removed / synonyms mapped)
+            var bestByJaccard: String? = null
+            var bestJaccard = 0.0
+            val qSet = qTokens.toSet()
             for (key in candidates) {
-                // quick length filter
-                if (abs(key.length - qOrig.length) > MAX_FUZZY_DISTANCE + 1) continue
-                val d = levenshtein(qOrig, key)
-                if (d < bestDist) {
-                    bestDist = d
-                    bestKey = key
+                val keyTokens = filterStopwordsAndMapSynonyms(key).first.toSet()
+                if (keyTokens.isEmpty()) continue
+                val inter = qSet.intersect(keyTokens).size.toDouble()
+                val union = qSet.union(keyTokens).size.toDouble()
+                val j = if (union == 0.0) 0.0 else inter / union
+                if (j > bestJaccard) {
+                    bestJaccard = j
+                    bestByJaccard = key
                 }
-                if (bestDist == 0) break
             }
-            if (bestKey != null && bestDist <= MAX_FUZZY_DISTANCE) {
-                val possible = templatesMap[bestKey]
+            if (bestByJaccard != null && bestJaccard >= JACCARD_THRESHOLD) {
+                val possible = templatesMap[bestByJaccard]
                 if (!possible.isNullOrEmpty()) {
                     addChatMessage(currentMascotName, possible.random())
                     answered = true
+                }
+            }
+
+            // fallback to Levenshtein if Jaccard didn't decide
+            if (!answered) {
+                var bestKey: String? = null
+                var bestDist = Int.MAX_VALUE
+                for (key in candidates) {
+                    // quick length filter
+                    if (abs(key.length - qFiltered.length) > MAX_FUZZY_DISTANCE + 1) continue
+                    val d = levenshtein(qFiltered, key)
+                    if (d < bestDist) {
+                        bestDist = d
+                        bestKey = key
+                    }
+                    if (bestDist == 0) break
+                }
+                if (bestKey != null && bestDist <= MAX_FUZZY_DISTANCE) {
+                    val possible = templatesMap[bestKey]
+                    if (!possible.isNullOrEmpty()) {
+                        addChatMessage(currentMascotName, possible.random())
+                        answered = true
+                    }
                 }
             }
         } // <-- FUZZY BLOCK ADDED
 
         // 3. If still no answer, try to switch context
         if (!answered) {
-            detectContext(qOrig)?.let { newContext ->
+            detectContext(qFiltered)?.let { newContext ->
                 if (newContext != currentContext) {
                     currentContext = newContext
                     loadTemplatesFromFile(currentContext)
                     rebuildInvertedIndex() // <-- ADDED: rebuild index after switching context
                     updateAutoComplete()
                     // Re-check for an answer in the new context after switching
-                    templatesMap[qOrig]?.let { possible ->
+                    templatesMap[qFiltered]?.let { possible ->
                         if (possible.isNotEmpty()) {
                             addChatMessage(currentMascotName, possible.random())
                             answered = true
@@ -466,11 +505,71 @@ class ChatActivity : AppCompatActivity() {
         return s.split(Regex("\\s+")).map { it.trim() }.filter { it.isNotEmpty() }
     }
 
-    // <-- ADDED: rebuild inverted index from current templatesMap
+    // <-- ADDED: load synonyms and stopwords from folder via SAF
+    private fun loadSynonymsAndStopwords() {
+        synonymsMap.clear()
+        stopwords.clear()
+        val uri = folderUri ?: return
+        try {
+            val dir = DocumentFile.fromTreeUri(this, uri) ?: return
+
+            // synonims.txt (note: filename spelled as in your request)
+            val synFile = dir.findFile("synonims.txt")
+            if (synFile != null && synFile.exists()) {
+                contentResolver.openInputStream(synFile.uri)?.bufferedReader()?.use { reader ->
+                    reader.forEachLine { raw ->
+                        var l = raw.trim()
+                        if (l.isEmpty()) return@forEachLine
+                        // allow lines wrapped in * or not
+                        if (l.startsWith("*") && l.endsWith("*") && l.length > 1) {
+                            l = l.substring(1, l.length - 1)
+                        }
+                        val parts = l.split(";").map { normalizeText(it).trim() }.filter { it.isNotEmpty() }
+                        if (parts.isEmpty()) return@forEachLine
+                        // choose last element as canonical
+                        val canonical = parts.last()
+                        for (p in parts) {
+                            synonymsMap[p] = canonical
+                        }
+                    }
+                }
+            }
+
+            // stopwords.txt with ^ separators: ^я^бы^хотел^узнать^ ...
+            val stopFile = dir.findFile("stopwords.txt")
+            if (stopFile != null && stopFile.exists()) {
+                contentResolver.openInputStream(stopFile.uri)?.bufferedReader()?.use { reader ->
+                    val all = reader.readText()
+                    if (all.isNotEmpty()) {
+                        val parts = all.split("^").map { normalizeText(it).trim() }.filter { it.isNotEmpty() }
+                        for (p in parts) stopwords.add(p)
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            // ignore silently — allow app to continue without synonyms/stopwords
+        }
+    }
+
+    // <-- ADDED: filter stopwords and map synonyms for an input string
+    // returns Pair(listOfTokens, joinedNormalizedString)
+    private fun filterStopwordsAndMapSynonyms(input: String): Pair<List<String>, String> {
+        val toks = tokenize(input)
+        val mapped = toks.map { tok ->
+            val n = normalizeText(tok)
+            val s = synonymsMap[n] ?: n
+            s
+        }.filter { it.isNotEmpty() && !stopwords.contains(it) }
+        val joined = mapped.joinToString(" ")
+        return Pair(mapped, joined)
+    }
+
+    // <-- ADDED: rebuild inverted index from current templatesMap (respect stopwords & synonyms)
     private fun rebuildInvertedIndex() {
         invertedIndex.clear()
         for (key in templatesMap.keys) {
-            val toks = tokenize(key)
+            // key already normalized, further filter and map synonyms
+            val toks = filterStopwordsAndMapSynonyms(key).first
             for (t in toks) {
                 val list = invertedIndex.getOrPut(t) { mutableListOf() }
                 // avoid duplicates
@@ -673,6 +772,9 @@ class ChatActivity : AppCompatActivity() {
         currentThemeColor = "#00FF00"
         currentThemeBackground = "#000000"
 
+        // <-- ADDED: ensure synonyms/stopwords are loaded (in case folderUri was set later)
+        loadSynonymsAndStopwords()
+
         if (folderUri == null) {
             loadFallbackTemplates()
             rebuildInvertedIndex() // <-- ADDED
@@ -756,11 +858,13 @@ class ChatActivity : AppCompatActivity() {
                         // <-- ADDED: normalize trigger key (remove punctuation etc)
                         val triggerRaw = parts[0].trim()
                         val trigger = normalizeText(triggerRaw)
+                        // <-- ADDED: additionally filter stopwords and map synonyms for trigger key when storing
+                        val triggerFiltered = filterStopwordsAndMapSynonyms(trigger).second
                         val responses = parts[1].split("|")
                         val responseList =
                             responses.mapNotNull { it.trim().takeIf { s -> s.isNotEmpty() } }
                                 .toMutableList()
-                        if (trigger.isNotEmpty() && responseList.isNotEmpty()) templatesMap[trigger] =
+                        if (triggerFiltered.isNotEmpty() && responseList.isNotEmpty()) templatesMap[triggerFiltered] =
                             responseList
                     }
                 }
@@ -892,9 +996,11 @@ class ChatActivity : AppCompatActivity() {
         dialogs.clear()
         dialogLines.clear()
         mascotList.clear()
-        // <-- ADDED: store normalized keys in fallback as well
-        templatesMap[normalizeText("привет")] = mutableListOf("Привет! Чем могу помочь?", "Здравствуй!")
-        templatesMap[normalizeText("как дела")] = mutableListOf("Всё отлично, а у тебя?", "Нормально, как дела?")
+        // <-- ADDED: store normalized keys in fallback as well (respect stopwords/synonyms)
+        val t1 = filterStopwordsAndMapSynonyms(normalizeText("привет")).second
+        templatesMap[t1] = mutableListOf("Привет! Чем могу помочь?", "Здравствуй!")
+        val t2 = filterStopwordsAndMapSynonyms(normalizeText("как дела")).second
+        templatesMap[t2] = mutableListOf("Всё отлично, а у тебя?", "Нормально, как дела?")
         keywordResponses["спасибо"] = mutableListOf("Рад, что помог!", "Всегда пожалуйста!")
     }
 
