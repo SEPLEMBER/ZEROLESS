@@ -7,7 +7,7 @@ import android.view.View
 import android.widget.Button
 import androidx.appcompat.app.AppCompatActivity
 
-class MainActivity : AppCompatActivity() {
+class PostsActivity : AppCompatActivity() {
 
     companion object {
         private const val REQUEST_CODE_SETTINGS = 1001
