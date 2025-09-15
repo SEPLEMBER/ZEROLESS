@@ -848,28 +848,22 @@ class ChatActivity : AppCompatActivity() {
         dialogRunnable = null
     }
 
+    // <-- FIXED: Refactored this function to remove duplicated logic and resolve a subtle compiler error.
     private fun loadMascotMetadata(mascotName: String) {
-        if (folderUri == null) return
-        val metadataFilename = "${mascotName.lowercase(Locale.ROOT)}_metadata.txt"
-        val dir = DocumentFile.fromTreeUri(this, folderUri!!) ?: return
-        val metadataFile = dir.findFile(metadataFilename)
-        if (metadataFile != null && metadataFile.exists()) {
-            try {
-                contentResolver.openInputStream(metadataFile.uri)?.bufferedReader()?.useLines { lines ->
-                    lines.forEach { line ->
-                        val t = line.trim()
-                        fun getValue(prefix: String) = t.substring(prefix.length).trim()
-                        when {
-                            t.startsWith("mascot_name=") -> currentMascotName = getValue("mascot_name=")
-                            t.startsWith("mascot_icon=") -> currentMascotIcon = getValue("mascot_icon=")
-                            t.startsWith("theme_color=") -> currentThemeColor = getValue("theme_color=")
-                            t.startsWith("theme_background=") -> currentThemeBackground = getValue("theme_background=")
-                        }
+        folderUri?.let { uri ->
+            val dir = DocumentFile.fromTreeUri(this, uri) ?: return
+            val metadataFilename = "${mascotName.lowercase(Locale.ROOT)}_metadata.txt"
+            dir.findFile(metadataFilename)?.uri?.let { metadataUri ->
+                try {
+                    contentResolver.openInputStream(metadataUri)?.bufferedReader()?.useLines { lines ->
+                        // Reuse the existing parsing function instead of duplicating logic.
+                        lines.forEach(::parseMetadataLine)
                     }
+                    // After parsing all lines, update the UI.
                     updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
+                } catch (e: Exception) {
+                    showCustomToast("Ошибка загрузки метаданных маскота: ${e.message}")
                 }
-            } catch (e: Exception) {
-                showCustomToast("Ошибка загрузки метаданных маскота: ${e.message}")
             }
         }
     }
