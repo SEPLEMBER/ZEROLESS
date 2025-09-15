@@ -1,4 +1,4 @@
-package com.pawscribe.chat
+package com.nemesis.chat
 
 import android.animation.ObjectAnimator
 import android.content.Intent
