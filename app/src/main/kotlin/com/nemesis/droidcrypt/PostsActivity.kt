@@ -15,7 +15,7 @@ class PostsActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_main)
+        setContentView(R.layout.activity_posts)
 
         val startChat = findViewById<Button>(R.id.startChatButton)
         val openSettings = findViewById<Button>(R.id.openSettingsButton)
