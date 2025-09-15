@@ -25,4 +25,10 @@
     <color name="bubble_bg">#0B0B0D</color>
     <color name="chat_area_bg">#040404</color> <!-- чуть светлее чем background -->
     <color name="input_bg">#070707</color>
+
+    <!-- ADDED: popup background for autocomplete (semi-transparent dark) -->
+    <color name="popup_bg">#80000000</color>
+
+    <!-- ADDED: orange color for typing indicator -->
+    <color name="typing_orange">#FFA500</color>
 </resources>
