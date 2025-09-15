@@ -801,10 +801,10 @@ class ChatActivity : AppCompatActivity() {
             }
             queryInput.setAdapter(adapter)
             queryInput.threshold = 1
-        } else {
-            adapter?.clear()
-            adapter?.addAll(suggestions)
-            adapter?.notifyDataSetChanged()
+} else {
+    adapter?.clear()
+    adapter?.addAll(suggestions.toList())
+    adapter?.notifyDataSetChanged()
         }
         
         try {
