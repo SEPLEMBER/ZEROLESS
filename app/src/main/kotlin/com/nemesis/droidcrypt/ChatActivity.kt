@@ -76,7 +76,6 @@ class ChatActivity : AppCompatActivity() {
     private var currentDialog: Dialog? = null
     private var currentDialogIndex = 0
     private val dialogHandler = Handler(Looper.getMainLooper())
-    // <-- FIXED: Separate handler for query responses to prevent race conditions
     private val responseHandler = Handler(Looper.getMainLooper())
     private var dialogRunnable: Runnable? = null
     private var idleCheckRunnable: Runnable? = null
@@ -131,7 +130,6 @@ class ChatActivity : AppCompatActivity() {
 
         loadSynonymsAndStopwords()
 
-        // <-- FIXED: Simplified window background logic
         try {
             val resId = resources.getIdentifier("background_black", "color", packageName)
             val bgColor = if (resId != 0) getColor(resId) else Color.BLACK
@@ -209,8 +207,8 @@ class ChatActivity : AppCompatActivity() {
     override fun onPause() {
         super.onPause()
         stopDialog()
-        responseHandler.removeCallbacksAndMessages(null) // Cancel pending responses
-        idleCheckRunnable?.let { dialogHandler.removeCallbacks(it) } // Stop idle check
+        responseHandler.removeCallbacksAndMessages(null)
+        idleCheckRunnable?.let { dialogHandler.removeCallbacks(it) }
     }
 
     /// SECTION: Toolbar Helpers
@@ -242,7 +240,6 @@ class ChatActivity : AppCompatActivity() {
             tryLoad("envelope.png", btnEnvelopeTop)
             tryLoad("settings.png", btnSettings)
 
-            // <-- FIXED: Correct fallback logic for send button icon
             val sendIcon = dir.findFile("send.png")
             if (sendIcon != null && sendIcon.exists()) {
                 tryLoad("send.png", envelopeInputButton)
@@ -258,7 +255,6 @@ class ChatActivity : AppCompatActivity() {
 
     /// SECTION: Core Chat Logic
     private fun processUserQuery(userInput: String) {
-        // <-- FIXED: Cancel any pending responses from the previous query to prevent race conditions
         responseHandler.removeCallbacksAndMessages(null)
         
         val qOrigRaw = userInput.trim()
@@ -311,21 +307,17 @@ class ChatActivity : AppCompatActivity() {
     }
 
     private fun computeResponse(qFiltered: String, qOrig: String, qTokensFiltered: List<String>): String {
-        // 1. Exact match
         templatesMap[qFiltered]?.randomOrNull()?.let { return it }
 
-        // 2. Keyword match
         for ((keyword, responses) in keywordResponses) {
             if (qFiltered.contains(keyword)) {
                 responses.randomOrNull()?.let { return it }
             }
         }
 
-        // 3. Fuzzy match (Inverted Index -> Jaccard -> Levenshtein)
         val qTokens = if (qTokensFiltered.isNotEmpty()) qTokensFiltered else tokenize(qFiltered)
         val candidates = findBestCandidates(qTokens, qFiltered)
 
-        // Jaccard check
         val qSet = qTokens.toSet()
         var bestByJaccard: String? = null
         var bestJaccard = 0.0
@@ -344,7 +336,6 @@ class ChatActivity : AppCompatActivity() {
             templatesMap[bestByJaccard]?.randomOrNull()?.let { return it }
         }
 
-        // Levenshtein check
         var bestKey: String? = null
         var bestDist = MAX_FUZZY_DISTANCE + 1
         for (key in candidates) {
@@ -360,7 +351,6 @@ class ChatActivity : AppCompatActivity() {
             templatesMap[bestKey]?.randomOrNull()?.let { return it }
         }
 
-        // 4. Context switch
         detectContext(qFiltered)?.let { newContext ->
             if (newContext != currentContext) {
                 currentContext = newContext
@@ -369,7 +359,6 @@ class ChatActivity : AppCompatActivity() {
             }
         }
 
-        // 5. Fallback
         return getDummyResponse(qOrig)
     }
     
@@ -493,7 +482,6 @@ class ChatActivity : AppCompatActivity() {
         }
     }
     
-    // <-- FIXED: Optimized Levenshtein with clearer early exit logic
     private fun levenshtein(s: String, t: String): Int {
         if (s == t) return 0
         val n = s.length
@@ -574,13 +562,11 @@ class ChatActivity : AppCompatActivity() {
             val pad = dpToPx(10)
             setPadding(pad, pad, pad, pad)
 
-            // <-- FIXED: Explicitly use Activity context for TextViews
             addView(TextView(this@ChatActivity).apply {
                 this.text = "$sender:"
                 textSize = 12f
                 setTextColor(Color.parseColor("#AAAAAA"))
             })
-            // <-- FIXED: Explicitly use Activity context for TextViews
             addView(TextView(this@ChatActivity).apply {
                 this.text = text
                 textSize = 16f
@@ -630,7 +616,6 @@ class ChatActivity : AppCompatActivity() {
     private fun dpToPx(dp: Int): Int = (dp * resources.displayMetrics.density).roundToInt()
 
     /// SECTION: Template Loading
-    // <-- FIXED: Refactored error handling into a separate function
     private fun onTemplateLoadFailed() {
         loadFallbackTemplates()
         rebuildInvertedIndex()
@@ -721,22 +706,40 @@ class ChatActivity : AppCompatActivity() {
         }
     }
     
+    // <-- FIXED: Simplified this function to resolve a persistent compiler error.
     private fun parseMetadataLine(line: String) {
         val t = line.trim()
-        fun getValue(prefix: String) = t.substring(prefix.length).trim()
-
         when {
             t.startsWith("mascot_list=") -> {
-                getValue("mascot_list=").split("|").forEach {
+                val value = t.substring("mascot_list=".length).trim()
+                value.split("|").forEach {
                     val parts = it.split(":")
-                    if (parts.size == 4) mascotList.add(mapOf("name" to parts[0].trim(), "icon" to parts[1].trim(), "color" to parts[2].trim(), "background" to parts[3].trim()))
+                    if (parts.size == 4) {
+                        mascotList.add(mapOf(
+                            "name" to parts[0].trim(),
+                            "icon" to parts[1].trim(),
+                            "color" to parts[2].trim(),
+                            "background" to parts[3].trim()
+                        ))
+                    }
                 }
             }
-            t.startsWith("mascot_name=") -> currentMascotName = getValue("mascot_name=")
-            t.startsWith("mascot_icon=") -> currentMascotIcon = getValue("mascot_icon=")
-            t.startsWith("theme_color=") -> currentThemeColor = getValue("theme_color=")
-            t.startsWith("theme_background=") -> currentThemeBackground = getValue("theme_background=")
-            t.startsWith("dialog_lines=") -> dialogLines.addAll(getValue("dialog_lines=").split("|").map { it.trim() }.filter { it.isNotEmpty() })
+            t.startsWith("mascot_name=") -> {
+                currentMascotName = t.substring("mascot_name=".length).trim()
+            }
+            t.startsWith("mascot_icon=") -> {
+                currentMascotIcon = t.substring("mascot_icon=".length).trim()
+            }
+            t.startsWith("theme_color=") -> {
+                currentThemeColor = t.substring("theme_color=".length).trim()
+            }
+            t.startsWith("theme_background=") -> {
+                currentThemeBackground = t.substring("theme_background=".length).trim()
+            }
+            t.startsWith("dialog_lines=") -> {
+                val lines = t.substring("dialog_lines=".length).trim().split("|")
+                dialogLines.addAll(lines.map { it.trim() }.filter { it.isNotEmpty() })
+            }
         }
     }
     
@@ -848,7 +851,6 @@ class ChatActivity : AppCompatActivity() {
         dialogRunnable = null
     }
 
-    // <-- FIXED: Refactored this function to remove duplicated logic and resolve a subtle compiler error.
     private fun loadMascotMetadata(mascotName: String) {
         folderUri?.let { uri ->
             val dir = DocumentFile.fromTreeUri(this, uri) ?: return
@@ -856,10 +858,8 @@ class ChatActivity : AppCompatActivity() {
             dir.findFile(metadataFilename)?.uri?.let { metadataUri ->
                 try {
                     contentResolver.openInputStream(metadataUri)?.bufferedReader()?.useLines { lines ->
-                        // Reuse the existing parsing function instead of duplicating logic.
                         lines.forEach(::parseMetadataLine)
                     }
-                    // After parsing all lines, update the UI.
                     updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
                 } catch (e: Exception) {
                     showCustomToast("Ошибка загрузки метаданных маскота: ${e.message}")
@@ -880,7 +880,6 @@ class ChatActivity : AppCompatActivity() {
     /// SECTION: Utils
     private fun showCustomToast(message: String) {
         try {
-            // <-- FIXED: The second argument for inflate should be null for a Toast.
             val layout = layoutInflater.inflate(R.layout.custom_toast, null)
             layout.findViewById<TextView>(R.id.customToastText).text = message
             Toast(applicationContext).apply {
