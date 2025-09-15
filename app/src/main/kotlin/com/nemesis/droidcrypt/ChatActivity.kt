@@ -3,6 +3,7 @@ package com.nemesis.droidcrypt
 import android.animation.ObjectAnimator
 import android.content.Intent
 import android.graphics.*
+import android.graphics.drawable.ColorDrawable // <-- ADDED
 import android.graphics.drawable.GradientDrawable
 import android.media.MediaPlayer
 import android.net.Uri
@@ -145,6 +146,15 @@ class ChatActivity : AppCompatActivity() {
         // <-- ADDED: load synonyms & stopwords early (if folderUri available this will read files)
         loadSynonymsAndStopwords()
 
+        // <-- FIX: ensure window background is black to avoid white flicker before keyboard opens
+        try {
+            // prefer resource if exists, otherwise fallback to Color.BLACK
+            val resId = resources.getIdentifier("background_black", "color", packageName)
+            val bgColor = if (resId != 0) resources.getColor(resId, theme) else Color.BLACK
+            window.setBackgroundDrawable(ColorDrawable(bgColor))
+        } catch (_: Exception) {
+            try { window.setBackgroundDrawable(ColorDrawable(Color.BLACK)) } catch (_: Exception) {}
+        }
         // screenshots lock from prefs
         try {
             val prefs = PreferenceManager.getDefaultSharedPreferences(this)
@@ -167,10 +177,10 @@ class ChatActivity : AppCompatActivity() {
         btnLock?.setOnClickListener { finish() }
         btnTrash?.setOnClickListener { clearChat() }
         btnSettings?.setOnClickListener { startActivity(Intent(this, SettingsActivity::class.java)) }
-        // <-- CHANGED: top envelope opens PostsActivity (was toast)
-        btnEnvelopeTop?.setOnClickListener { startActivity(Intent(this, PostsActivity::class.java)) }
+        // <-- CHANGED earlier: top envelope opens PostActivity (was toast) — keep this
+        btnEnvelopeTop?.setOnClickListener { startActivity(Intent(this, PostActivity::class.java)) }
 
-        // envelope near input — отправка (send)
+        // envelope near input — отправка
         envelopeInputButton?.setOnClickListener {
             val input = queryInput.text.toString().trim()
             if (input.isNotEmpty()) {
@@ -272,21 +282,12 @@ class ChatActivity : AppCompatActivity() {
             // <-- CHANGED: we hide actionbar big mascot to keep avatars only in chat side
             mascotTopImage?.visibility = View.GONE // <-- ADDED: hide top avatar as requested
 
-            // (keep code that attempted to load it but we won't display it)
-            val iconFile = dir.findFile(currentMascotIcon)
-            if (iconFile != null && iconFile.exists()) {
-                // do not show in actionbar (we set visibility GONE), but keep ability to load if needed elsewhere
-                // contentResolver.openInputStream(iconFile.uri)?.use { ins ->
-                //     val bmp = BitmapFactory.decodeStream(ins)
-                //     mascotTopImage?.let { imageView ->
-                //         imageView.setImageBitmap(bmp)
-                //         imageView.alpha = 0f
-                //         ObjectAnimator.ofFloat(imageView, "alpha", 0f, 1f).apply {
-                //             duration = 400
-                //             start()
-                //         }
-                //     }
-                // }
+            // avoid duplicate 'iconFile' name in this scope — use iconFileTop (FIX)
+            val iconFileTop = dir.findFile(currentMascotIcon) // <-- FIX
+            if (iconFileTop != null && iconFileTop.exists()) {
+                // we intentionally keep top avatar hidden (visibility GONE)
+                // but we keep ability here to pre-load or cache if required later
+                // (no UI assignment to avoid showing it in actionbar)
             }
         } catch (e: Exception) {
             e.printStackTrace()
