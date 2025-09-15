@@ -32,7 +32,7 @@ class ChatActivity : AppCompatActivity() {
         private const val PREF_KEY_DISABLE_SCREENSHOTS = "pref_disable_screenshots"
         private const val MAX_CONTEXT_SWITCH = 6 // Note: This is now unused due to logic simplification
         private const val MAX_MESSAGES = 250
-        private const val MAX_FUZZY_DISTANCE = 2 // <-- ADDED: допустимая дистанция для фаззи-матчинга
+        private const val MAX_FUZZY_DISTANCE = 5 // <-- ADDED: допустимая дистанция для фаззи-матчинга
         private const val CANDIDATE_TOKEN_THRESHOLD = 1 // <-- ADDED: минимальное число общих токенов для кандидата
         private const val MAX_CANDIDATES_FOR_LEV = 40 // <-- ADDED: ограничение числа кандидатов для Levenshtein
     }
