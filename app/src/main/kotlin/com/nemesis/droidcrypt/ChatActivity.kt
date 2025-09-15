@@ -755,7 +755,9 @@ class ChatActivity : AppCompatActivity() {
                     val mascot = parts[0].trim()
                     val text = parts[1].trim()
                     if (mascot.isNotEmpty() && text.isNotEmpty()) {
-                        val cur = currentDialogParser ?: run {
+                        val cur = if (currentDialogParser != null) {
+    currentDialogParser!!
+} else {
     val newDialog = Dialog("default")
     currentDialogParser = newDialog
     newDialog
