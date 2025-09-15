@@ -685,7 +685,7 @@ class ChatActivity : AppCompatActivity() {
             lp.marginStart = dpToPx(48)
 
             // indicator
-            val indicator = TextView(this).apply {
+            var indicator = TextView(this).apply {
                 text = "/"
                 textSize = 14f
                 setTextColor(Color.parseColor("#CCCCCC"))
@@ -1098,7 +1098,7 @@ class ChatActivity : AppCompatActivity() {
         }
         // also set popup background to semi-dark so white text is legible
         try {
-            val bg = GradientDrawable().apply {
+            var bg = GradientDrawable().apply {
                 setColor(Color.parseColor("#20000000")) // translucent dark
             }
             queryInput.dropDownBackground = bg
