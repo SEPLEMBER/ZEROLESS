@@ -261,15 +261,13 @@ class ChatActivity : AppCompatActivity() {
         }
     }
 
-    /// SECTION: Core Chat Logic — Основная логика чата (processUserQuery, clearChat) — Обработка ввода, антиспам, смена контекста, dummy-ответы; использует templatesMap, keywordResponses
+/// SECTION: Core Chat Logic — Основная логика чата (processUserQuery, clearChat) — Обработка ввода, антиспам, смена контекста, dummy-ответы; использует templatesMap, keywordResponses
     // === core: process user query ===
     private fun processUserQuery(userInput: String) {
         val qOrig = userInput.trim().lowercase(Locale.getDefault())
         if (qOrig.isEmpty()) return
-
         lastUserInputTime = System.currentTimeMillis()
         stopDialog()
-
         if (qOrig == lastQuery) {
             val cnt = queryCountMap.getOrDefault(qOrig, 0)
             queryCountMap[qOrig] = cnt + 1
@@ -278,9 +276,11 @@ class ChatActivity : AppCompatActivity() {
             queryCountMap[qOrig] = 1
             lastQuery = qOrig
         }
-
         addChatMessage("Ты", userInput)
-
+        
+        // Показать уведомление "Печатает..." с рандомной задержкой
+        showTypingIndicator()
+        
         val repeats = queryCountMap.getOrDefault(qOrig, 0)
         if (repeats >= 5) {
             val spamResp = antiSpamResponses.random()
@@ -288,9 +288,7 @@ class ChatActivity : AppCompatActivity() {
             startIdleTimer()
             return
         }
-
         var answered = false
-
         // 1. Check for an exact match in the current context
         templatesMap[qOrig]?.let { possible ->
             if (possible.isNotEmpty()) {
@@ -298,7 +296,6 @@ class ChatActivity : AppCompatActivity() {
                 answered = true
             }
         }
-
         // 2. If no exact match, check for keywords in the current context
         if (!answered) {
             for ((keyword, responses) in keywordResponses) {
@@ -309,7 +306,6 @@ class ChatActivity : AppCompatActivity() {
                 }
             }
         }
-
         // 3. If still no answer, try to switch context
         if (!answered) {
             detectContext(qOrig)?.let { newContext ->
@@ -327,18 +323,41 @@ class ChatActivity : AppCompatActivity() {
                 }
             }
         }
-
         // 4. If nothing worked, use a fallback response
         if (!answered) {
             val fallbackResp = getDummyResponse(qOrig)
             addChatMessage(currentMascotName, fallbackResp)
         }
-
         // Trigger idle events after processing the query
         triggerRandomDialog()
         startIdleTimer()
     }
-
+    
+    // Новый метод для показа полупрозрачного уведомления "Печатает..."
+    private fun showTypingIndicator() {
+        val typingView = TextView(this).apply {
+            text = "печатает..."
+            textSize = 14f
+            setTextColor(getColor(android.R.color.white))
+            setBackgroundColor(0x80000000.toInt()) // Полупрозрачный чёрный фон
+            alpha = 0.7f // Дополнительная полупрозрачность
+            setPadding(16, 8, 16, 8)
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                setMargins(0, 16, 0, 0) // Отступ сверху для размещения вверху чата
+            }
+        }
+        messagesContainer.addView(typingView, 0) // Добавляем в начало контейнера (вверху)
+        
+        // Рандомная задержка 1–3 секунды перед удалением
+        val randomDelay = (1000..3000).random().toLong()
+        Handler(Looper.getMainLooper()).postDelayed({
+            messagesContainer.removeView(typingView)
+        }, randomDelay)
+    }
+    
     private fun clearChat() {
         messagesContainer.removeAllViews()
         queryCountMap.clear()
@@ -348,7 +367,6 @@ class ChatActivity : AppCompatActivity() {
         updateAutoComplete()
         addChatMessage(currentMascotName, "Чат очищен. Возвращаюсь к началу.")
     }
-
     private fun detectContext(input: String): String? {
         val lower = input.lowercase(Locale.ROOT)
         for ((keyword, value) in contextMap) {
@@ -356,7 +374,6 @@ class ChatActivity : AppCompatActivity() {
         }
         return null
     }
-
     private fun getDummyResponse(query: String): String {
         val lower = query.lowercase(Locale.ROOT)
         return when {
