@@ -1,9 +1,9 @@
-package com.nemesis.droidcrypt
+package com.pawscribe.chat
 
 import android.animation.ObjectAnimator
 import android.content.Intent
-import android.graphics.*
-import android.graphics.drawable.GradientDrawable
+import android.graphics.BitmapFactory
+import android.graphics.Color
 import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
@@ -16,28 +16,22 @@ import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.graphics.ColorUtils
 import androidx.documentfile.provider.DocumentFile
 import java.util.*
-import kotlin.math.roundToInt
-import java.util.*
-import kotlin.math.roundToInt
-import kotlin.math.min // <-- ADDED
-import kotlin.math.abs // <-- ADDED
+import kotlin.math.abs
+import kotlin.math.min
 
 class ChatActivity : AppCompatActivity() {
 
     companion object {
         private const val PREF_KEY_FOLDER_URI = "pref_folder_uri"
         private const val PREF_KEY_DISABLE_SCREENSHOTS = "pref_disable_screenshots"
-        private const val MAX_CONTEXT_SWITCH = 6 // Note: This is now unused due to logic simplification
         private const val MAX_MESSAGES = 250
-        private const val MAX_FUZZY_DISTANCE = 2 // <-- ADDED: допустимая дистанция для фаззи-матчинга
-        private const val CANDIDATE_TOKEN_THRESHOLD = 1 // <-- ADDED: минимальное число общих токенов для кандидата
-        private const val MAX_CANDIDATES_FOR_LEV = 40 // <-- ADDED: ограничение числа кандидатов для Levenshtein
+        private const val MAX_FUZZY_DISTANCE = 2
+        private const val CANDIDATE_TOKEN_THRESHOLD = 1
+        private const val MAX_CANDIDATES_FOR_LEV = 40
     }
 
-    /// SECTION: UI и Data — Объявление переменных (UI-элементы, карты шаблонов, состояния маскотов/контекста, idle-данные)
     // UI
     private var folderUri: Uri? = null
     private lateinit var scrollView: ScrollView
@@ -51,9 +45,9 @@ class ChatActivity : AppCompatActivity() {
     private lateinit var messagesContainer: LinearLayout
     private var adapter: ArrayAdapter<String>? = null
 
-    // Data structures
+    // Data
     private val fallback = arrayOf("Привет", "Как дела?", "Расскажи о себе", "Выход")
-    private val templatesMap = HashMap<String, MutableList<String>>() // keys are normalized triggers now
+    private val templatesMap = HashMap<String, MutableList<String>>() // normalized triggers -> responses
     private val contextMap = HashMap<String, String>()
     private val keywordResponses = HashMap<String, MutableList<String>>()
     private val antiSpamResponses = mutableListOf<String>()
@@ -61,8 +55,11 @@ class ChatActivity : AppCompatActivity() {
     private val dialogLines = mutableListOf<String>()
     private val dialogs = mutableListOf<Dialog>()
 
-    // <-- ADDED: inverted index token -> list of triggers (normalized)
-    private val invertedIndex = HashMap<String, MutableList<String>>() // token -> list of trigger keys
+    // synonyms map (MUST exist)
+    private val synonymsMap = HashMap<String, MutableList<String>>()
+
+    // inverted index: token -> list of normalized triggers
+    private val invertedIndex = HashMap<String, MutableList<String>>()
 
     private var currentMascotName = "Racky"
     private var currentMascotIcon = "raccoon_icon.png"
@@ -100,12 +97,11 @@ class ChatActivity : AppCompatActivity() {
         )
     }
 
-    /// SECTION: Lifecycle — Инициализация Activity (onCreate, onResume, onPause) — Настройка UI, prefs, иконок, listeners, начальная загрузка
+    // --- Lifecycle ---
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_chat)
 
-        // refs
         scrollView = findViewById(R.id.scrollView)
         queryInput = findViewById(R.id.queryInput)
         envelopeInputButton = findViewById(R.id.envelope_button)
@@ -116,7 +112,7 @@ class ChatActivity : AppCompatActivity() {
         btnSettings = findViewById(R.id.btn_settings)
         messagesContainer = findViewById(R.id.chatMessagesContainer)
 
-        // SAF Uri: Intent -> persisted -> prefs
+        // SAF Uri
         folderUri = intent?.getParcelableExtra("folderUri")
         if (folderUri == null) {
             for (perm in contentResolver.persistedUriPermissions) {
@@ -134,7 +130,7 @@ class ChatActivity : AppCompatActivity() {
         } catch (_: Exception) {
         }
 
-        // screenshots lock from prefs
+        // screenshots lock
         try {
             val prefs = PreferenceManager.getDefaultSharedPreferences(this)
             val disable = prefs.getBoolean(PREF_KEY_DISABLE_SCREENSHOTS, false)
@@ -144,7 +140,6 @@ class ChatActivity : AppCompatActivity() {
         } catch (_: Exception) {
         }
 
-        // load icons
         loadToolbarIcons()
         setupIconTouchEffect(btnLock)
         setupIconTouchEffect(btnTrash)
@@ -152,13 +147,11 @@ class ChatActivity : AppCompatActivity() {
         setupIconTouchEffect(btnSettings)
         setupIconTouchEffect(envelopeInputButton)
 
-        // icon actions
         btnLock?.setOnClickListener { finish() }
         btnTrash?.setOnClickListener { clearChat() }
         btnSettings?.setOnClickListener { startActivity(Intent(this, SettingsActivity::class.java)) }
         btnEnvelopeTop?.setOnClickListener { showCustomToast("Envelope top — заглушка") }
 
-        // envelope near input — отправка
         envelopeInputButton?.setOnClickListener {
             val input = queryInput.text.toString().trim()
             if (input.isNotEmpty()) {
@@ -171,12 +164,14 @@ class ChatActivity : AppCompatActivity() {
         if (folderUri == null) {
             showCustomToast("Папка не выбрана! Открой настройки и выбери папку.")
             loadFallbackTemplates()
-            rebuildInvertedIndex() // <-- ADDED: build index for fallback
+            loadSynonyms()
+            rebuildInvertedIndex()
             updateAutoComplete()
             addChatMessage(currentMascotName, "Добро пожаловать!")
         } else {
             loadTemplatesFromFile(currentContext)
-            rebuildInvertedIndex() // <-- ADDED: build index after load
+            loadSynonyms()
+            rebuildInvertedIndex()
             updateAutoComplete()
             addChatMessage(currentMascotName, "Добро пожаловать!")
         }
@@ -203,7 +198,8 @@ class ChatActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         folderUri?.let { loadTemplatesFromFile(currentContext) }
-        rebuildInvertedIndex() // <-- ADDED: ensure index fresh on resume
+        loadSynonyms()
+        rebuildInvertedIndex()
         updateAutoComplete()
         idleCheckRunnable?.let {
             dialogHandler.removeCallbacks(it)
@@ -218,8 +214,7 @@ class ChatActivity : AppCompatActivity() {
         dialogHandler.removeCallbacksAndMessages(null)
     }
 
-    /// SECTION: Toolbar Helpers — Вспомогательные функции для тулбара (touch-эффекты, загрузка иконок) — Работают с UI-элементами и файлами из папки
-    // --- toolbar helpers ---
+    // --- Toolbar Helpers ---
     private fun setupIconTouchEffect(btn: ImageButton?) {
         btn?.setOnTouchListener { v, event ->
             when (event.action) {
@@ -244,15 +239,13 @@ class ChatActivity : AppCompatActivity() {
                             target?.setImageBitmap(bmp)
                         }
                     }
-                } catch (_: Exception) {
-                }
+                } catch (_: Exception) {}
             }
-            // top icons expected names
             tryLoad("lock.png", btnLock)
             tryLoad("trash.png", btnTrash)
             tryLoad("envelope.png", btnEnvelopeTop)
             tryLoad("settings.png", btnSettings)
-            // load top mascot image if available (use currentMascotIcon file)
+
             val iconFile = dir.findFile(currentMascotIcon)
             if (iconFile != null && iconFile.exists()) {
                 contentResolver.openInputStream(iconFile.uri)?.use { ins ->
@@ -269,18 +262,13 @@ class ChatActivity : AppCompatActivity() {
             }
         } catch (e: Exception) {
             e.printStackTrace()
-            // Optionally show a toast on error
-            // showCustomToast("Ошибка загрузки иконок")
         }
     }
 
-/// SECTION: Core Chat Logic — Основная логика чата (processUserQuery, clearChat) — Обработка ввода, антиспам, смена контекста, dummy-ответы; использует templatesMap, keywordResponses
-    // === core: process user query ===
+    // --- Core chat logic ---
     private fun processUserQuery(userInput: String) {
-        // <-- ADDED: normalize input early (remove punctuation, collapse spaces)
         val qOrigRaw = userInput.trim()
         val qOrig = normalizeText(qOrigRaw)
-        // store/use normalized keys in queryCountMap to count repeats robustly
         val qKeyForCount = qOrig
 
         if (qOrig.isEmpty()) return
@@ -295,10 +283,9 @@ class ChatActivity : AppCompatActivity() {
             lastQuery = qKeyForCount
         }
         addChatMessage("Ты", userInput)
-        
-        // Показать уведомление "Печатает..." с рандомной задержкой
+
         showTypingIndicator()
-        
+
         val repeats = queryCountMap.getOrDefault(qKeyForCount, 0)
         if (repeats >= 5) {
             val spamResp = antiSpamResponses.random()
@@ -308,7 +295,7 @@ class ChatActivity : AppCompatActivity() {
         }
         var answered = false
 
-        // 1. Check for an exact match in the current context (templatesMap keys are normalized)
+        // 1. Exact match
         templatesMap[qOrig]?.let { possible ->
             if (possible.isNotEmpty()) {
                 addChatMessage(currentMascotName, possible.random())
@@ -316,10 +303,9 @@ class ChatActivity : AppCompatActivity() {
             }
         }
 
-        // 2. If no exact match, check for keywords in the current context
+        // 2. Keyword responses
         if (!answered) {
             for ((keyword, responses) in keywordResponses) {
-                // normalize keyword check
                 if (qOrig.contains(keyword) && responses.isNotEmpty()) {
                     addChatMessage(currentMascotName, responses.random())
                     answered = true
@@ -328,9 +314,20 @@ class ChatActivity : AppCompatActivity() {
             }
         }
 
-        // 2.5 FUZZY: Use inverted index to collect candidates and run Levenshtein only on them
+        // 2.1 Jaccard match
         if (!answered) {
-            // tokenize normalized query
+            val matchResult = findBestJaccardMatch(qOrig)
+            matchResult?.let { (bestKey, _) ->
+                val possible = templatesMap[bestKey]
+                if (!possible.isNullOrEmpty()) {
+                    addChatMessage(currentMascotName, possible.random())
+                    answered = true
+                }
+            }
+        }
+
+        // 2.5 Fuzzy via inverted index + Levenshtein
+        if (!answered) {
             val qTokens = tokenize(qOrig)
             val candidateCounts = HashMap<String, Int>()
             for (tok in qTokens) {
@@ -338,7 +335,6 @@ class ChatActivity : AppCompatActivity() {
                     candidateCounts[trig] = candidateCounts.getOrDefault(trig, 0) + 1
                 }
             }
-            // Prefer candidates with more shared tokens
             val candidates = if (candidateCounts.isNotEmpty()) {
                 candidateCounts.entries
                     .filter { it.value >= CANDIDATE_TOKEN_THRESHOLD }
@@ -346,7 +342,6 @@ class ChatActivity : AppCompatActivity() {
                     .map { it.key }
                     .take(MAX_CANDIDATES_FOR_LEV)
             } else {
-                // fallback: if no token overlap, consider all keys but with quick length filter
                 templatesMap.keys.filter { abs(it.length - qOrig.length) <= MAX_FUZZY_DISTANCE }
                     .take(MAX_CANDIDATES_FOR_LEV)
             }
@@ -354,7 +349,6 @@ class ChatActivity : AppCompatActivity() {
             var bestKey: String? = null
             var bestDist = Int.MAX_VALUE
             for (key in candidates) {
-                // quick length filter
                 if (abs(key.length - qOrig.length) > MAX_FUZZY_DISTANCE + 1) continue
                 val d = levenshtein(qOrig, key)
                 if (d < bestDist) {
@@ -370,17 +364,17 @@ class ChatActivity : AppCompatActivity() {
                     answered = true
                 }
             }
-        } // <-- FUZZY BLOCK ADDED
+        }
 
-        // 3. If still no answer, try to switch context
+        // 3. Try switch context
         if (!answered) {
             detectContext(qOrig)?.let { newContext ->
                 if (newContext != currentContext) {
                     currentContext = newContext
                     loadTemplatesFromFile(currentContext)
-                    rebuildInvertedIndex() // <-- ADDED: rebuild index after switching context
+                    loadSynonyms()
+                    rebuildInvertedIndex()
                     updateAutoComplete()
-                    // Re-check for an answer in the new context after switching
                     templatesMap[qOrig]?.let { possible ->
                         if (possible.isNotEmpty()) {
                             addChatMessage(currentMascotName, possible.random())
@@ -390,60 +384,105 @@ class ChatActivity : AppCompatActivity() {
                 }
             }
         }
-        // 4. If nothing worked, use a fallback response
+
+        // 4. fallback
         if (!answered) {
             val fallbackResp = getDummyResponse(qOrig)
             addChatMessage(currentMascotName, fallbackResp)
         }
-        // Trigger idle events after processing the query
+
+        // idle events
         triggerRandomDialog()
         startIdleTimer()
     }
-    
-    // Новый метод для показа полупрозрачного уведомления "Печатает..."
+
     private fun showTypingIndicator() {
+        // remove any existing typing indicator
+        val childrenToRemove = mutableListOf<View>()
+        for (i in 0 until messagesContainer.childCount) {
+            val child = messagesContainer.getChildAt(i)
+            if (child.tag == "typing") childrenToRemove.add(child)
+        }
+        for (c in childrenToRemove) messagesContainer.removeView(c)
+
         val typingView = TextView(this).apply {
             text = "печатает..."
             textSize = 14f
-            setTextColor(getColor(android.R.color.white))
-            setBackgroundColor(0x80000000.toInt()) // Полупрозрачный чёрный фон
-            alpha = 0.7f // Дополнительная полупрозрачность
+            setTextColor(Color.WHITE)
+            setBackgroundColor(0x80000000.toInt())
+            alpha = 0.9f
             setPadding(16, 8, 16, 8)
+            tag = "typing"
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
             ).apply {
-                setMargins(0, 16, 0, 0) // Отступ сверху для размещения вверху чата
+                setMargins(8, 8, 8, 8)
+                gravity = Gravity.START
             }
         }
-        messagesContainer.addView(typingView, 0) // Добавляем в начало контейнера (вверху)
-        
-        // Рандомная задержка 1–3 секунды перед удалением
+        messagesContainer.addView(typingView)
+        scrollToBottomDelayed()
+
+        // random delay 1-3s then remove
         val randomDelay = (1000..3000).random().toLong()
         Handler(Looper.getMainLooper()).postDelayed({
             messagesContainer.removeView(typingView)
         }, randomDelay)
     }
-    
+
     private fun clearChat() {
         messagesContainer.removeAllViews()
         queryCountMap.clear()
         lastQuery = ""
         currentContext = "base.txt"
         loadTemplatesFromFile(currentContext)
-        rebuildInvertedIndex() // <-- ADDED
+        loadSynonyms()
+        rebuildInvertedIndex()
         updateAutoComplete()
         addChatMessage(currentMascotName, "Чат очищен. Возвращаюсь к началу.")
     }
-    private fun detectContext(input: String): String? {
-        val lower = normalizeText(input) // <-- ADDED: normalize when detecting context
-        for ((keyword, value) in contextMap) {
-            if (lower.contains(keyword)) return value
+
+    private fun loadSynonyms() {
+        synonymsMap.clear()
+        val uri = folderUri ?: return
+        try {
+            val dir = DocumentFile.fromTreeUri(this, uri) ?: return
+            val file = dir.findFile("synonims.txt") ?: return
+            contentResolver.openInputStream(file.uri)?.bufferedReader()?.use { reader ->
+                reader.forEachLine { raw ->
+                    val line = raw.trim()
+                    if (line.isEmpty() || line.startsWith("#")) return@forEachLine
+                    if (line.contains("=")) {
+                        val parts = line.split("=", limit = 2)
+                        if (parts.size == 2) {
+                            val mainWord = normalizeText(parts[0].trim())
+                            val synonyms = parts[1].split(",", "|")
+                                .mapNotNull { normalizeText(it.trim()).takeIf { s -> s.isNotEmpty() } }
+                                .toMutableList()
+                            if (mainWord.isNotEmpty() && synonyms.isNotEmpty()) synonymsMap[mainWord] = synonyms
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
-        return null
     }
+
+    private fun detectContext(input: String): String? {
+        val scores = mutableMapOf<String, Double>()
+        for ((keyword, contextFile) in contextMap) {
+            val jaccard = jaccardWithSynonyms(input, keyword)
+            if (jaccard > 0.3) {
+                scores[contextFile] = jaccard
+            }
+        }
+        return scores.maxByOrNull { it.value }?.key
+    }
+
     private fun getDummyResponse(query: String): String {
-        val lower = query.lowercase(Locale.ROOT)
+        val lower = query.lowercase(Locale.getDefault())
         return when {
             lower.contains("привет") -> "Привет! Чем могу помочь?"
             lower.contains("как дела") -> "Всё отлично, а у тебя?"
@@ -451,46 +490,76 @@ class ChatActivity : AppCompatActivity() {
         }
     }
 
-    // <-- ADDED: normalize text (remove punctuation, collapse spaces)
     private fun normalizeText(s: String): String {
-        // keep letters, digits and spaces only
         val lower = s.lowercase(Locale.getDefault())
         val cleaned = lower.replace(Regex("[^\\p{L}\\p{Nd}\\s]"), " ")
-        val collapsed = cleaned.replace(Regex("\\s+"), " ").trim()
-        return collapsed
+        return cleaned.replace(Regex("\\s+"), " ").trim()
     }
 
-    // <-- ADDED: tokenize (split normalized text to tokens)
     private fun tokenize(s: String): List<String> {
         if (s.isBlank()) return emptyList()
         return s.split(Regex("\\s+")).map { it.trim() }.filter { it.isNotEmpty() }
     }
 
-    // <-- ADDED: rebuild inverted index from current templatesMap
+    private fun expandWithSynonyms(tokens: List<String>): Set<String> {
+        val expanded = mutableSetOf<String>()
+        for (token in tokens) {
+            expanded.add(token)
+            synonymsMap[token]?.let { expanded.addAll(it) }
+            // reverse lookup
+            for ((mainWord, synonymList) in synonymsMap) {
+                if (synonymList.contains(token)) {
+                    expanded.add(mainWord)
+                    expanded.addAll(synonymList)
+                }
+            }
+        }
+        return expanded
+    }
+
+    private fun jaccardWithSynonyms(text1: String, text2: String): Double {
+        val tokens1 = expandWithSynonyms(tokenize(normalizeText(text1)))
+        val tokens2 = expandWithSynonyms(tokenize(normalizeText(text2)))
+        if (tokens1.isEmpty() && tokens2.isEmpty()) return 1.0
+        if (tokens1.isEmpty() || tokens2.isEmpty()) return 0.0
+        val intersection = tokens1.intersect(tokens2).size
+        val union = tokens1.union(tokens2).size
+        return intersection.toDouble() / union
+    }
+
+    private fun findBestJaccardMatch(query: String): Pair<String, Double>? {
+        var bestKey: String? = null
+        var bestScore = 0.0
+        for (key in templatesMap.keys) {
+            val minScore = if (tokenize(key).size <= 3) 0.7 else 0.6
+            val score = jaccardWithSynonyms(query, key)
+            if (score > bestScore && score >= minScore) {
+                bestScore = score
+                bestKey = key
+            }
+        }
+        return if (bestKey != null) Pair(bestKey, bestScore) else null
+    }
+
     private fun rebuildInvertedIndex() {
         invertedIndex.clear()
         for (key in templatesMap.keys) {
-            val toks = tokenize(key)
+            val toks = expandWithSynonyms(tokenize(key))
             for (t in toks) {
                 val list = invertedIndex.getOrPut(t) { mutableListOf() }
-                // avoid duplicates
                 if (!list.contains(key)) list.add(key)
             }
         }
     }
 
-    // <-- ADDED: Levenshtein implementation (optimized with rolling rows and early exit)
     private fun levenshtein(s: String, t: String): Int {
-        // quick shortcuts
         if (s == t) return 0
         val n = s.length
         val m = t.length
         if (n == 0) return m
         if (m == 0) return n
-        // optional early exit if difference too big (speedup)
         if (abs(n - m) > MAX_FUZZY_DISTANCE + 2) return Int.MAX_VALUE / 2
 
-        // use two rolling rows to save memory
         val prev = IntArray(m + 1) { it }
         val curr = IntArray(m + 1)
 
@@ -506,156 +575,13 @@ class ChatActivity : AppCompatActivity() {
                 curr[j] = min(min(deletion, insertion), substitution)
                 if (curr[j] < minInRow) minInRow = curr[j]
             }
-            // early stop if minimum in this row already exceeds threshold
             if (minInRow > MAX_FUZZY_DISTANCE + 2) return Int.MAX_VALUE / 2
-            // copy curr -> prev
             for (k in 0..m) prev[k] = curr[k]
         }
         return prev[m]
     }
-    // <-- END ADDED
 
-    /// SECTION: UI Messages — Создание и добавление сообщений в чат (addChatMessage, createMessageBubble и утилиты) — UI-логика пузырей, аватаров, скролла; использует currentThemeColor
-    // === UI: add message with avatar left for mascots, right-aligned for user ===
-    private fun addChatMessage(sender: String, text: String) {
-        val row = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            val pad = dpToPx(6)
-            setPadding(pad, pad / 2, pad, pad / 2)
-            layoutParams =
-                LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT
-                )
-        }
-
-        val isUser = sender.equals("Ты", ignoreCase = true)
-
-        if (isUser) {
-            val bubble = createMessageBubble(sender, text, isUser)
-            val lp =
-                LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT
-                )
-            lp.gravity = Gravity.END
-            lp.marginStart = dpToPx(48)
-            row.addView(spaceView(), LinearLayout.LayoutParams(0, 0, 1f))
-            row.addView(bubble, lp)
-        } else {
-            val avatarView = ImageView(this).apply {
-                val size = dpToPx(64)
-                layoutParams = LinearLayout.LayoutParams(size, size)
-                scaleType = ImageView.ScaleType.CENTER_CROP
-                adjustViewBounds = true
-                loadAvatarInto(this, sender)
-            }
-            val bubble = createMessageBubble(sender, text, isUser)
-            val bubbleLp =
-                LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT
-                )
-            bubbleLp.marginStart = dpToPx(8)
-            row.addView(avatarView)
-            row.addView(bubble, bubbleLp)
-        }
-
-        messagesContainer.addView(row)
-        if (messagesContainer.childCount > MAX_MESSAGES) {
-            val removeCount = messagesContainer.childCount - MAX_MESSAGES
-            repeat(removeCount) { messagesContainer.removeViewAt(0) }
-        }
-        scrollView.post { scrollView.smoothScrollTo(0, messagesContainer.bottom) }
-    }
-
-    private fun spaceView(): View = View(this).apply {
-        layoutParams = LinearLayout.LayoutParams(0, 0, 1f)
-    }
-
-    private fun createMessageBubble(
-        sender: String,
-        text: String,
-        isUser: Boolean
-    ): LinearLayout {
-        val container = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        val tvSender = TextView(this).apply {
-            this.text = "$sender:"
-            textSize = 12f
-            setTextColor(Color.parseColor("#AAAAAA"))
-        }
-        val tv = TextView(this).apply {
-            this.text = text
-            textSize = 16f
-            setTextIsSelectable(true)
-            val pad = dpToPx(10)
-            setPadding(pad, pad, pad, pad)
-            val accent = safeParseColorOrDefault(currentThemeColor, Color.parseColor("#00FF00"))
-            background = createBubbleDrawable(accent)
-            try {
-                setTextColor(Color.parseColor(currentThemeColor))
-            } catch (_: Exception) {
-                setTextColor(Color.WHITE)
-            }
-        }
-        container.addView(tvSender)
-        container.addView(tv)
-        return container
-    }
-
-    private fun createBubbleDrawable(accentColor: Int): GradientDrawable {
-        return GradientDrawable().apply {
-            val bg = blendColors(Color.parseColor("#0A0A0A"), accentColor, 0.06f)
-            setColor(bg)
-            cornerRadius = dpToPx(10).toFloat()
-            setStroke(dpToPx(2), ColorUtils.setAlphaComponent(accentColor, 180))
-        }
-    }
-
-    private fun loadAvatarInto(target: ImageView, sender: String) {
-        val uri = folderUri ?: return
-        try {
-            val dir = DocumentFile.fromTreeUri(this, uri) ?: return
-            val s = sender.lowercase(Locale.getDefault())
-            val candidates =
-                listOf("${s}_icon.png", "${s}_avatar.png", "${s}.png", currentMascotIcon)
-            for (name in candidates) {
-                val f = dir.findFile(name) ?: continue
-                if (f.exists()) {
-                    contentResolver.openInputStream(f.uri)?.use { ins ->
-                        val bmp = BitmapFactory.decodeStream(ins)
-                        target.setImageBitmap(bmp)
-                        return
-                    }
-                }
-            }
-        } catch (_: Exception) {
-        }
-        target.setImageResource(android.R.color.transparent)
-    }
-
-    private fun blendColors(base: Int, accent: Int, ratio: Float): Int {
-        val r = (Color.red(base) * (1 - ratio) + Color.red(accent) * ratio).roundToInt()
-        val g = (Color.green(base) * (1 - ratio) + Color.green(accent) * ratio).roundToInt()
-        val b = (Color.blue(base) * (1 - ratio) + Color.blue(accent) * ratio).roundToInt()
-        return Color.rgb(r, g, b)
-    }
-
-    private fun safeParseColorOrDefault(spec: String?, fallback: Int): Int {
-        return try {
-            Color.parseColor(spec ?: "")
-        } catch (_: Exception) {
-            fallback
-        }
-    }
-
-    private fun dpToPx(dp: Int): Int {
-        val density = resources.displayMetrics.density
-        return (dp * density).roundToInt()
-    }
-
-    /// SECTION: Template Loading — Загрузка шаблонов и метаданных (loadTemplatesFromFile, loadFallbackTemplates, updateAutoComplete) — Парсинг файлов из папки, карты шаблонов/контекстов, fallback; использует folderUri, contextMap
-    // ========================== Загрузка шаблонов ==========================
+    // --- Template loading ---
     private fun loadTemplatesFromFile(filename: String) {
         templatesMap.clear()
         keywordResponses.clear()
@@ -663,10 +589,7 @@ class ChatActivity : AppCompatActivity() {
         dialogLines.clear()
         dialogs.clear()
 
-        // Reset to default before parsing, especially contextMap for base.txt
-        if (filename == "base.txt") {
-            contextMap.clear()
-        }
+        if (filename == "base.txt") contextMap.clear()
 
         currentMascotName = "Racky"
         currentMascotIcon = "raccoon_icon.png"
@@ -675,76 +598,54 @@ class ChatActivity : AppCompatActivity() {
 
         if (folderUri == null) {
             loadFallbackTemplates()
-            rebuildInvertedIndex() // <-- ADDED
-            updateUI(
-                currentMascotName,
-                currentMascotIcon,
-                currentThemeColor,
-                currentThemeBackground
-            )
+            rebuildInvertedIndex()
+            updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
             return
         }
 
         try {
             val dir = DocumentFile.fromTreeUri(this, folderUri!!) ?: run {
                 loadFallbackTemplates()
-                rebuildInvertedIndex() // <-- ADDED
-                updateUI(
-                    currentMascotName,
-                    currentMascotIcon,
-                    currentThemeColor,
-                    currentThemeBackground
-                )
+                rebuildInvertedIndex()
+                updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
                 return
             }
 
             val file = dir.findFile(filename)
             if (file == null || !file.exists()) {
                 loadFallbackTemplates()
-                rebuildInvertedIndex() // <-- ADDED
-                updateUI(
-                    currentMascotName,
-                    currentMascotIcon,
-                    currentThemeColor,
-                    currentThemeBackground
-                )
+                rebuildInvertedIndex()
+                updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
                 return
             }
 
-            // read main file
             contentResolver.openInputStream(file.uri)?.bufferedReader()?.use { reader ->
                 reader.forEachLine { raw ->
                     val l = raw.trim()
                     if (l.isEmpty()) return@forEachLine
 
-                    // context line in base: :key=file.txt:
                     if (filename == "base.txt" && l.startsWith(":") && l.endsWith(":")) {
                         val contextLine = l.substring(1, l.length - 1)
                         if (contextLine.contains("=")) {
                             val parts = contextLine.split("=", limit = 2)
                             if (parts.size == 2) {
-                                val keyword = parts[0].trim().lowercase(Locale.ROOT)
+                                val keyword = parts[0].trim().lowercase(Locale.getDefault())
                                 val contextFile = parts[1].trim()
-                                if (keyword.isNotEmpty() && contextFile.isNotEmpty()) contextMap[keyword] =
-                                    contextFile
+                                if (keyword.isNotEmpty() && contextFile.isNotEmpty()) contextMap[keyword] = contextFile
                             }
                         }
                         return@forEachLine
                     }
 
-                    // keyword responses: -keyword=resp1|resp2
                     if (l.startsWith("-")) {
                         val keywordLine = l.substring(1)
                         if (keywordLine.contains("=")) {
                             val parts = keywordLine.split("=", limit = 2)
                             if (parts.size == 2) {
-                                val keyword = parts[0].trim().lowercase(Locale.ROOT)
+                                val keyword = parts[0].trim().lowercase(Locale.getDefault())
                                 val responses = parts[1].split("|")
-                                val responseList =
-                                    responses.mapNotNull { it.trim().takeIf { s -> s.isNotEmpty() } }
-                                        .toMutableList()
-                                if (keyword.isNotEmpty() && responseList.isNotEmpty()) keywordResponses[keyword] =
-                                    responseList
+                                val responseList = responses.mapNotNull { it.trim().takeIf { s -> s.isNotEmpty() } }.toMutableList()
+                                if (keyword.isNotEmpty() && responseList.isNotEmpty()) keywordResponses[keyword] = responseList
                             }
                         }
                         return@forEachLine
@@ -753,20 +654,16 @@ class ChatActivity : AppCompatActivity() {
                     if (!l.contains("=")) return@forEachLine
                     val parts = l.split("=", limit = 2)
                     if (parts.size == 2) {
-                        // <-- ADDED: normalize trigger key (remove punctuation etc)
                         val triggerRaw = parts[0].trim()
                         val trigger = normalizeText(triggerRaw)
                         val responses = parts[1].split("|")
-                        val responseList =
-                            responses.mapNotNull { it.trim().takeIf { s -> s.isNotEmpty() } }
-                                .toMutableList()
-                        if (trigger.isNotEmpty() && responseList.isNotEmpty()) templatesMap[trigger] =
-                            responseList
+                        val responseList = responses.mapNotNull { it.trim().takeIf { s -> s.isNotEmpty() } }.toMutableList()
+                        if (trigger.isNotEmpty() && responseList.isNotEmpty()) templatesMap[trigger] = responseList
                     }
                 }
             }
 
-            // metadata file
+            // metadata
             val metadataFilename = filename.replace(".txt", "_metadata.txt")
             val metadataFile = dir.findFile(metadataFilename)
             if (metadataFile != null && metadataFile.exists()) {
@@ -789,17 +686,12 @@ class ChatActivity : AppCompatActivity() {
                                     }
                                 }
                             }
-                            line.startsWith("mascot_name=") -> currentMascotName =
-                                line.substring("mascot_name=".length).trim()
-                            line.startsWith("mascot_icon=") -> currentMascotIcon =
-                                line.substring("mascot_icon=".length).trim()
-                            line.startsWith("theme_color=") -> currentThemeColor =
-                                line.substring("theme_color=".length).trim()
-                            line.startsWith("theme_background=") -> currentThemeBackground =
-                                line.substring("theme_background=".length).trim()
+                            line.startsWith("mascot_name=") -> currentMascotName = line.substring("mascot_name=".length).trim()
+                            line.startsWith("mascot_icon=") -> currentMascotIcon = line.substring("mascot_icon=".length).trim()
+                            line.startsWith("theme_color=") -> currentThemeColor = line.substring("theme_color=".length).trim()
+                            line.startsWith("theme_background=") -> currentThemeBackground = line.substring("theme_background=".length).trim()
                             line.startsWith("dialog_lines=") -> {
-                                val lines =
-                                    line.substring("dialog_lines=".length).split("|")
+                                val lines = line.substring("dialog_lines=".length).split("|")
                                 for (d in lines) {
                                     val t = d.trim(); if (t.isNotEmpty()) dialogLines.add(t)
                                 }
@@ -809,50 +701,44 @@ class ChatActivity : AppCompatActivity() {
                 }
             }
 
-            // ---- randomreply.txt parsing (robust)
+            // randomreply.txt parsing
             val dialogFile = dir.findFile("randomreply.txt")
             if (dialogFile != null && dialogFile.exists()) {
                 try {
-                    contentResolver.openInputStream(dialogFile.uri)?.bufferedReader()
-                        ?.use { reader ->
-                            var currentDialogParser: Dialog? = null
-                            reader.forEachLine { raw ->
-                                val l = raw.trim()
-                                if (l.isEmpty()) return@forEachLine
+                    contentResolver.openInputStream(dialogFile.uri)?.bufferedReader()?.use { reader ->
+                        var currentDialogParser: Dialog? = null
+                        reader.forEachLine { raw ->
+                            val l = raw.trim()
+                            if (l.isEmpty()) return@forEachLine
 
-                                if (l.startsWith(";")) {
-                                    currentDialogParser?.takeIf { it.replies.isNotEmpty() }
-                                        ?.let { dialogs.add(it) }
-                                    currentDialogParser = Dialog(l.substring(1).trim())
-                                    return@forEachLine
-                                }
-
-                                if (l.contains(">")) {
-                                    val parts = l.split(">", limit = 2)
-                                    if (parts.size == 2) {
-                                        val mascot = parts[0].trim()
-                                        val text = parts[1].trim()
-                                        if (mascot.isNotEmpty() && text.isNotEmpty()) {
-                                            val cur = currentDialogParser
-                                                ?: Dialog("default").also { currentDialogParser = it }
-                                            cur.replies.add(mapOf("mascot" to mascot, "text" to text))
-                                        }
-                                    }
-                                    return@forEachLine
-                                }
-
-                                // fallback short dialog line
-                                dialogLines.add(l)
+                            if (l.startsWith(";")) {
+                                currentDialogParser?.takeIf { it.replies.isNotEmpty() }?.let { dialogs.add(it) }
+                                currentDialogParser = Dialog(l.substring(1).trim())
+                                return@forEachLine
                             }
-                            currentDialogParser?.takeIf { it.replies.isNotEmpty() }
-                                ?.let { dialogs.add(it) }
+
+                            if (l.contains(">")) {
+                                val parts = l.split(">", limit = 2)
+                                if (parts.size == 2) {
+                                    val mascot = parts[0].trim()
+                                    val text = parts[1].trim()
+                                    if (mascot.isNotEmpty() && text.isNotEmpty()) {
+                                        val cur = currentDialogParser ?: Dialog("default").also { currentDialogParser = it }
+                                        cur.replies.add(mapOf("mascot" to mascot, "text" to text))
+                                    }
+                                }
+                                return@forEachLine
+                            }
+
+                            dialogLines.add(l)
                         }
+                        currentDialogParser?.takeIf { it.replies.isNotEmpty() }?.let { dialogs.add(it) }
+                    }
                 } catch (e: Exception) {
                     showCustomToast("Ошибка чтения randomreply.txt: ${e.message}")
                 }
             }
 
-            // choose random mascot for base
             if (filename == "base.txt" && mascotList.isNotEmpty()) {
                 val selected = mascotList.random()
                 selected["name"]?.let { currentMascotName = it }
@@ -861,27 +747,17 @@ class ChatActivity : AppCompatActivity() {
                 selected["background"]?.let { currentThemeBackground = it }
             }
 
-            // <-- ADDED: build inverted index once templatesMap filled
+            // reload synonyms and index
+            loadSynonyms()
             rebuildInvertedIndex()
-
-            updateUI(
-                currentMascotName,
-                currentMascotIcon,
-                currentThemeColor,
-                currentThemeBackground
-            )
+            updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
 
         } catch (e: Exception) {
             e.printStackTrace()
             showCustomToast("Ошибка чтения файла: ${e.message}")
             loadFallbackTemplates()
-            rebuildInvertedIndex() // <-- ADDED
-            updateUI(
-                currentMascotName,
-                currentMascotIcon,
-                currentThemeColor,
-                currentThemeBackground
-            )
+            rebuildInvertedIndex()
+            updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
         }
     }
 
@@ -892,7 +768,7 @@ class ChatActivity : AppCompatActivity() {
         dialogs.clear()
         dialogLines.clear()
         mascotList.clear()
-        // <-- ADDED: store normalized keys in fallback as well
+
         templatesMap[normalizeText("привет")] = mutableListOf("Привет! Чем могу помочь?", "Здравствуй!")
         templatesMap[normalizeText("как дела")] = mutableListOf("Всё отлично, а у тебя?", "Нормально, как дела?")
         keywordResponses["спасибо"] = mutableListOf("Рад, что помог!", "Всегда пожалуйста!")
@@ -900,14 +776,13 @@ class ChatActivity : AppCompatActivity() {
 
     private fun updateAutoComplete() {
         val suggestions = mutableListOf<String>()
-        suggestions.addAll(templatesMap.keys) // keys are normalized triggers
+        suggestions.addAll(templatesMap.keys)
         for (s in fallback) {
-            val low = s.lowercase(Locale.ROOT)
+            val low = normalizeText(s)
             if (!suggestions.contains(low)) suggestions.add(low)
         }
         if (adapter == null) {
-            adapter =
-                ArrayAdapter(this, android.R.layout.simple_dropdown_item_1line, suggestions)
+            adapter = ArrayAdapter(this, android.R.layout.simple_dropdown_item_1line, suggestions)
             queryInput.setAdapter(adapter)
             queryInput.threshold = 1
         } else {
@@ -917,8 +792,7 @@ class ChatActivity : AppCompatActivity() {
         }
     }
 
-    /// SECTION: Idle & Dialogs — Автономные диалоги и idle-логика (triggerRandomDialog, startRandomDialog, stopDialog, loadMascotMetadata, updateUI) — Рандомные реплики, таймеры, смена маскота; использует dialogHandler, mascotList
-    // ======= Idle & random dialogs =======
+    // --- Idle & dialogs ---
     private fun triggerRandomDialog() {
         if (dialogLines.isNotEmpty() && random.nextDouble() < 0.3) {
             dialogHandler.postDelayed({
@@ -959,19 +833,11 @@ class ChatActivity : AppCompatActivity() {
                     currentDialogIndex++
                     dialogHandler.postDelayed(this, (random.nextInt(15000) + 10000).toLong())
                 } else {
-                    dialogHandler.postDelayed(
-                        { startRandomDialog() },
-                        (random.nextInt(20000) + 5000).toLong()
-                    )
+                    dialogHandler.postDelayed({ startRandomDialog() }, (random.nextInt(20000) + 5000).toLong())
                 }
             }
         }
-        dialogRunnable?.let {
-            dialogHandler.postDelayed(
-                it,
-                (random.nextInt(15000) + 10000).toLong()
-            )
-        }
+        dialogRunnable?.let { dialogHandler.postDelayed(it, (random.nextInt(15000) + 10000).toLong()) }
     }
 
     private fun stopDialog() {
@@ -983,46 +849,30 @@ class ChatActivity : AppCompatActivity() {
 
     private fun loadMascotMetadata(mascotName: String) {
         if (folderUri == null) return
-        val metadataFilename = "${mascotName.lowercase(Locale.ROOT)}_metadata.txt"
+        val metadataFilename = "${mascotName.lowercase(Locale.getDefault())}_metadata.txt"
         val dir = DocumentFile.fromTreeUri(this, folderUri!!) ?: return
-        val metadataFile = dir.findFile(metadataFilename)
-        if (metadataFile != null && metadataFile.exists()) {
-            try {
-                contentResolver.openInputStream(metadataFile.uri)?.bufferedReader()?.use { reader ->
-                    reader.forEachLine { raw ->
-                        val line = raw.trim()
-                        when {
-                            line.startsWith("mascot_name=") -> currentMascotName =
-                                line.substring("mascot_name=".length).trim()
-                            line.startsWith("mascot_icon=") -> currentMascotIcon =
-                                line.substring("mascot_icon=".length).trim()
-                            line.startsWith("theme_color=") -> currentThemeColor =
-                                line.substring("theme_color=".length).trim()
-                            line.startsWith("theme_background=") -> currentThemeBackground =
-                                line.substring("theme_background=".length).trim()
-                        }
+        val metadataFile = dir.findFile(metadataFilename) ?: return
+        try {
+            contentResolver.openInputStream(metadataFile.uri)?.bufferedReader()?.use { reader ->
+                reader.forEachLine { raw ->
+                    val line = raw.trim()
+                    when {
+                        line.startsWith("mascot_name=") -> currentMascotName = line.substring("mascot_name=".length).trim()
+                        line.startsWith("mascot_icon=") -> currentMascotIcon = line.substring("mascot_icon=".length).trim()
+                        line.startsWith("theme_color=") -> currentThemeColor = line.substring("theme_color=".length).trim()
+                        line.startsWith("theme_background=") -> currentThemeBackground = line.substring("theme_background=".length).trim()
                     }
-                    updateUI(
-                        currentMascotName,
-                        currentMascotIcon,
-                        currentThemeColor,
-                        currentThemeBackground
-                    )
                 }
-            } catch (e: Exception) {
-                showCustomToast("Ошибка загрузки метаданных маскота: ${e.message}")
+                updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
             }
+        } catch (e: Exception) {
+            showCustomToast("Ошибка загрузки метаданных маскота: ${e.message}")
         }
     }
 
-    private fun updateUI(
-        mascotName: String,
-        mascotIcon: String,
-        themeColor: String,
-        themeBackground: String
-    ) {
+    private fun updateUI(mascotName: String, mascotIcon: String, themeColor: String, themeBackground: String) {
         title = "Pawstribe - $mascotName"
-        mascotTopImage?.let { imageView: ImageView ->
+        mascotTopImage?.let { imageView ->
             folderUri?.let { uri ->
                 try {
                     val dir = DocumentFile.fromTreeUri(this, uri)
@@ -1032,21 +882,16 @@ class ChatActivity : AppCompatActivity() {
                             val bitmap = BitmapFactory.decodeStream(inputStream)
                             imageView.setImageBitmap(bitmap)
                             imageView.alpha = 0f
-                            ObjectAnimator.ofFloat(imageView, "alpha", 0f, 1f).setDuration(450)
-                                .start()
+                            ObjectAnimator.ofFloat(imageView, "alpha", 0f, 1f).setDuration(450).start()
                         }
                     }
-                } catch (_: Exception) {
-                }
+                } catch (_: Exception) {}
             }
         }
-        try {
-            messagesContainer.setBackgroundColor(Color.parseColor(themeBackground))
-        } catch (_: Exception) {
-        }
+        try { messagesContainer.setBackgroundColor(Color.parseColor(themeBackground)) } catch (_: Exception) {}
     }
 
-    /// SECTION: Utils — Утилиты (showCustomToast, startIdleTimer) — Toast, таймеры idle; простые хелперы для UI и состояний
+    // --- Utils ---
     private fun showCustomToast(message: String) {
         try {
             val inflater = layoutInflater
@@ -1065,10 +910,44 @@ class ChatActivity : AppCompatActivity() {
     private fun startIdleTimer() {
         lastUserInputTime = System.currentTimeMillis()
         idleCheckRunnable?.let {
-            dialogHandler.removeCallbacks(it); dialogHandler.postDelayed(
-                it,
-                5000
-            )
+            dialogHandler.removeCallbacks(it)
+            dialogHandler.postDelayed(it, 5000)
         }
+    }
+
+    // --- Added: UI helper to add message views ---
+    private fun addChatMessage(sender: String, text: String) {
+        runOnUiThread {
+            val tv = TextView(this).apply {
+                this.text = "$sender: $text"
+                textSize = 16f
+                setPadding(20, 14, 20, 14)
+                layoutParams = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                ).apply {
+                    val isUser = sender.lowercase(Locale.getDefault()) == "ты"
+                    gravity = if (isUser) Gravity.END else Gravity.START
+                    setMargins(8, 8, 8, 8)
+                }
+                // simple background for better readability (fallback)
+                try {
+                    val isUser = sender.lowercase(Locale.getDefault()) == "ты"
+                    setBackgroundResource(if (isUser) R.drawable.bg_message_user else R.drawable.bg_message_bot)
+                } catch (_: Exception) {}
+            }
+            messagesContainer.addView(tv)
+            // keep container not too big
+            if (messagesContainer.childCount > MAX_MESSAGES) {
+                messagesContainer.removeViewAt(0)
+            }
+            scrollToBottomDelayed()
+        }
+    }
+
+    private fun scrollToBottomDelayed() {
+        scrollView.postDelayed({
+            try { scrollView.fullScroll(View.FOCUS_DOWN) } catch (_: Exception) {}
+        }, 120)
     }
 }
