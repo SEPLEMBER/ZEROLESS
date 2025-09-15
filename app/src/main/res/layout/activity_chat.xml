@@ -123,8 +123,7 @@
             android:background="?attr/selectableItemBackgroundBorderless"
             android:contentDescription="Send"
             android:scaleType="centerInside"
-            android:adjustViewBounds="true"
-            android:src="@drawable/ic_send_placeholder" />
+            android:adjustViewBounds="true"  />
     </LinearLayout>
 
 </LinearLayout>
