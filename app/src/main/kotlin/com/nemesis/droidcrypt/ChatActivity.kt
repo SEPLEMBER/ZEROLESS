@@ -879,19 +879,26 @@ class ChatActivity : AppCompatActivity() {
 
     /// SECTION: Utils
     private fun showCustomToast(message: String) {
-        try {
+    try {
+        // Для Android API 30+ используем обычный Toast
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+            Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+        } else {
+            // Для старых версий Android можем использовать кастомный layout
             val layout = layoutInflater.inflate(R.layout.custom_toast, null)
             layout.findViewById<TextView>(R.id.customToastText).text = message
-            Toast(applicationContext).apply {
-                duration = Toast.LENGTH_SHORT
-                @Suppress("DEPRECATION")
-                view = layout
-                show()
-            }
-        } catch (e: Exception) {
-            Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+            
+            val toast = Toast(applicationContext)
+            toast.duration = Toast.LENGTH_SHORT
+            @Suppress("DEPRECATION")
+            toast.view = layout
+            toast.show()
         }
+    } catch (e: Exception) {
+        // Fallback к обычному Toast при любых ошибках
+        Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
     }
+}
 
     private fun startIdleTimer() {
         lastUserInputTime = System.currentTimeMillis()
