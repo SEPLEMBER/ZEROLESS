@@ -1,4 +1,4 @@
-    <!-- Top bar: Time + Battery (слева), иконки (справа) -->
+<?xml version="1.0" encoding="utf-8"?>
     <LinearLayout
         android:id="@+id/topBar"
         android:layout_width="match_parent"
