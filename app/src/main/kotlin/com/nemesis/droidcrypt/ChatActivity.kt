@@ -4,6 +4,7 @@ import android.animation.ObjectAnimator
 import android.content.Intent
 import android.graphics.*
 import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.ColorDrawable
 import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
@@ -19,12 +20,9 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.graphics.ColorUtils
 import androidx.documentfile.provider.DocumentFile
 import java.util.*
+import kotlin.math.abs
+import kotlin.math.min
 import kotlin.math.roundToInt
-import java.util.*
-import kotlin.math.roundToInt
-import kotlin.math.min // <-- ADDED
-import kotlin.math.abs // <-- ADDED
-import android.graphics.drawable.ColorDrawable
 
 class ChatActivity : AppCompatActivity() {
 
@@ -33,21 +31,21 @@ class ChatActivity : AppCompatActivity() {
         private const val PREF_KEY_DISABLE_SCREENSHOTS = "pref_disable_screenshots"
         private const val MAX_CONTEXT_SWITCH = 6 // Note: This is now unused due to logic simplification
         private const val MAX_MESSAGES = 250
-        private const val CANDIDATE_TOKEN_THRESHOLD = 2 // <-- ADDED: минимальное число общих токенов для кандидата
-        private const val MAX_SUBQUERY_RESPONSES = 3 // Ограничение на количество подответов 
-        private const val SUBQUERY_RESPONSE_DELAY = 1500L // Задержка для индикатора "печатает..." }
-        private const val MAX_CANDIDATES_FOR_LEV = 25 // <-- ADDED: ограничение числа кандидатов для Levenshtein
+        private const val CANDIDATE_TOKEN_THRESHOLD = 2 // минимальное число общих токенов для кандидата
+        private const val MAX_SUBQUERY_RESPONSES = 3 // Ограничение на количество подответов
+        private const val SUBQUERY_RESPONSE_DELAY = 1500L // Задержка для индикатора "печатает..."
+        private const val MAX_CANDIDATES_FOR_LEV = 25 // ограничение числа кандидатов для Levenshtein
         private const val JACCARD_THRESHOLD = 0.50
     }
 
     private fun getFuzzyDistance(word: String): Int {
-    return when {
-        word.length <= 4 -> 1
-        word.length <= 8 -> 2
-        else -> 3
+        return when {
+            word.length <= 4 -> 1
+            word.length <= 8 -> 2
+            else -> 3
+        }
     }
-}
-    
+
     /// SECTION: UI и Data — Объявление переменных (UI-элементы, карты шаблонов, состояния маскотов/контекста, idle-данные)
     // UI
     private var folderUri: Uri? = null
@@ -72,10 +70,10 @@ class ChatActivity : AppCompatActivity() {
     private val dialogLines = mutableListOf<String>()
     private val dialogs = mutableListOf<Dialog>()
 
-    // <-- ADDED: inverted index token -> list of triggers (normalized)
+    // inverted index token -> list of triggers (normalized)
     private val invertedIndex = HashMap<String, MutableList<String>>() // token -> list of trigger keys
 
-    // <-- ADDED: synonyms and stopwords storage
+    // synonyms and stopwords storage
     private val synonymsMap = HashMap<String, String>() // synonym -> canonical
     private val stopwords = HashSet<String>() // normalized stopwords set
 
@@ -115,7 +113,7 @@ class ChatActivity : AppCompatActivity() {
         )
     }
 
-    /// SECTION: Lifecycle — Инициализация Activity (onCreate, onResume, onPause) — Настройка UI, prefs, иконок, listeners, начальная загрузка
+    /// SECTION: Lifecycle — Инициализация Activity (onCreate, onResume, onPause)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_chat)
@@ -149,7 +147,7 @@ class ChatActivity : AppCompatActivity() {
         } catch (_: Exception) {
         }
 
-        // <-- ADDED: load synonyms & stopwords early (if folderUri available this will read files)
+        // load synonyms & stopwords early (if folderUri available this will read files)
         loadSynonymsAndStopwords()
 
         // screenshots lock from prefs
@@ -189,12 +187,12 @@ class ChatActivity : AppCompatActivity() {
         if (folderUri == null) {
             showCustomToast("Папка не выбрана! Открой настройки и выбери папку.")
             loadFallbackTemplates()
-            rebuildInvertedIndex() // <-- ADDED: build index for fallback
+            rebuildInvertedIndex()
             updateAutoComplete()
             addChatMessage(currentMascotName, "Добро пожаловать!")
         } else {
             loadTemplatesFromFile(currentContext)
-            rebuildInvertedIndex() // <-- ADDED: build index after load
+            rebuildInvertedIndex()
             updateAutoComplete()
             addChatMessage(currentMascotName, "Добро пожаловать!")
         }
@@ -217,14 +215,14 @@ class ChatActivity : AppCompatActivity() {
         }
         idleCheckRunnable?.let { dialogHandler.postDelayed(it, 5000) }
 
-    // <-- CHANGED: hide actionbar big avatar (we keep side avatars)
+        // hide big avatar
         mascotTopImage?.visibility = View.GONE
     }
 
     override fun onResume() {
         super.onResume()
         folderUri?.let { loadTemplatesFromFile(currentContext) }
-        rebuildInvertedIndex() // <-- ADDED: ensure index fresh on resume
+        rebuildInvertedIndex()
         updateAutoComplete()
         idleCheckRunnable?.let {
             dialogHandler.removeCallbacks(it)
@@ -239,8 +237,7 @@ class ChatActivity : AppCompatActivity() {
         dialogHandler.removeCallbacksAndMessages(null)
     }
 
-    /// SECTION: Toolbar Helpers — Вспомогательные функции для тулбара (touch-эффекты, загрузка иконок) — Работают с UI-элементами и файлами из папки
-    // --- toolbar helpers ---
+    /// SECTION: Toolbar Helpers
     private fun setupIconTouchEffect(btn: ImageButton?) {
         btn?.setOnTouchListener { v, event ->
             when (event.action) {
@@ -273,147 +270,135 @@ class ChatActivity : AppCompatActivity() {
             tryLoad("trash.png", btnTrash)
             tryLoad("envelope.png", btnEnvelopeTop)
             tryLoad("settings.png", btnSettings)
-            
+
         } catch (e: Exception) {
             e.printStackTrace()
-            // Optionally show a toast on error
-            // showCustomToast("Ошибка загрузки иконок")
         }
     }
 
-// === SECTION core: process user query ===
-private fun processUserQuery(userInput: String) {
-    // normalize input early (remove punctuation, collapse spaces)
-    val qOrigRaw = userInput.trim()
-    val qOrig = normalizeText(qOrigRaw)
+    // === SECTION core: process user query ===
+    private fun processUserQuery(userInput: String) {
+        // normalize input early (remove punctuation, collapse spaces)
+        val qOrigRaw = userInput.trim()
+        val qOrig = normalizeText(qOrigRaw)
 
-    // filter stopwords and map synonyms producing tokens and joined string
-    val (qTokensFiltered, qFiltered) = filterStopwordsAndMapSynonyms(qOrig)
+        // filter stopwords and map synonyms producing tokens and joined string
+        val (qTokensFiltered, qFiltered) = filterStopwordsAndMapSynonyms(qOrig)
 
-    // store/use normalized keys in queryCountMap to count repeats robustly
-    val qKeyForCount = qFiltered
+        // store/use normalized keys in queryCountMap to count repeats robustly
+        val qKeyForCount = qFiltered
 
-    if (qFiltered.isEmpty()) return
+        if (qFiltered.isEmpty()) return
 
-    lastUserInputTime = System.currentTimeMillis()
-    stopDialog()
+        lastUserInputTime = System.currentTimeMillis()
+        stopDialog()
 
-    if (qKeyForCount == lastQuery) {
-        val cnt = queryCountMap.getOrDefault(qKeyForCount, 0)
-        queryCountMap[qKeyForCount] = cnt + 1
-    } else {
-        queryCountMap.clear()
-        queryCountMap[qKeyForCount] = 1
-        lastQuery = qKeyForCount
-    }
-
-    addChatMessage("Ты", userInput)
-
-    // Показать уведомление "Печатает..." с рандомной задержкой
-    showTypingIndicator()
-
-    val repeats = queryCountMap.getOrDefault(qKeyForCount, 0)
-    if (repeats >= 5) {
-        val spamResp = antiSpamResponses.random()
-        addChatMessage(currentMascotName, spamResp)
-        startIdleTimer()
-        return
-    }
-
-    var answered = false
-
-    // List to collect subquery responses for combining
-    val subqueryResponses = mutableListOf<String>()
-    val processedSubqueries = mutableSetOf<String>()
-
-    // 1. Check for an exact match in the current context (templatesMap keys are normalized)
-    templatesMap[qFiltered]?.let { possible ->
-        if (possible.isNotEmpty()) {
-            subqueryResponses.add(possible.random())
-            answered = true
-            processedSubqueries.add(qFiltered)
+        if (qKeyForCount == lastQuery) {
+            val cnt = queryCountMap.getOrDefault(qKeyForCount, 0)
+            queryCountMap[qKeyForCount] = cnt + 1
+        } else {
+            queryCountMap.clear()
+            queryCountMap[qKeyForCount] = 1
+            lastQuery = qKeyForCount
         }
-    }
 
-    // 2. Try subqueries (individual tokens and two-token combinations)
-    if (subqueryResponses.size < MAX_SUBQUERY_RESPONSES) {
-        val tokens = if (qTokensFiltered.isNotEmpty()) qTokensFiltered else tokenize(qFiltered)
+        addChatMessage("Ты", userInput)
 
-        // Try individual tokens
-        for (token in tokens) {
-            if (subqueryResponses.size >= MAX_SUBQUERY_RESPONSES) break
-            if (processedSubqueries.contains(token) || token.length < 2) continue // Ignore short tokens
+        // Показать уведомление "Печатает..."
+        showTypingIndicator()
 
-            templatesMap[token]?.let { possible ->
-                if (possible.isNotEmpty()) {
-                    subqueryResponses.add(possible.random())
-                    processedSubqueries.add(token)
-                }
+        val repeats = queryCountMap.getOrDefault(qKeyForCount, 0)
+        if (repeats >= 5) {
+            val spamResp = antiSpamResponses.random()
+            addChatMessage(currentMascotName, spamResp)
+            startIdleTimer()
+            return
+        }
+
+        var answered = false
+
+        // List to collect subquery responses for combining
+        val subqueryResponses = mutableListOf<String>()
+        val processedSubqueries = mutableSetOf<String>()
+
+        // 1. Check for an exact match in the current context (templatesMap keys are normalized)
+        templatesMap[qFiltered]?.let { possible ->
+            if (possible.isNotEmpty()) {
+                subqueryResponses.add(possible.random())
+                answered = true
+                processedSubqueries.add(qFiltered)
             }
+        }
 
-            if (subqueryResponses.size < MAX_SUBQUERY_RESPONSES) {
-                keywordResponses[token]?.let { possible ->
+        // 2. Try subqueries (individual tokens and two-token combinations)
+        if (subqueryResponses.size < MAX_SUBQUERY_RESPONSES) {
+            val tokens = if (qTokensFiltered.isNotEmpty()) qTokensFiltered else tokenize(qFiltered)
+
+            // Try individual tokens
+            for (token in tokens) {
+                if (subqueryResponses.size >= MAX_SUBQUERY_RESPONSES) break
+                if (processedSubqueries.contains(token) || token.length < 2) continue // Ignore short tokens
+
+                templatesMap[token]?.let { possible ->
                     if (possible.isNotEmpty()) {
                         subqueryResponses.add(possible.random())
                         processedSubqueries.add(token)
                     }
                 }
+
+                if (subqueryResponses.size < MAX_SUBQUERY_RESPONSES) {
+                    keywordResponses[token]?.let { possible ->
+                        if (possible.isNotEmpty()) {
+                            subqueryResponses.add(possible.random())
+                            processedSubqueries.add(token)
+                        }
+                    }
+                }
             }
-        }
 
-        // Try two-token combinations
-        if (subqueryResponses.size < MAX_SUBQUERY_RESPONSES && tokens.size > 1) {
-            for (i in 0 until tokens.size - 1) {
-                if (subqueryResponses.size >= MAX_SUBQUERY_RESPONSES) break
-                val twoTokens = "${tokens[i]} ${tokens[i + 1]}"
-                if (processedSubqueries.contains(twoTokens)) continue
+            // Try two-token combinations
+            if (subqueryResponses.size < MAX_SUBQUERY_RESPONSES && tokens.size > 1) {
+                for (i in 0 until tokens.size - 1) {
+                    if (subqueryResponses.size >= MAX_SUBQUERY_RESPONSES) break
+                    val twoTokens = "${tokens[i]} ${tokens[i + 1]}"
+                    if (processedSubqueries.contains(twoTokens)) continue
 
-                templatesMap[twoTokens]?.let { possible ->
-                    if (possible.isNotEmpty()) {
-                        subqueryResponses.add(possible.random())
-                        processedSubqueries.add(twoTokens)
+                    templatesMap[twoTokens]?.let { possible ->
+                        if (possible.isNotEmpty()) {
+                            subqueryResponses.add(possible.random())
+                            processedSubqueries.add(twoTokens)
+                        }
                     }
                 }
             }
         }
-    }
 
-    // 3. Combine subquery responses into a single message
-    if (subqueryResponses.isNotEmpty()) {
-        val combinedResponse = subqueryResponses.joinToString(". ")
-        dialogHandler.postDelayed({
-            addChatMessage(currentMascotName, combinedResponse)
-            startIdleTimer()
-        }, SUBQUERY_RESPONSE_DELAY)
-        answered = true
-    }
+        // 3. Combine subquery responses into a single message
+        if (subqueryResponses.isNotEmpty()) {
+            val combinedResponse = subqueryResponses.joinToString(". ")
+            dialogHandler.postDelayed({
+                addChatMessage(currentMascotName, combinedResponse)
+                startIdleTimer()
+            }, SUBQUERY_RESPONSE_DELAY)
+            answered = true
+        }
 
-    // 4. If no subquery responses, check for keywords in the current context
-    if (!answered) {
-        for ((keyword, responses) in keywordResponses) {
-            if (qFiltered.contains(keyword) && responses.isNotEmpty()) {
-                dialogHandler.postDelayed({
-                    addChatMessage(currentMascotName, responses.random())
-                    startIdleTimer()
-                }, SUBQUERY_RESPONSE_DELAY)
-                answered = true
-                break
+        // 4. If no subquery responses, check for keywords in the current context
+        if (!answered) {
+            for ((keyword, responses) in keywordResponses) {
+                if (qFiltered.contains(keyword) && responses.isNotEmpty()) {
+                    dialogHandler.postDelayed({
+                        addChatMessage(currentMascotName, responses.random())
+                        startIdleTimer()
+                    }, SUBQUERY_RESPONSE_DELAY)
+                    answered = true
+                    break
+                }
             }
         }
-    }
 
-    // 5. Final fallback: default/dummy response if still not answered
-    if (!answered) {
-        dialogHandler.postDelayed({
-            addChatMessage(currentMascotName, getDefaultResponse())
-            startIdleTimer()
-        }, SUBQUERY_RESPONSE_DELAY)
-    }
-}
-
-        // 2.5 FUZZY: Use inverted index to collect candidates and run Levenshtein only on them
+        // 5. FUZZY matching (inverted index -> Jaccard -> Levenshtein)
         if (!answered) {
-            // tokenize normalized query (we already have filtered tokens)
             val qTokens = if (qTokensFiltered.isNotEmpty()) qTokensFiltered else tokenize(qFiltered)
             val candidateCounts = HashMap<String, Int>()
             for (tok in qTokens) {
@@ -421,8 +406,8 @@ private fun processUserQuery(userInput: String) {
                     candidateCounts[trig] = candidateCounts.getOrDefault(trig, 0) + 1
                 }
             }
-            // Prefer candidates with more shared tokens
-            val candidates = if (candidateCounts.isNotEmpty()) {
+
+            val candidates: List<String> = if (candidateCounts.isNotEmpty()) {
                 candidateCounts.entries
                     .filter { it.value >= CANDIDATE_TOKEN_THRESHOLD }
                     .sortedByDescending { it.value }
@@ -430,12 +415,11 @@ private fun processUserQuery(userInput: String) {
                     .take(MAX_CANDIDATES_FOR_LEV)
             } else {
                 val maxDist = getFuzzyDistance(qFiltered)
-templatesMap.keys.filter { abs(it.length - qFiltered.length) <= maxDist }
-    .take(MAX_CANDIDATES_FOR_LEV)
-
+                templatesMap.keys.filter { abs(it.length - qFiltered.length) <= maxDist }
+                    .take(MAX_CANDIDATES_FOR_LEV)
             }
 
-            // <-- ADDED: Try Jaccard first on token-sets (stopwords removed / synonyms mapped)
+            // Try Jaccard first
             var bestByJaccard: String? = null
             var bestJaccard = 0.0
             val qSet = qTokens.toSet()
@@ -458,40 +442,38 @@ templatesMap.keys.filter { abs(it.length - qFiltered.length) <= maxDist }
                 }
             }
 
-            // fallback to Levenshtein if Jaccard didn't decide
+            // fallback to Levenshtein if needed
             if (!answered) {
                 var bestKey: String? = null
                 var bestDist = Int.MAX_VALUE
                 for (key in candidates) {
                     val maxDist = getFuzzyDistance(qFiltered)
-if (abs(key.length - qFiltered.length) > maxDist + 1) continue
-val d = levenshtein(qFiltered, key, qFiltered)
-if (d < bestDist) {
-    bestDist = d
-    bestKey = key
-}
-
+                    if (abs(key.length - qFiltered.length) > maxDist + 1) continue
+                    val d = levenshtein(qFiltered, key, qFiltered)
+                    if (d < bestDist) {
+                        bestDist = d
+                        bestKey = key
+                    }
                     if (bestDist == 0) break
                 }
                 val maxDist = getFuzzyDistance(qFiltered)
-if (bestKey != null && bestDist <= maxDist) {
-    val possible = templatesMap[bestKey]
-    if (!possible.isNullOrEmpty()) {
-        addChatMessage(currentMascotName, possible.random())
-        answered = true
-    }
-}
-
+                if (bestKey != null && bestDist <= maxDist) {
+                    val possible = templatesMap[bestKey]
+                    if (!possible.isNullOrEmpty()) {
+                        addChatMessage(currentMascotName, possible.random())
+                        answered = true
+                    }
+                }
             }
-        } // <-- FUZZY BLOCK ADDED
+        }
 
-        // 3. If still no answer, try to switch context
+        // 6. If still no answer, try to switch context and re-check
         if (!answered) {
             detectContext(qFiltered)?.let { newContext ->
                 if (newContext != currentContext) {
                     currentContext = newContext
                     loadTemplatesFromFile(currentContext)
-                    rebuildInvertedIndex() // <-- ADDED: rebuild index after switching context
+                    rebuildInvertedIndex()
                     updateAutoComplete()
                     // Re-check for an answer in the new context after switching
                     templatesMap[qFiltered]?.let { possible ->
@@ -503,16 +485,18 @@ if (bestKey != null && bestDist <= maxDist) {
                 }
             }
         }
-        // 4. If nothing worked, use a fallback response
+
+        // 7. Final fallback
         if (!answered) {
             val fallbackResp = getDummyResponse(qOrig)
             addChatMessage(currentMascotName, fallbackResp)
         }
+
         // Trigger idle events after processing the query
         triggerRandomDialog()
         startIdleTimer()
     }
-    
+
     // Новый метод для показа полупрозрачного уведомления "Печатает..."
     private fun showTypingIndicator() {
         val typingView = TextView(this).apply {
@@ -530,31 +514,33 @@ if (bestKey != null && bestDist <= maxDist) {
             }
         }
         messagesContainer.addView(typingView, 0) // Добавляем в начало контейнера (вверху)
-        
+
         // Рандомная задержка 1–3 секунды перед удалением
         val randomDelay = (1000..3000).random().toLong()
         Handler(Looper.getMainLooper()).postDelayed({
             messagesContainer.removeView(typingView)
         }, randomDelay)
     }
-    
+
     private fun clearChat() {
         messagesContainer.removeAllViews()
         queryCountMap.clear()
         lastQuery = ""
         currentContext = "base.txt"
         loadTemplatesFromFile(currentContext)
-        rebuildInvertedIndex() // <-- ADDED
+        rebuildInvertedIndex()
         updateAutoComplete()
         addChatMessage(currentMascotName, "Чат очищен. Возвращаюсь к началу.")
     }
+
     private fun detectContext(input: String): String? {
-        val lower = normalizeText(input) // <-- ADDED: normalize when detecting context
+        val lower = normalizeText(input) // normalize when detecting context
         for ((keyword, value) in contextMap) {
             if (lower.contains(keyword)) return value
         }
         return null
     }
+
     private fun getDummyResponse(query: String): String {
         val lower = query.lowercase(Locale.ROOT)
         return when {
@@ -564,7 +550,7 @@ if (bestKey != null && bestDist <= maxDist) {
         }
     }
 
-    // <-- ADDED: normalize text (remove punctuation, collapse spaces)
+    // normalize text (remove punctuation, collapse spaces)
     private fun normalizeText(s: String): String {
         // keep letters, digits and spaces only
         val lower = s.lowercase(Locale.getDefault())
@@ -573,13 +559,13 @@ if (bestKey != null && bestDist <= maxDist) {
         return collapsed
     }
 
-    // <-- ADDED: tokenize (split normalized text to tokens)
+    // tokenize (split normalized text to tokens)
     private fun tokenize(s: String): List<String> {
         if (s.isBlank()) return emptyList()
         return s.split(Regex("\\s+")).map { it.trim() }.filter { it.isNotEmpty() }
     }
 
-    // <-- ADDED: load synonyms and stopwords from folder via SAF
+    // load synonyms and stopwords from folder via SAF
     private fun loadSynonymsAndStopwords() {
         synonymsMap.clear()
         stopwords.clear()
@@ -625,7 +611,7 @@ if (bestKey != null && bestDist <= maxDist) {
         }
     }
 
-    // <-- ADDED: filter stopwords and map synonyms for an input string
+    // filter stopwords and map synonyms for an input string
     // returns Pair(listOfTokens, joinedNormalizedString)
     private fun filterStopwordsAndMapSynonyms(input: String): Pair<List<String>, String> {
         val toks = tokenize(input)
@@ -638,7 +624,7 @@ if (bestKey != null && bestDist <= maxDist) {
         return Pair(mapped, joined)
     }
 
-    // <-- ADDED: rebuild inverted index from current templatesMap (respect stopwords & synonyms)
+    // rebuild inverted index from current templatesMap (respect stopwords & synonyms)
     private fun rebuildInvertedIndex() {
         invertedIndex.clear()
         for (key in templatesMap.keys) {
@@ -652,48 +638,45 @@ if (bestKey != null && bestDist <= maxDist) {
         }
     }
 
-    // <-- ADDED: Levenshtein implementation (optimized with rolling rows and early exit)
-private fun levenshtein(s: String, t: String, qFiltered: String): Int {
-    // quick shortcuts
-    if (s == t) return 0
-    val n = s.length
-    val m = t.length
-    if (n == 0) return m
-    if (m == 0) return n
+    // Levenshtein implementation (optimized with rolling rows and early exit)
+    private fun levenshtein(s: String, t: String, qFiltered: String): Int {
+        // quick shortcuts
+        if (s == t) return 0
+        val n = s.length
+        val m = t.length
+        if (n == 0) return m
+        if (m == 0) return n
 
-    val maxDist = getFuzzyDistance(qFiltered)
-    if (abs(n - m) > maxDist + 2) return Int.MAX_VALUE / 2
+        val maxDist = getFuzzyDistance(qFiltered)
+        if (abs(n - m) > maxDist + 2) return Int.MAX_VALUE / 2
 
-    // use two rolling rows to save memory
-    val prev = IntArray(m + 1) { it }
-    val curr = IntArray(m + 1)
+        // use two rolling rows to save memory
+        val prev = IntArray(m + 1) { it }
+        val curr = IntArray(m + 1)
 
-    for (i in 1..n) {
-        curr[0] = i
-        var minInRow = curr[0]
-        val si = s[i - 1]
-        for (j in 1..m) {
-            val cost = if (si == t[j - 1]) 0 else 1
-            val deletion = prev[j] + 1
-            val insertion = curr[j - 1] + 1
-            val substitution = prev[j - 1] + cost
-            curr[j] = min(min(deletion, insertion), substitution)
-            if (curr[j] < minInRow) minInRow = curr[j]
+        for (i in 1..n) {
+            curr[0] = i
+            var minInRow = curr[0]
+            val si = s[i - 1]
+            for (j in 1..m) {
+                val cost = if (si == t[j - 1]) 0 else 1
+                val deletion = prev[j] + 1
+                val insertion = curr[j - 1] + 1
+                val substitution = prev[j - 1] + cost
+                curr[j] = min(min(deletion, insertion), substitution)
+                if (curr[j] < minInRow) minInRow = curr[j]
+            }
+
+            val maxDistRow = getFuzzyDistance(qFiltered)
+            if (minInRow > maxDistRow + 2) return Int.MAX_VALUE / 2
+
+            for (k in 0..m) prev[k] = curr[k]
         }
 
-        val maxDistRow = getFuzzyDistance(qFiltered)
-        if (minInRow > maxDistRow + 2) return Int.MAX_VALUE / 2
-
-        for (k in 0..m) prev[k] = curr[k]
+        return prev[m]
     }
 
-    return prev[m]
-}
-// <-- END ADDED
-
-
-    /// SECTION: UI Messages — Создание и добавление сообщений в чат (addChatMessage, createMessageBubble и утилиты) — UI-логика пузырей, аватаров, скролла; использует currentThemeColor
-    // === UI: add message with avatar left for mascots, right-aligned for user ===
+    /// SECTION: UI Messages — Создание и добавление сообщений в чат
     private fun addChatMessage(sender: String, text: String) {
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -831,8 +814,7 @@ private fun levenshtein(s: String, t: String, qFiltered: String): Int {
         return (dp * density).roundToInt()
     }
 
-    /// SECTION: Template Loading — Загрузка шаблонов и метаданных (loadTemplatesFromFile, loadFallbackTemplates, updateAutoComplete) — Парсинг файлов из папки, карты шаблонов/контекстов, fallback; использует folderUri, contextMap
-    // ========================== Загрузка шаблонов ==========================
+    /// SECTION: Template Loading
     private fun loadTemplatesFromFile(filename: String) {
         templatesMap.clear()
         keywordResponses.clear()
@@ -850,12 +832,12 @@ private fun levenshtein(s: String, t: String, qFiltered: String): Int {
         currentThemeColor = "#00FF00"
         currentThemeBackground = "#000000"
 
-        // <-- ADDED: ensure synonyms/stopwords are loaded (in case folderUri was set later)
+        // ensure synonyms/stopwords are loaded (in case folderUri was set later)
         loadSynonymsAndStopwords()
 
         if (folderUri == null) {
             loadFallbackTemplates()
-            rebuildInvertedIndex() // <-- ADDED
+            rebuildInvertedIndex()
             updateUI(
                 currentMascotName,
                 currentMascotIcon,
@@ -868,7 +850,7 @@ private fun levenshtein(s: String, t: String, qFiltered: String): Int {
         try {
             val dir = DocumentFile.fromTreeUri(this, folderUri!!) ?: run {
                 loadFallbackTemplates()
-                rebuildInvertedIndex() // <-- ADDED
+                rebuildInvertedIndex()
                 updateUI(
                     currentMascotName,
                     currentMascotIcon,
@@ -881,7 +863,7 @@ private fun levenshtein(s: String, t: String, qFiltered: String): Int {
             val file = dir.findFile(filename)
             if (file == null || !file.exists()) {
                 loadFallbackTemplates()
-                rebuildInvertedIndex() // <-- ADDED
+                rebuildInvertedIndex()
                 updateUI(
                     currentMascotName,
                     currentMascotIcon,
@@ -933,10 +915,10 @@ private fun levenshtein(s: String, t: String, qFiltered: String): Int {
                     if (!l.contains("=")) return@forEachLine
                     val parts = l.split("=", limit = 2)
                     if (parts.size == 2) {
-                        // <-- ADDED: normalize trigger key (remove punctuation etc)
+                        // normalize trigger key (remove punctuation etc)
                         val triggerRaw = parts[0].trim()
                         val trigger = normalizeText(triggerRaw)
-                        // <-- ADDED: additionally filter stopwords and map synonyms for trigger key when storing
+                        // additionally filter stopwords and map synonyms for trigger key when storing
                         val triggerFiltered = filterStopwordsAndMapSynonyms(trigger).second
                         val responses = parts[1].split("|")
                         val responseList =
@@ -991,7 +973,7 @@ private fun levenshtein(s: String, t: String, qFiltered: String): Int {
                 }
             }
 
-            // ---- randomreply.txt parsing (robust)
+            // randomreply.txt parsing (robust)
             val dialogFile = dir.findFile("randomreply.txt")
             if (dialogFile != null && dialogFile.exists()) {
                 try {
@@ -1043,7 +1025,7 @@ private fun levenshtein(s: String, t: String, qFiltered: String): Int {
                 selected["background"]?.let { currentThemeBackground = it }
             }
 
-            // <-- ADDED: build inverted index once templatesMap filled
+            // build inverted index once templatesMap filled
             rebuildInvertedIndex()
 
             updateUI(
@@ -1057,7 +1039,7 @@ private fun levenshtein(s: String, t: String, qFiltered: String): Int {
             e.printStackTrace()
             showCustomToast("Ошибка чтения файла: ${e.message}")
             loadFallbackTemplates()
-            rebuildInvertedIndex() // <-- ADDED
+            rebuildInvertedIndex()
             updateUI(
                 currentMascotName,
                 currentMascotIcon,
@@ -1074,7 +1056,7 @@ private fun levenshtein(s: String, t: String, qFiltered: String): Int {
         dialogs.clear()
         dialogLines.clear()
         mascotList.clear()
-        // <-- ADDED: store normalized keys in fallback as well (respect stopwords/synonyms)
+        // store normalized keys in fallback as well (respect stopwords/synonyms)
         val t1 = filterStopwordsAndMapSynonyms(normalizeText("привет")).second
         templatesMap[t1] = mutableListOf("Привет! Чем могу помочь?", "Здравствуй!")
         val t2 = filterStopwordsAndMapSynonyms(normalizeText("как дела")).second
@@ -1090,7 +1072,6 @@ private fun levenshtein(s: String, t: String, qFiltered: String): Int {
             if (!suggestions.contains(low)) suggestions.add(low)
         }
         if (adapter == null) {
-            // <-- CHANGED: make adapter produce white text for dropdown items
             adapter = object : ArrayAdapter<String>(this, android.R.layout.simple_dropdown_item_1line, suggestions) {
                 override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
                     val v = super.getView(position, convertView, parent) as TextView
@@ -1109,8 +1090,7 @@ private fun levenshtein(s: String, t: String, qFiltered: String): Int {
         }
     }
 
-    /// SECTION: Idle & Dialogs — Автономные диалоги и idle-логика (triggerRandomDialog, startRandomDialog, stopDialog, loadMascotMetadata, updateUI) — Рандомные реплики, таймеры, смена маскота; использует dialogHandler, mascotList
-    // ======= Idle & random dialogs =======
+    /// SECTION: Idle & Dialogs
     private fun triggerRandomDialog() {
         if (dialogLines.isNotEmpty() && random.nextDouble() < 0.3) {
             dialogHandler.postDelayed({
@@ -1214,7 +1194,6 @@ private fun levenshtein(s: String, t: String, qFiltered: String): Int {
         themeBackground: String
     ) {
         title = "Pawstribe - $mascotName"
-        // <-- CHANGED: we hide actionbar mascotTopImage (no big avatar)
         mascotTopImage?.visibility = View.GONE
 
         try {
@@ -1223,7 +1202,7 @@ private fun levenshtein(s: String, t: String, qFiltered: String): Int {
         }
     }
 
-    /// SECTION: Utils — Утилиты (showCustomToast, startIdleTimer) — Toast, таймеры idle; простые хелперы для UI и состояний
+    /// SECTION: Utils
     private fun showCustomToast(message: String) {
         try {
             val inflater = layoutInflater
