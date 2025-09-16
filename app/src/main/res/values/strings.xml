@@ -14,6 +14,8 @@
 <string name="envelope">Сообщения</string>
 <string name="settings">Настройки</string>
 <string name="battery">Батарея</string>
+<string name="charging">Зарядка</string>
+<string name="info">Информация</string>
 <string name="time">Время</string>
 
 </resources>
