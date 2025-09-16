@@ -1,13 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    android:id="@+id/chat_layout"
-    android:layout_width="match_parent"
-    android:layout_height="match_parent"
-    android:orientation="vertical"
-    android:background="@color/background_black"
-    android:padding="8dp">
-
-    <!-- Top bar: Mascot image + icons -->
+    <!-- Top bar: Time + Battery (слева), иконки (справа) -->
     <LinearLayout
         android:id="@+id/topBar"
         android:layout_width="match_parent"
@@ -18,27 +9,46 @@
         android:paddingEnd="8dp"
         android:background="@color/card_dark">
 
-        <!-- Mascot Image (hidden: actionbar avatar removed as requested) -->
-        <ImageView
-            android:id="@+id/mascot_top_image"
-            android:layout_width="64dp"
-            android:layout_height="64dp"
-            android:layout_marginEnd="8dp"
-            android:scaleType="centerCrop"
-            android:contentDescription="Mascot Top"
-            android:visibility="gone" />
+        <!-- Секция слева -->
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="match_parent"
+            android:orientation="vertical"
+            android:gravity="center_vertical">
 
+            <TextView
+                android:id="@+id/time_text"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="00:00"
+                android:textColor="@color/typing_orange"
+                android:textSize="16sp"
+                android:paddingBottom="2dp"
+                android:fontFamily="monospace"/>
+
+            <TextView
+                android:id="@+id/battery_text"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="100%"
+                android:textColor="@color/typing_orange"
+                android:textSize="14sp"
+                android:fontFamily="monospace"/>
+        </LinearLayout>
+
+        <!-- Spacer -->
         <View
             android:layout_width="0dp"
-            android:layout_height="wrap_content"
+            android:layout_height="match_parent"
             android:layout_weight="1" />
 
+        <!-- Иконки справа -->
         <ImageButton
             android:id="@+id/btn_lock"
             android:layout_width="56dp"
             android:layout_height="56dp"
             android:background="?attr/selectableItemBackgroundBorderless"
-            android:contentDescription="Lock"
+            android:contentDescription="@string/lock"
             android:scaleType="centerInside"
             android:adjustViewBounds="true" />
 
@@ -48,7 +58,7 @@
             android:layout_height="56dp"
             android:layout_marginStart="6dp"
             android:background="?attr/selectableItemBackgroundBorderless"
-            android:contentDescription="Trash"
+            android:contentDescription="@string/trash"
             android:scaleType="centerInside"
             android:adjustViewBounds="true" />
 
@@ -58,7 +68,7 @@
             android:layout_height="56dp"
             android:layout_marginStart="6dp"
             android:background="?attr/selectableItemBackgroundBorderless"
-            android:contentDescription="Envelope"
+            android:contentDescription="@string/envelope"
             android:scaleType="centerInside"
             android:adjustViewBounds="true" />
 
@@ -68,62 +78,7 @@
             android:layout_height="56dp"
             android:layout_marginStart="6dp"
             android:background="?attr/selectableItemBackgroundBorderless"
-            android:contentDescription="Settings"
+            android:contentDescription="@string/settings"
             android:scaleType="centerInside"
             android:adjustViewBounds="true" />
     </LinearLayout>
-
-    <!-- Chat area background slightly lighter than page -->
-    <ScrollView
-        android:id="@+id/scrollView"
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1"
-        android:fillViewport="true"
-        android:background="@color/chat_area_bg"
-        android:padding="8dp">
-
-        <LinearLayout
-            android:id="@+id/chatMessagesContainer"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical" />
-    </ScrollView>
-
-    <!-- Input row: text + envelope (send) -->
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:gravity="center_vertical"
-        android:paddingTop="8dp"
-        android:background="@color/input_bg"
-        android:padding="8dp">
-
-        <AutoCompleteTextView
-            android:id="@+id/queryInput"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:hint="Напиши сообщение..."
-            android:textColor="@color/mascot_racky_text"
-            android:textColorHint="@color/mascot_racky_text"
-            android:background="@android:color/transparent"
-            android:padding="8dp"
-            android:inputType="textMultiLine"
-            android:maxLines="3"
-            android:scrollbars="vertical"
-            android:popupBackground="@color/popup_bg" />
-
-        <ImageButton
-            android:id="@+id/envelope_button"
-            android:layout_width="56dp"
-            android:layout_height="56dp"
-            android:layout_marginStart="8dp"
-            android:background="?attr/selectableItemBackgroundBorderless"
-            android:contentDescription="Send"
-            android:scaleType="centerInside"
-            android:adjustViewBounds="true"  />
-    </LinearLayout>
-
-</LinearLayout>
