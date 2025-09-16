@@ -9,4 +9,8 @@
     <string name="templates_hint">Каждый шаблон в новой строке. Формат: триггер=ответ</string>
     <string name="start_chat">Перейти в чат</string>
     <string name="open_settings">Открыть настройки</string>
+    <string name="racky_intro">Racky: Привет! Я тут немного подшаманил ядро. Введи /settings для настройки или /exit для выхода.</string>
+    <string name="welcome_1">О, рад тебя снова видеть! Подключайся скорее!</string>
+    <string name="welcome_2">Racky на связи! Готов к новым приключениям?</string>
+    <string name="welcome_3">Эй, ты вернулся! Введи команду и погнали!</string>
 </resources>
