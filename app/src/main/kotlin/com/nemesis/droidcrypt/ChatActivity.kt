@@ -668,7 +668,7 @@ class ChatActivity : AppCompatActivity() {
             row.addView(bubble, lp)
 
             // Add Slash Icon
-            var slashView = TextView(this).apply {
+            val slashView = TextView(this).apply {
                 text = "/"
                 textSize = 14f
                 setPadding(dpToPx(6), dpToPx(4), dpToPx(6), dpToPx(4))
@@ -682,9 +682,8 @@ class ChatActivity : AppCompatActivity() {
                 tag = slashTags
             }
             row.addView(slashView)
-            dialogHandler.postDelayed({
-                slashView.text = "//"
-            }, 2000L)
+            val slashUpdateRunnable = Runnable { slashView.text = "//" }
+            dialogHandler.postDelayed(slashUpdateRunnable, 2000L)
         } else {
             val avatarView = ImageView(this).apply {
                 val size = dpToPx(64)
@@ -967,8 +966,8 @@ class ChatActivity : AppCompatActivity() {
     // Idle & Dialogs
     private fun triggerRandomDialog() {
         if (dialogLines.isNotEmpty() && random.nextDouble() < 0.3) {
-            dialogHandler.postDelayed({
-                if (dialogLines.isEmpty()) return@postDelayed
+            val randomDialogRunnable = Runnable {
+                if (dialogLines.isEmpty()) return@Runnable
                 val line = dialogLines.random()
                 if (mascotList.isNotEmpty()) {
                     mascotList.random().let { rnd ->
@@ -979,16 +978,18 @@ class ChatActivity : AppCompatActivity() {
                 } else {
                     addChatMessage(currentMascotName, line)
                 }
-            }, 1500L)
+            }
+            dialogHandler.postDelayed(randomDialogRunnable, 1500L)
         }
         if (mascotList.isNotEmpty() && random.nextDouble() < 0.1) {
-            dialogHandler.postDelayed({
+            val randomMascotRunnable = Runnable {
                 mascotList.random().let { rnd ->
                     val name = rnd["name"] ?: currentMascotName
                     loadMascotMetadata(name)
                     addChatMessage(name, "Эй, мы не закончили!")
                 }
-            }, 2500L)
+            }
+            dialogHandler.postDelayed(randomMascotRunnable, 2500L)
         }
     }
 
@@ -1007,13 +1008,17 @@ class ChatActivity : AppCompatActivity() {
                     loadMascotMetadata(mascot)
                     addChatMessage(mascot, text)
                     currentDialogIndex++
-                    dialogHandler.postDelayed(this, (10000..25000).random().toLong())
+                    val nextDelay = (10000..25000).random().toLong()
+                    dialogHandler.postDelayed(this, nextDelay)
                 } else {
-                    dialogHandler.postDelayed({ startRandomDialog() }, (5000..25000).random().toLong())
+                    val restartDelay = (5000..25000).random().toLong()
+                    val restartRunnable = Runnable { startRandomDialog() }
+                    dialogHandler.postDelayed(restartRunnable, restartDelay)
                 }
             }
         }
-        dialogHandler.postDelayed(dialogRunnable!!, (10000..25000).random().toLong())
+        val initialDelay = (10000..25000).random().toLong()
+        dialogHandler.postDelayed(dialogRunnable!!, initialDelay)
     }
 
     private fun stopDialog() {
