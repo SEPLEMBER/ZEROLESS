@@ -1,6 +1,5 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:tools="http://schemas.android.com/tools"
-    package="com.nemesis.droidcrypt">
+    xmlns:tools="http://schemas.android.com/tools">
 
     <!-- Permissions: For prototype, use internal storage and SAF compatibility -->
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
@@ -15,7 +14,7 @@
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:supportsRtl="true"
-        android:theme="@style/Theme.AppCompat.Light.DarkActionBar"
+        android:theme="@style/Theme.AppCompat.Light.NoActionBar"
         android:requestLegacyExternalStorage="true"
         tools:targetApi="35">
 
