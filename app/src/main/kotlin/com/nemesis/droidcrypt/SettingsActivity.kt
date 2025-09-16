@@ -11,7 +11,6 @@ import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.documentfile.provider.DocumentFile
-import androidx.preference.PreferenceManager
 import java.io.BufferedReader
 import java.io.FileInputStream
 import java.io.FileOutputStream
@@ -20,7 +19,6 @@ import java.io.InputStreamReader
 class SettingsActivity : AppCompatActivity() {
 
     companion object {
-        private const val REQUEST_CODE_OPEN_DIRECTORY = 1
         private const val PREF_KEY_FOLDER_URI = "pref_folder_uri"
         private const val PREF_KEY_DISABLE_SCREENSHOTS = "pref_disable_screenshots"
     }
@@ -34,30 +32,31 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var disableScreenshotsSwitch: Switch
     private lateinit var prefs: SharedPreferences
 
-    private val folderPickerLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-        if (result.resultCode == RESULT_OK) {
-            result.data?.data?.let { uri ->
-                folderUri = uri
-                try {
-                    contentResolver.takePersistableUriPermission(
-                        uri,
-                        Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-                    )
-                } catch (e: SecurityException) {
-                    // Игнорируем, если не удалось получить разрешение
-                }
-                prefs.edit().putString(PREF_KEY_FOLDER_URI, uri.toString()).apply()
-                Toast.makeText(this, "Папка выбрана", Toast.LENGTH_SHORT).show()
-                loadTemplatesFromFile("base.txt")
-            } ?: Toast.makeText(this, "Ошибка: папка не выбрана", Toast.LENGTH_SHORT).show()
+    private val folderPickerLauncher =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            if (result.resultCode == RESULT_OK) {
+                result.data?.data?.let { uri ->
+                    folderUri = uri
+                    try {
+                        contentResolver.takePersistableUriPermission(
+                            uri,
+                            Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                        )
+                    } catch (_: SecurityException) {
+                    }
+                    prefs.edit().putString(PREF_KEY_FOLDER_URI, uri.toString()).apply()
+                    Toast.makeText(this, "Папка выбрана", Toast.LENGTH_SHORT).show()
+                    loadTemplatesFromFile("base.txt")
+                } ?: Toast.makeText(this, "Ошибка: папка не выбрана", Toast.LENGTH_SHORT).show()
+            }
         }
-    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_settings)
 
-        prefs = PreferenceManager.getDefaultSharedPreferences(this)
+        // Используем прямой SharedPreferences
+        prefs = getSharedPreferences("my_prefs", MODE_PRIVATE)
 
         selectFolderButton = findViewById(R.id.selectFolderButton)
         clearTemplatesButton = findViewById(R.id.clearTemplatesButton)
@@ -67,11 +66,9 @@ class SettingsActivity : AppCompatActivity() {
         disableScreenshotsSwitch = findViewById(R.id.disableScreenshotsSwitch)
 
         templatesInput.setText("")
-
-        // Загрузка настройки запрета скриншотов
         disableScreenshotsSwitch.isChecked = prefs.getBoolean(PREF_KEY_DISABLE_SCREENSHOTS, false)
 
-        // Попытка восстановить ранее сохраненный URI папки
+        // Восстанавливаем сохранённый URI папки
         prefs.getString(PREF_KEY_FOLDER_URI, null)?.let { saved ->
             try {
                 folderUri = Uri.parse(saved)
@@ -80,7 +77,7 @@ class SettingsActivity : AppCompatActivity() {
                     Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
                 )
                 loadTemplatesFromFile("base.txt")
-            } catch (e: Exception) {
+            } catch (_: Exception) {
                 folderUri = null
             }
         }
@@ -97,17 +94,18 @@ class SettingsActivity : AppCompatActivity() {
                 Toast.makeText(this, "Сначала выберите папку", Toast.LENGTH_SHORT).show()
                 return@setOnClickListener
             }
+
             val all = templatesInput.text.toString()
-            if (all.trim().isEmpty()) {
+            if (all.isBlank()) {
                 saveTemplatesToFile("base.txt", "")
                 Toast.makeText(this, "Шаблоны очищены", Toast.LENGTH_SHORT).show()
                 return@setOnClickListener
             }
-            val lines = all.lines()
+
             var savedCount = 0
             var skipped = 0
             val content = buildString {
-                lines.forEach { raw ->
+                all.lines().forEach { raw ->
                     val line = raw.trim()
                     if (line.isEmpty()) return@forEach
                     if ("=" !in line) {
@@ -120,17 +118,21 @@ class SettingsActivity : AppCompatActivity() {
                         return@forEach
                     }
                     if (isNotEmpty()) append('\n')
-                    append(key.toLowerCase()).append('=').append(value)
+                    append(key.lowercase()).append('=').append(value)
                     savedCount++
                 }
             }
+
             saveTemplatesToFile("base.txt", content)
             Toast.makeText(this, "Сохранено: $savedCount, пропущено: $skipped", Toast.LENGTH_SHORT).show()
         }
 
         disableScreenshotsSwitch.setOnCheckedChangeListener { _, isChecked ->
             prefs.edit().putBoolean(PREF_KEY_DISABLE_SCREENSHOTS, isChecked).apply()
-            Toast.makeText(this, if (isChecked) "Скриншоты запрещены" else "Скриншоты разрешены", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this,
+                if (isChecked) "Скриншоты запрещены" else "Скриншоты разрешены",
+                Toast.LENGTH_SHORT
+            ).show()
         }
 
         backButton.setOnClickListener {
