@@ -499,7 +499,7 @@ class ChatActivity : AppCompatActivity() {
             text = "печатает..."
             textSize = 14f
             setTextColor(getColor(android.R.color.white))
-            setBackgroundColor(0x80000000)
+            setBackgroundColor(Color.argb(128, 0, 0, 0))
             alpha = 0.7f
             setPadding(dpToPx(16), dpToPx(8), dpToPx(16), dpToPx(8))
             layoutParams = LinearLayout.LayoutParams(
@@ -668,7 +668,7 @@ class ChatActivity : AppCompatActivity() {
             row.addView(bubble, lp)
 
             // Add Slash Icon
-            val slashView = TextView(this).apply {
+            var slashView = TextView(this).apply {
                 text = "/"
                 textSize = 14f
                 setPadding(dpToPx(6), dpToPx(4), dpToPx(6), dpToPx(4))
@@ -683,9 +683,7 @@ class ChatActivity : AppCompatActivity() {
             }
             row.addView(slashView)
             dialogHandler.postDelayed({
-                try {
-                    slashView.text = "//"
-                } catch (_: Exception) {}
+                slashView.text = "//"
             }, 2000L)
         } else {
             val avatarView = ImageView(this).apply {
