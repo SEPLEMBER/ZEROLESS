@@ -3,48 +3,100 @@ package com.nemesis.droidcrypt
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
-import android.view.View
-import android.widget.Button
+import android.os.Handler
+import android.os.Looper
+import android.view.animation.AlphaAnimation
+import android.widget.ImageView
+import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
+import java.io.BufferedReader
+import java.io.InputStreamReader
+import kotlin.random.Random
 
 class MainActivity : AppCompatActivity() {
-
-    companion object {
-        private const val REQUEST_CODE_SETTINGS = 1001
-    }
+    private lateinit var matrixText: TextView
+    private lateinit var modelLogo: ImageView
+    private lateinit var metaCoreText: TextView
+    private val handler = Handler(Looper.getMainLooper())
+    private val welcomeMessages = arrayOf(
+        R.string.welcome_1,
+        R.string.welcome_2,
+        R.string.welcome_3
+    )
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        val startChat = findViewById<Button>(R.id.startChatButton)
-        val openSettings = findViewById<Button>(R.id.openSettingsButton)
+        matrixText = findViewById(R.id.matrix_text)
+        modelLogo = findViewById(R.id.model_logo)
+        metaCoreText = findViewById(R.id.meta_core_text)
 
-        startChat.setOnClickListener {
-            // Просто стартуем ChatActivity — он сам попытается взять folderUri из SharedPreferences / persisted permissions
-            val i = Intent(this@MainActivity, ChatActivity::class.java)
-            startActivity(i)
-        }
+        val prefs = getSharedPreferences("CyberBeastBot", MODE_PRIVATE)
+        val isRegistered = prefs.getBoolean("isRegistered", false)
+        val hasExited = prefs.getBoolean("hasExited", false)
 
-        openSettings.setOnClickListener {
-            // Запускаем SettingsActivity для выбора папки и редактирования шаблонов.
-            // Ожидаем результат — при возвращении можем сразу открыть чат с переданным folderUri.
-            val i = Intent(this@MainActivity, SettingsActivity::class.java)
-            startActivityForResult(i, REQUEST_CODE_SETTINGS)
+        if (!isRegistered) {
+            startActivity(Intent(this, SetupActivity::class.java))
+            finish()
+        } else {
+            showConnectionAnimation(hasExited)
         }
     }
 
-    @Deprecated("onActivityResult is deprecated but kept for parity with original behavior")
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == REQUEST_CODE_SETTINGS && resultCode == RESULT_OK && data != null) {
-            // Если Settings вернул folderUri — передаём его в ChatActivity и открываем чат
-            val folderUri = data.getParcelableExtra<Uri>("folderUri")
-            val i = Intent(this@MainActivity, ChatActivity::class.java)
-            if (folderUri != null) {
-                i.putExtra("folderUri", folderUri)
+    private fun showConnectionAnimation(hasExited: Boolean) {
+        if (hasExited) {
+            val randomMessage = getString(welcomeMessages[Random.nextInt(welcomeMessages.size)])
+            animateText(matrixText, randomMessage) { showConnecting() }
+        } else {
+            showConnecting()
+        }
+    }
+
+    private fun showConnecting() {
+        animateText(matrixText, "Подключение...") {
+            // Load logo and meta_core.txt
+            val prefs = getSharedPreferences("CyberBeastBot", MODE_PRIVATE)
+            val logoPath = prefs.getString("modelLogoPath", null)
+            if (logoPath != null) {
+                modelLogo.setImageURI(Uri.parse(logoPath))
+                val fadeIn = AlphaAnimation(0f, 1f).apply { duration = 1000 }
+                modelLogo.visibility = TextView.VISIBLE
+                modelLogo.startAnimation(fadeIn)
             }
-            startActivity(i)
+
+            val metaPath = prefs.getString("metaCorePath", null)
+            if (metaPath != null) {
+                try {
+                    contentResolver.openInputStream(Uri.parse(metaPath))?.use { input ->
+                        BufferedReader(InputStreamReader(input)).use { reader ->
+                            val metaText = reader.readText()
+                            metaCoreText.text = metaText
+                            metaCoreText.visibility = TextView.VISIBLE
+                        }
+                    }
+                } catch (e: Exception) {
+                    metaCoreText.text = "..."
+                    metaCoreText.visibility = TextView.VISIBLE
+                }
+            }
+
+            handler.postDelayed({
+                animateText(matrixText, "С подключением.") {
+                    startActivity(Intent(this, ChatActivity::class.java))
+                    finish()
+                }
+            }, 2000)
+        }
+    }
+
+    private fun animateText(textView: TextView, text: String, onComplete: () -> Unit) {
+        textView.text = ""
+        text.forEachIndexed { index, char ->
+            handler.postDelayed({
+                textView.append(char.toString())
+                if (index == text.length - 1) onComplete()
+            }, 50L * index)
         }
     }
 }
