@@ -153,7 +153,7 @@ class ChatActivity : AppCompatActivity() {
         scrollView = findViewById(R.id.scrollView)
         queryInput = findViewById(R.id.queryInput)
         envelopeInputButton = findViewById(R.id.envelope_button)
-        mascotTopImage = findViewById(R.id.mascot_top_image)
+        // mascotTopImage = findViewById(R.id.mascot_top_image)  // Убрано: ID отсутствует в layout, изображение загружается динамически из SAF при необходимости
         btnLock = findViewById(R.id.btn_lock)
         btnTrash = findViewById(R.id.btn_trash)
         btnEnvelopeTop = findViewById(R.id.btn_envelope_top)
@@ -265,7 +265,8 @@ class ChatActivity : AppCompatActivity() {
         }
         idleCheckRunnable?.let { dialogHandler.postDelayed(it, 5000) }
 
-        // hide big avatar
+        // hide big avatar (теперь динамически, если нужно)
+        loadMascotTopImage()
         mascotTopImage?.visibility = View.GONE
     }
 
@@ -362,6 +363,42 @@ class ChatActivity : AppCompatActivity() {
 
         } catch (e: Exception) {
             e.printStackTrace()
+        }
+    }
+
+    // Новый метод для динамической загрузки верхнего изображения маскота из SAF (если файл существует)
+    private fun loadMascotTopImage() {
+        val uri = folderUri ?: return
+        try {
+            val dir = DocumentFile.fromTreeUri(this, uri) ?: return
+            val candidates = listOf("${currentMascotName.lowercase(Locale.getDefault())}.png", "mascot_top.png", currentMascotIcon)
+            for (name in candidates) {
+                val file = dir.findFile(name)
+                if (file != null && file.exists()) {
+                    contentResolver.openInputStream(file.uri)?.use { ins ->
+                        val bmp = BitmapFactory.decodeStream(ins)
+                        // Создаем ImageView динамически, если его нет в layout
+                        if (mascotTopImage == null) {
+                            mascotTopImage = ImageView(this).apply {
+                                val size = dpToPx(120)
+                                layoutParams = LinearLayout.LayoutParams(size, size).apply {
+                                    gravity = Gravity.CENTER_HORIZONTAL
+                                    topMargin = dpToPx(8)
+                                }
+                                scaleType = ImageView.ScaleType.CENTER_CROP
+                                adjustViewBounds = true
+                            }
+                            // Добавляем в подходящий контейнер, например, в messagesContainer или root
+                            val root = findViewById<ViewGroup>(android.R.id.content)
+                            root.addView(mascotTopImage, 0) // Добавляем сверху
+                        }
+                        mascotTopImage?.setImageBitmap(bmp)
+                        return
+                    }
+                }
+            }
+        } catch (_: Exception) {
+            // Игнорируем: fallback не нужен, так как visibility = GONE
         }
     }
 
@@ -1367,7 +1404,7 @@ class ChatActivity : AppCompatActivity() {
 
     private fun loadMascotMetadata(mascotName: String) {
         if (folderUri == null) return
-        val metadataFilename = "${mascotName.lowercase(Locale.ROOT)}_metadata.txt"
+        val metadataFilename = "${mascotName.lowercase(Locale.getDefault())}_metadata.txt"
         val dir = DocumentFile.fromTreeUri(this, folderUri!!) ?: return
         val metadataFile = dir.findFile(metadataFilename)
         if (metadataFile != null && metadataFile.exists()) {
@@ -1407,6 +1444,8 @@ class ChatActivity : AppCompatActivity() {
     ) {
         runOnUi {
             title = "Pawstribe - $mascotName"
+            // Перезагружаем изображение маскота из SAF при смене UI
+            loadMascotTopImage()
             mascotTopImage?.visibility = View.GONE
 
             try {
