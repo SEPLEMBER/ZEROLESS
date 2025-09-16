@@ -360,36 +360,34 @@ class ChatActivity : AppCompatActivity() {
                 if (t.isBlank() || t.length < 1) continue
                 if (processedSubqueries.contains(t)) continue
 
-                // try a direct template match
-                templatesMap[t]?.let { possible ->
-                    if (possible.isNotEmpty()) {
-                        subqueryResponses.add("${t.uppercase(Locale.getDefault())}: ${possible.random()}")
-                        processedSubqueries.add(t)
-                        continue
-                    }
+                // try a direct template match (avoid using continue inside let — use plain check)
+                val directPossible = templatesMap[t]
+                if (!directPossible.isNullOrEmpty()) {
+                    subqueryResponses.add("${t.uppercase(Locale.getDefault())}: ${directPossible.random()}")
+                    processedSubqueries.add(t)
+                    continue
                 }
+
                 // try two-token key (maybe topic is two words)
                 // attempt to find any templates with t + next token in original sequence
                 val origTokens = tokenize(qOrig)
                 val idx = origTokens.indexOfFirst { normalizeText(it) == t }
                 if (idx >= 0 && idx < origTokens.size - 1) {
                     val two = "${normalizeText(origTokens[idx])} ${normalizeText(origTokens[idx + 1])}"
-                    templatesMap[two]?.let { possible ->
-                        if (possible.isNotEmpty()) {
-                            subqueryResponses.add("${two.uppercase(Locale.getDefault())}: ${possible.random()}")
-                            processedSubqueries.add(two)
-                            continue
-                        }
+                    val twoPossible = templatesMap[two]
+                    if (!twoPossible.isNullOrEmpty()) {
+                        subqueryResponses.add("${two.uppercase(Locale.getDefault())}: ${twoPossible.random()}")
+                        processedSubqueries.add(two)
+                        continue
                     }
                 }
 
                 // keywordResponses fallback
-                keywordResponses[t]?.let { possible ->
-                    if (possible.isNotEmpty()) {
-                        subqueryResponses.add("${t.uppercase(Locale.getDefault())}: ${possible.random()}")
-                        processedSubqueries.add(t)
-                        continue
-                    }
+                val kwPossible = keywordResponses[t]
+                if (!kwPossible.isNullOrEmpty()) {
+                    subqueryResponses.add("${t.uppercase(Locale.getDefault())}: ${kwPossible.random()}")
+                    processedSubqueries.add(t)
+                    continue
                 }
 
                 // If nothing found in current context, try fuzzy lookup via inverted index
@@ -397,13 +395,12 @@ class ChatActivity : AppCompatActivity() {
                 val candidates = invertedIndex[t] ?: emptyList()
                 if (candidates.isNotEmpty()) {
                     val pick = candidates.firstOrNull()
-                    pick?.let { p ->
-                        templatesMap[p]?.let { possible ->
-                            if (possible.isNotEmpty()) {
-                                subqueryResponses.add("${t.uppercase(Locale.getDefault())}: ${possible.random()}")
-                                processedSubqueries.add(t)
-                                continue
-                            }
+                    if (pick != null) {
+                        val pickPossible = templatesMap[pick]
+                        if (!pickPossible.isNullOrEmpty()) {
+                            subqueryResponses.add("${t.uppercase(Locale.getDefault())}: ${pickPossible.random()}")
+                            processedSubqueries.add(t)
+                            continue
                         }
                     }
                 }
@@ -433,7 +430,7 @@ class ChatActivity : AppCompatActivity() {
         if (subqueryResponses.size < MAX_SUBQUERY_RESPONSES) {
             val tokens = if (qTokensFiltered.isNotEmpty()) qTokensFiltered else tokenize(qFiltered)
 
-            // Try individual tokens (explicit for-loop to allow break/continue)
+            // Try individual tokens
             for (token in tokens) {
                 if (subqueryResponses.size >= MAX_SUBQUERY_RESPONSES) break
                 if (processedSubqueries.contains(token) || token.length < 2) continue // Ignore short tokens
