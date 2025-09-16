@@ -1,4 +1,4 @@
-package com.nemesis.droidcrypt
+package com.nemesis.pawscribe
 
 import android.animation.ObjectAnimator
 import android.content.Intent
@@ -29,7 +29,7 @@ class ChatActivity : AppCompatActivity(), ChatLogic.ChatUi {
         private const val MAX_MESSAGES = 250
     }
 
-    // UI elements
+    // UI
     private var folderUri: Uri? = null
     private lateinit var scrollView: ScrollView
     private lateinit var queryInput: AutoCompleteTextView
@@ -42,20 +42,17 @@ class ChatActivity : AppCompatActivity(), ChatLogic.ChatUi {
     private lateinit var messagesContainer: LinearLayout
     private var adapter: ArrayAdapter<String>? = null
 
-    // UI-side state that stays in Activity
+    // UI-side state
     private var currentThemeColor = "#00FF00"
     private var currentThemeBackground = "#000000"
 
-    // Idle/dialog handlers (stay in Activity)
-    private var currentDialog: ChatLogic.Dialog? = null // kept only for type compatibility if needed
-    private var currentDialogIndex = 0
+    // Idle/dialog handlers
     private val dialogHandler = Handler(Looper.getMainLooper())
-    private var dialogRunnable: Runnable? = null
     private var idleCheckRunnable: Runnable? = null
     private var lastUserInputTime = System.currentTimeMillis()
     private val random = Random()
 
-    // New: logic instance
+    // logic instance
     private lateinit var logic: ChatLogic
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -73,7 +70,7 @@ class ChatActivity : AppCompatActivity(), ChatLogic.ChatUi {
         btnSettings = findViewById(R.id.btn_settings)
         messagesContainer = findViewById(R.id.chatMessagesContainer)
 
-        // SAF Uri
+        // SAF Uri retrieval
         folderUri = intent?.getParcelableExtra("folderUri")
         if (folderUri == null) {
             for (perm in contentResolver.persistedUriPermissions) {
@@ -91,7 +88,7 @@ class ChatActivity : AppCompatActivity(), ChatLogic.ChatUi {
         } catch (_: Exception) {
         }
 
-        // create logic and pass this Activity as UI bridge
+        // create logic instance
         logic = ChatLogic(this, folderUri, this)
 
         // screenshots lock from prefs
@@ -104,7 +101,7 @@ class ChatActivity : AppCompatActivity(), ChatLogic.ChatUi {
         } catch (_: Exception) {
         }
 
-        // load icons and touch effects
+        // load icons & touch effects
         loadToolbarIcons()
         setupIconTouchEffect(btnLock)
         setupIconTouchEffect(btnTrash)
@@ -131,13 +128,12 @@ class ChatActivity : AppCompatActivity(), ChatLogic.ChatUi {
             showCustomToast("Папка не выбрана! Открой настройки и выбери папку.")
             logic.loadTemplatesFromFile("base.txt")
             logic.rebuildIndexPublic()
-            updateAutoComplete(listOf()) // will be updated via callback soon
+            // logic will call updateAutoComplete via callback
             addChatMessage("Racky", "Добро пожаловать!")
         } else {
             logic.setFolderUri(folderUri)
             logic.loadTemplatesFromFile(logic.currentContext)
             logic.rebuildIndexPublic()
-            // logic will call updateAutoComplete via UI callback
             addChatMessage("Racky", "Добро пожаловать!")
         }
 
@@ -147,16 +143,14 @@ class ChatActivity : AppCompatActivity(), ChatLogic.ChatUi {
             logic.processUserQuery(selected)
         }
 
-        // idle runnable (Activity stays responsible for timers/dialog flow)
+        // idle runnable
         idleCheckRunnable = object : Runnable {
             override fun run() {
                 val idle = System.currentTimeMillis() - lastUserInputTime
                 if (idle >= 25000) {
-                    // use logic.dialogLines/dialogs via triggers in UI if required
-                    // We trigger logic-managed dialogs via UI callback
-                    // Triggering random dialog through UI (ChatLogic triggers UI.triggerRandomDialog)
-                    // For backward compatibility we reuse Activity-side simple behavior:
-                    // (keep original behavior: if dialogs not empty, startRandomDialog else triggerRandomDialog)
+                    // minimal UI-side idle trigger; logic handles richer dialog behavior and will call triggerRandomDialog()
+                    logic.rebuildIndexPublic()
+                    // Optionally ask logic to trigger dialog via UI callbacks
                 }
                 dialogHandler.postDelayed(this, 5000)
             }
@@ -178,11 +172,10 @@ class ChatActivity : AppCompatActivity(), ChatLogic.ChatUi {
 
     override fun onPause() {
         super.onPause()
-        stopDialog()
         dialogHandler.removeCallbacksAndMessages(null)
     }
 
-    // === Toolbar Helpers ===
+    // Toolbar helpers
     private fun setupIconTouchEffect(btn: ImageButton?) {
         btn?.setOnTouchListener { v, event ->
             when (event.action) {
@@ -233,7 +226,7 @@ class ChatActivity : AppCompatActivity(), ChatLogic.ChatUi {
         }
     }
 
-    // === UI Messages (these are the ChatUi callbacks used by ChatLogic) ===
+    // ChatUi implementation (single updateAutoComplete implementation - no overload conflicts)
     override fun addChatMessage(sender: String, text: String) {
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -371,8 +364,8 @@ class ChatActivity : AppCompatActivity(), ChatLogic.ChatUi {
         return (dp * density).roundToInt()
     }
 
-    // === Template Loading UI helpers kept in Activity if needed (Activity delegates actual parsing to logic) ===
-    private fun updateAutoComplete(suggestions: List<String>) {
+    // single implementation for updateAutoComplete (overrides ChatUi)
+    override fun updateAutoComplete(suggestions: List<String>) {
         if (adapter == null) {
             adapter =
                 ArrayAdapter(this, android.R.layout.simple_dropdown_item_1line, suggestions)
@@ -385,26 +378,12 @@ class ChatActivity : AppCompatActivity(), ChatLogic.ChatUi {
         }
     }
 
-    // === Idle & Dialogs (kept simple, triggerRandomDialog is called from logic via UI) ===
+    // triggerRandomDialog is called by logic when needed
     override fun triggerRandomDialog() {
-        // Original logic used dialogLines and mascotList from templates; since those are inside logic,
-        // ChatLogic will call this UI method when it wants to trigger UI-only actions.
-        // We'll keep a minimal behavior: show a random small message occasionally (to match previous behavior)
         if (random.nextDouble() < 0.3) {
             Handler(Looper.getMainLooper()).postDelayed({
                 addChatMessage("Racky", "...")
             }, 1500)
-        }
-    }
-
-    private fun startRandomDialog() {
-        // kept minimal; the complex dialog scheduling remains in Activity if desired
-    }
-
-    private fun stopDialog() {
-        dialogRunnable?.let {
-            dialogHandler.removeCallbacks(it)
-            dialogRunnable = null
         }
     }
 
@@ -438,10 +417,6 @@ class ChatActivity : AppCompatActivity(), ChatLogic.ChatUi {
                 5000
             )
         }
-    }
-
-    override fun updateAutoComplete(suggestions: List<String>) {
-        updateAutoComplete(suggestions)
     }
 
     override fun updateUI(mascotName: String, mascotIcon: String, themeColor: String, themeBackground: String) {
@@ -487,38 +462,12 @@ class ChatActivity : AppCompatActivity(), ChatLogic.ChatUi {
         }
     }
 
-    // wrapper to call updateAutoComplete from logic (keeps name compatibility)
-    private fun updateAutoComplete(suggestions: List<String>, resetAdapterIfNull: Boolean = false) {
-        if (resetAdapterIfNull && adapter == null) {
-            adapter =
-                ArrayAdapter(this, android.R.layout.simple_dropdown_item_1line, suggestions)
-            queryInput.setAdapter(adapter)
-            queryInput.threshold = 1
-        } else {
-            if (adapter == null) {
-                adapter =
-                    ArrayAdapter(this, android.R.layout.simple_dropdown_item_1line, suggestions)
-                queryInput.setAdapter(adapter)
-                queryInput.threshold = 1
-            } else {
-                adapter?.clear()
-                adapter?.addAll(suggestions)
-                adapter?.notifyDataSetChanged()
-            }
-        }
-    }
-
-    // Keep old clearChat behavior but using logic for templates
+    // clear chat
     private fun clearChat() {
         messagesContainer.removeAllViews()
-        // reset logic counters and reload base
         logic.loadTemplatesFromFile("base.txt")
         logic.rebuildIndexPublic()
         updateAutoComplete(listOf())
         addChatMessage("Racky", "Чат очищен. Возвращаюсь к началу.")
-    }
-
-    private fun showCustomToast(message: String, alt: Boolean = false) {
-        showCustomToast(message)
     }
 }
