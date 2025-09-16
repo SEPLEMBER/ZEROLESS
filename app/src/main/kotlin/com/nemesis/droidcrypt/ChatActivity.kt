@@ -67,6 +67,7 @@ class ChatActivity : AppCompatActivity() {
     private var btnTrash: ImageButton? = null
     private var btnEnvelopeTop: ImageButton? = null
     private var btnSettings: ImageButton? = null
+    private var btnCharging: ImageButton? = null
     private lateinit var messagesContainer: LinearLayout
     private var adapter: ArrayAdapter<String>? = null
 
@@ -143,11 +144,17 @@ class ChatActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_chat)
 
+        // Полноэкранный режим
+        window.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
+
         // Установка полупрозрачного тёмного фона для action bar
         supportActionBar?.setBackgroundDrawable(ColorDrawable(Color.argb(128, 0, 0, 0)))
 
         // Установка чёрного фона для окна, чтобы избежать белого фона при открытии клавиатуры
         window.setBackgroundDrawable(ColorDrawable(Color.BLACK))
+
+        // Настройка тулбара
+        setupToolbar()
 
         // refs
         scrollView = findViewById(R.id.scrollView)
@@ -198,12 +205,15 @@ class ChatActivity : AppCompatActivity() {
         setupIconTouchEffect(btnEnvelopeTop)
         setupIconTouchEffect(btnSettings)
         setupIconTouchEffect(envelopeInputButton)
+        setupIconTouchEffect(infoIconButton)
+        setupIconTouchEffect(btnCharging)
 
         // icon actions
         btnLock?.setOnClickListener { finish() }
         btnTrash?.setOnClickListener { clearChat() }
         btnSettings?.setOnClickListener { startActivity(Intent(this, SettingsActivity::class.java)) }
         btnEnvelopeTop?.setOnClickListener { startActivity(Intent(this, PostsActivity::class.java)) }
+        infoIconButton?.setOnClickListener { startActivity(Intent(this, PostsActivity::class.java)) }
 
         // envelope near input — отправка (с дебаунсом)
         envelopeInputButton?.setOnClickListener {
@@ -229,9 +239,6 @@ class ChatActivity : AppCompatActivity() {
             }
             true
         }
-
-        // create top status overlay (battery, percent, time, info icon)
-        createTopStatusBar()
 
         // initial parse / fallback
         if (folderUri == null) {
@@ -268,6 +275,84 @@ class ChatActivity : AppCompatActivity() {
         // hide big avatar (теперь динамически, если нужно)
         loadMascotTopImage()
         mascotTopImage?.visibility = View.GONE
+    }
+
+    private fun setupToolbar() {
+        val topBar = findViewById<LinearLayout>(R.id.topBar)
+
+        // Скрываем старые текстовые элементы времени и батареи
+        findViewById<TextView>(R.id.time_text)?.visibility = View.GONE
+        findViewById<TextView>(R.id.battery_text)?.visibility = View.GONE
+
+        // Настраиваем левую секцию для иконки батареи и процента
+        val leftLayout = topBar.getChildAt(0) as LinearLayout
+        leftLayout.removeAllViews()
+        leftLayout.orientation = LinearLayout.HORIZONTAL
+        leftLayout.gravity = Gravity.CENTER_VERTICAL
+
+        batteryImageView = ImageView(this).apply {
+            val iconSize = dpToPx(56)
+            layoutParams = LinearLayout.LayoutParams(iconSize, iconSize)
+            scaleType = ImageView.ScaleType.CENTER_INSIDE
+            adjustViewBounds = true
+        }
+        batteryPercentView = TextView(this).apply {
+            text = "--%"
+            textSize = 16f
+            setTextColor(Color.parseColor("#00BFFF"))
+            val lp = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                marginStart = dpToPx(8)
+            }
+            layoutParams = lp
+        }
+        leftLayout.addView(batteryImageView)
+        leftLayout.addView(batteryPercentView)
+
+        // Заменяем спейсер на часы по центру
+        val spacerIndex = 1
+        val spacer = topBar.getChildAt(spacerIndex)
+        topBar.removeViewAt(spacerIndex)
+        timeTextView = TextView(this).apply {
+            text = "--:--"
+            textSize = 20f
+            setTextColor(Color.parseColor("#FFA500"))
+            gravity = Gravity.CENTER
+            val lp = LinearLayout.LayoutParams(
+                0,
+                dpToPx(56),
+                1f
+            )
+            layoutParams = lp
+        }
+        topBar.addView(timeTextView, spacerIndex)
+
+        // Добавляем кнопку info перед lock
+        infoIconButton = ImageButton(this).apply {
+            background = null
+            val iconSize = dpToPx(56)
+            val lp = LinearLayout.LayoutParams(iconSize, iconSize)
+            layoutParams = lp
+            scaleType = ImageView.ScaleType.CENTER_INSIDE
+            adjustViewBounds = true
+        }
+        topBar.addView(infoIconButton, 2) // Вставляем перед btn_lock (теперь на позиции 3)
+
+        // Добавляем пятую иконку для зарядки в конец
+        btnCharging = ImageButton(this).apply {
+            background = null
+            val iconSize = dpToPx(56)
+            val lp = LinearLayout.LayoutParams(iconSize, iconSize).apply {
+                marginStart = dpToPx(6)
+            }
+            layoutParams = lp
+            scaleType = ImageView.ScaleType.CENTER_INSIDE
+            adjustViewBounds = true
+            visibility = View.GONE
+        }
+        topBar.addView(btnCharging)
     }
 
     override fun onResume() {
@@ -347,13 +432,12 @@ class ChatActivity : AppCompatActivity() {
             }
 
             // top icons expected names
+            tryLoadToImageButton("info.png", infoIconButton)
             tryLoadToImageButton("lock.png", btnLock)
             tryLoadToImageButton("trash.png", btnTrash)
             tryLoadToImageButton("envelope.png", btnEnvelopeTop)
             tryLoadToImageButton("settings.png", btnSettings)
-
-            // new: load info.png into infoIconButton (if created)
-            tryLoadToImageButton("info.png", infoIconButton)
+            tryLoadToImageButton("charging.png", btnCharging)
 
             // send button near input (envelopeInputButton) — try load send.png
             tryLoadToImageButton("send.png", envelopeInputButton)
@@ -1491,87 +1575,6 @@ class ChatActivity : AppCompatActivity() {
     // STATUS BAR / BATTERY
     // -----------------------
 
-    private fun createTopStatusBar() {
-        // Build overlay linear layout and add to root content view
-        runOnUi {
-            try {
-                val root = findViewById<ViewGroup>(android.R.id.content)
-                // Prevent duplicate
-                if (root.findViewWithTag<View>("chat_status_overlay") != null) return@runOnUi
-
-                val overlay = LinearLayout(this).apply {
-                    orientation = LinearLayout.HORIZONTAL
-                    tag = "chat_status_overlay"
-                    setPadding(dpToPx(8), dpToPx(6), dpToPx(8), dpToPx(6))
-                    layoutParams = FrameLayout.LayoutParams(
-                        FrameLayout.LayoutParams.MATCH_PARENT,
-                        FrameLayout.LayoutParams.WRAP_CONTENT
-                    )
-                    // transparent background
-                    setBackgroundColor(Color.TRANSPARENT)
-                }
-
-                // left: battery icon + percent
-                val leftGroup = LinearLayout(this).apply {
-                    orientation = LinearLayout.HORIZONTAL
-                    gravity = Gravity.CENTER_VERTICAL
-                }
-                batteryImageView = ImageView(this).apply {
-                    val size = dpToPx(28)
-                    layoutParams = LinearLayout.LayoutParams(size, size)
-                    scaleType = ImageView.ScaleType.CENTER_INSIDE
-                }
-                batteryPercentView = TextView(this).apply {
-                    text = "--%"
-                    textSize = 14f
-                    setPadding(dpToPx(6), 0, dpToPx(8), 0)
-                    setTextColor(Color.parseColor("#00BFFF")) // голубой
-                }
-                leftGroup.addView(batteryImageView)
-                leftGroup.addView(batteryPercentView)
-
-                // center: time
-                timeTextView = TextView(this).apply {
-                    text = "--:--"
-                    textSize = 16f
-                    setTextColor(Color.parseColor("#FFA500")) // оранжевый
-                    gravity = Gravity.CENTER
-                    layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-                }
-
-                // right: info icon (and leave space for existing toolbar icons)
-                val rightGroup = LinearLayout(this).apply {
-                    orientation = LinearLayout.HORIZONTAL
-                    gravity = Gravity.CENTER_VERTICAL or Gravity.END
-                }
-                infoIconButton = ImageButton(this).apply {
-                    setBackgroundColor(Color.TRANSPARENT)
-                    adjustViewBounds = true
-                    val size = dpToPx(32)
-                    layoutParams = LinearLayout.LayoutParams(size, size)
-                    scaleType = ImageView.ScaleType.CENTER_INSIDE
-                    setPadding(0, 0, dpToPx(6), 0)
-                }
-                setupIconTouchEffect(infoIconButton)
-                infoIconButton?.setOnClickListener {
-                    // show help / info
-                    addChatMessage(currentMascotName, "Я — твой чат-ассистент. Команды: /reload, /stats, /clear")
-                }
-
-                rightGroup.addView(infoIconButton)
-
-                overlay.addView(leftGroup)
-                overlay.addView(timeTextView)
-                overlay.addView(rightGroup)
-
-                // add overlay to root as first child so that it appears on top
-                root.addView(overlay)
-            } catch (e: Exception) {
-                e.printStackTrace()
-            }
-        }
-    }
-
     private fun registerBatteryReceiver() {
         if (batteryReceiver != null) return
         batteryReceiver = object : BroadcastReceiver() {
@@ -1579,9 +1582,10 @@ class ChatActivity : AppCompatActivity() {
                 if (intent == null) return
                 val level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
                 val scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, -1)
+                val plugged = intent.getIntExtra(BatteryManager.EXTRA_PLUGGED, -1)
                 val percent = if (level >= 0 && scale > 0) ((level * 100) / scale) else -1
                 if (percent >= 0) {
-                    updateBatteryUI(percent)
+                    updateBatteryUI(percent, plugged)
                 }
             }
         }
@@ -1591,8 +1595,9 @@ class ChatActivity : AppCompatActivity() {
         sticky?.let {
             val level = it.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
             val scale = it.getIntExtra(BatteryManager.EXTRA_SCALE, -1)
+            val plugged = it.getIntExtra(BatteryManager.EXTRA_PLUGGED, -1)
             val percent = if (level >= 0 && scale > 0) ((level * 100) / scale) else -1
-            if (percent >= 0) updateBatteryUI(percent)
+            if (percent >= 0) updateBatteryUI(percent, plugged)
         }
     }
 
@@ -1604,7 +1609,7 @@ class ChatActivity : AppCompatActivity() {
         batteryReceiver = null
     }
 
-    private fun updateBatteryUI(percent: Int) {
+    private fun updateBatteryUI(percent: Int, plugged: Int) {
         // UI update + possible bot messages when reaching thresholds
         runOnUi {
             // percent text
@@ -1643,6 +1648,13 @@ class ChatActivity : AppCompatActivity() {
             try {
                 batteryImageView?.setColorFilter(if (percent <= lowThreshold) red else normalBlue)
             } catch (_: Exception) {
+            }
+
+            // Показываем/скрываем иконку зарядки
+            if (plugged > 0) {
+                btnCharging?.visibility = View.VISIBLE
+            } else {
+                btnCharging?.visibility = View.GONE
             }
 
             // Bot messages on thresholds (only once per crossing)
