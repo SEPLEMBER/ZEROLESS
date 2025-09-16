@@ -1,13 +1,11 @@
 package com.nemesis.droidcrypt
 
-import android.content.Intent
 import android.content.SharedPreferences
 import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
-import android.view.View
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.documentfile.provider.DocumentFile
@@ -19,25 +17,24 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val TAG = "MainActivity"
-        private const val PREF_KEY_FOLDER_URI = "pref_folder_uri"
         private const val TYPING_DELAY = 50L
     }
 
     private lateinit var matrixText: TextView
-    private val handler = Handler(Looper.getMainLooper())
     private lateinit var prefs: SharedPreferences
+    private val handler = Handler(Looper.getMainLooper())
     private var folderUri: Uri? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        prefs = PreferenceManager.getDefaultSharedPreferences(this)
-        folderUri = prefs.getString(PREF_KEY_FOLDER_URI, null)?.let { Uri.parse(it) }
-
         matrixText = findViewById(R.id.matrix_text)
-        matrixText.setTextColor(0xFF00FF00.toInt()) // зеленый цвет
+        matrixText.setTextColor(0xFF00FF00.toInt()) // зеленый
         matrixText.text = ""
+
+        prefs = PreferenceManager.getDefaultSharedPreferences(this)
+        folderUri = prefs.getString("pref_folder_uri", null)?.let { Uri.parse(it) }
 
         if (folderUri != null) {
             loadTextFilesFromFolder(folderUri!!)
@@ -55,13 +52,11 @@ class MainActivity : AppCompatActivity() {
             }
 
             val txtFiles = dir.listFiles().filter { it.name?.endsWith(".txt") == true }
-
             if (txtFiles.isEmpty()) {
                 matrixText.text = "Файлов нет"
                 return
             }
 
-            // Постепенно выводим текст из файлов
             var fullText = ""
             for (file in txtFiles) {
                 contentResolver.openInputStream(file.uri)?.use { input ->
@@ -71,7 +66,6 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             animateText(matrixText, fullText.trim())
-
         } catch (e: Exception) {
             Log.e(TAG, "Error loading files", e)
             matrixText.text = "Ошибка загрузки"
