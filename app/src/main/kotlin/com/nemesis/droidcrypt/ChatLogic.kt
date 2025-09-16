@@ -14,16 +14,15 @@ class ChatLogic(
 ) {
 
     companion object {
-        private const val MAX_MESSAGES = 250
         private const val MAX_FUZZY_DISTANCE = 5
         private const val CANDIDATE_TOKEN_THRESHOLD = 1
         private const val MAX_CANDIDATES_FOR_LEV = 40
         private const val JACCARD_THRESHOLD = 0.50
     }
 
-    // Data structures (moved from Activity)
+    // Data structures
     private val fallback = arrayOf("Привет", "Как дела?", "Расскажи о себе", "Выход")
-    val templatesMap = HashMap<String, MutableList<String>>() // normalized trigger -> responses
+    val templatesMap = HashMap<String, MutableList<String>>()
     private val contextMap = HashMap<String, String>()
     private val keywordResponses = HashMap<String, MutableList<String>>()
     private val antiSpamResponses = mutableListOf<String>()
@@ -31,10 +30,7 @@ class ChatLogic(
     private val dialogLines = mutableListOf<String>()
     private val dialogs = mutableListOf<Dialog>()
 
-    // inverted index token -> list of triggers
     private val invertedIndex = HashMap<String, MutableList<String>>()
-
-    // synonyms and stopwords
     private val synonymsMap = HashMap<String, String>()
     private val stopwords = HashSet<String>()
 
@@ -49,6 +45,7 @@ class ChatLogic(
     private val random = Random()
     private val queryCountMap = HashMap<String, Int>()
 
+    // Dialog data class kept private inside logic
     private data class Dialog(val name: String, val replies: MutableList<Map<String, String>> = mutableListOf())
 
     init {
@@ -66,11 +63,9 @@ class ChatLogic(
                 "Я уже ответил, давай новый запрос!"
             )
         )
-        // try load synonyms/stopwords early if folder provided
         loadSynonymsAndStopwords()
     }
 
-    // UI bridge interface that Activity implements
     interface ChatUi {
         fun addChatMessage(sender: String, text: String)
         fun showTypingIndicator()
@@ -81,7 +76,6 @@ class ChatLogic(
         fun triggerRandomDialog()
     }
 
-    // === Public API used by Activity ===
     fun setFolderUri(uri: Uri?) {
         folderUri = uri
     }
@@ -94,7 +88,6 @@ class ChatLogic(
         val qKeyForCount = qFiltered
         if (qFiltered.isEmpty()) return
 
-        // update repeated query counters
         if (qKeyForCount == lastQuery) {
             val cnt = queryCountMap.getOrDefault(qKeyForCount, 0)
             queryCountMap[qKeyForCount] = cnt + 1
@@ -103,10 +96,7 @@ class ChatLogic(
             queryCountMap[qKeyForCount] = 1
             lastQuery = qKeyForCount
         }
-        // show user's input in UI
         ui.addChatMessage("Ты", userInput)
-
-        // show typing indicator
         ui.showTypingIndicator()
 
         val repeats = queryCountMap.getOrDefault(qKeyForCount, 0)
@@ -119,7 +109,7 @@ class ChatLogic(
 
         var answered = false
 
-        // 1. Exact match
+        // 1. Exact
         templatesMap[qFiltered]?.let { possible ->
             if (possible.isNotEmpty()) {
                 ui.addChatMessage(currentMascotName, possible.random())
@@ -127,7 +117,7 @@ class ChatLogic(
             }
         }
 
-        // 2. keyword matching
+        // 2. Keywords
         if (!answered) {
             for ((keyword, responses) in keywordResponses) {
                 if (qFiltered.contains(keyword) && responses.isNotEmpty()) {
@@ -138,7 +128,7 @@ class ChatLogic(
             }
         }
 
-        // 2.5 Fuzzy using inverted index -> jaccard -> levenshtein
+        // 2.5 Fuzzy (inverted index -> Jaccard -> Levenshtein)
         if (!answered) {
             val qTokens = if (qTokensFiltered.isNotEmpty()) qTokensFiltered else tokenize(qFiltered)
             val candidateCounts = HashMap<String, Int>()
@@ -158,7 +148,6 @@ class ChatLogic(
                     .take(MAX_CANDIDATES_FOR_LEV)
             }
 
-            // Jaccard
             var bestByJaccard: String? = null
             var bestJaccard = 0.0
             val qSet = qTokens.toSet()
@@ -181,7 +170,6 @@ class ChatLogic(
                 }
             }
 
-            // Levenshtein fallback
             if (!answered) {
                 var bestKey: String? = null
                 var bestDist = Int.MAX_VALUE
@@ -204,16 +192,14 @@ class ChatLogic(
             }
         }
 
-        // 3. Try context switch
+        // 3. Context switch
         if (!answered) {
             detectContext(qFiltered)?.let { newContext ->
                 if (newContext != currentContext) {
                     currentContext = newContext
                     loadTemplatesFromFile(currentContext)
-                    // notify UI about new suggestions and UI metadata
                     ui.updateAutoComplete(buildAutoCompleteSuggestions())
                     ui.updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
-                    // re-check in the new context
                     templatesMap[qFiltered]?.let { possible ->
                         if (possible.isNotEmpty()) {
                             ui.addChatMessage(currentMascotName, possible.random())
@@ -230,12 +216,9 @@ class ChatLogic(
             ui.addChatMessage(currentMascotName, fallbackResp)
         }
 
-        // trigger idle/dialog events on UI side and start idle timer
         ui.triggerRandomDialog()
         ui.startIdleTimer()
     }
-
-    // === Helpers & moved methods ===
 
     private fun getDummyResponse(query: String): String {
         val lower = query.lowercase(Locale.ROOT)
@@ -264,7 +247,6 @@ class ChatLogic(
         val uri = folderUri ?: return
         try {
             val dir = DocumentFile.fromTreeUri(context, uri) ?: return
-
             val synFile = dir.findFile("synonims.txt")
             if (synFile != null && synFile.exists()) {
                 context.contentResolver.openInputStream(synFile.uri)?.bufferedReader()?.use { reader ->
@@ -281,7 +263,6 @@ class ChatLogic(
                     }
                 }
             }
-
             val stopFile = dir.findFile("stopwords.txt")
             if (stopFile != null && stopFile.exists()) {
                 context.contentResolver.openInputStream(stopFile.uri)?.bufferedReader()?.use { reader ->
@@ -297,7 +278,6 @@ class ChatLogic(
         }
     }
 
-    // returns Pair(listOfTokens, joinedNormalizedString)
     private fun filterStopwordsAndMapSynonyms(input: String): Pair<List<String>, String> {
         val toks = tokenize(input)
         val mapped = toks.map { tok ->
@@ -318,6 +298,10 @@ class ChatLogic(
                 if (!list.contains(key)) list.add(key)
             }
         }
+    }
+
+    fun rebuildIndexPublic() {
+        rebuildInvertedIndex()
     }
 
     private fun levenshtein(s: String, t: String): Int {
@@ -349,7 +333,6 @@ class ChatLogic(
         return prev[m]
     }
 
-    // === Template loading / parsing (moved) ===
     fun loadTemplatesFromFile(filename: String) {
         templatesMap.clear()
         keywordResponses.clear()
@@ -372,6 +355,7 @@ class ChatLogic(
             loadFallbackTemplates()
             rebuildInvertedIndex()
             ui.updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
+            ui.updateAutoComplete(buildAutoCompleteSuggestions())
             return
         }
 
@@ -380,6 +364,7 @@ class ChatLogic(
                 loadFallbackTemplates()
                 rebuildInvertedIndex()
                 ui.updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
+                ui.updateAutoComplete(buildAutoCompleteSuggestions())
                 return
             }
 
@@ -388,6 +373,7 @@ class ChatLogic(
                 loadFallbackTemplates()
                 rebuildInvertedIndex()
                 ui.updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
+                ui.updateAutoComplete(buildAutoCompleteSuggestions())
                 return
             }
 
@@ -395,6 +381,7 @@ class ChatLogic(
                 reader.forEachLine { raw ->
                     val l = raw.trim()
                     if (l.isEmpty()) return@forEachLine
+
                     if (filename == "base.txt" && l.startsWith(":") && l.endsWith(":")) {
                         val contextLine = l.substring(1, l.length - 1)
                         if (contextLine.contains("=")) {
@@ -408,6 +395,7 @@ class ChatLogic(
                         }
                         return@forEachLine
                     }
+
                     if (l.startsWith("-")) {
                         val keywordLine = l.substring(1)
                         if (keywordLine.contains("=")) {
@@ -424,6 +412,7 @@ class ChatLogic(
                         }
                         return@forEachLine
                     }
+
                     if (!l.contains("=")) return@forEachLine
                     val parts = l.split("=", limit = 2)
                     if (parts.size == 2) {
@@ -471,8 +460,7 @@ class ChatLogic(
                             line.startsWith("theme_background=") -> currentThemeBackground =
                                 line.substring("theme_background=".length).trim()
                             line.startsWith("dialog_lines=") -> {
-                                val lines =
-                                    line.substring("dialog_lines=".length).split("|")
+                                val lines = line.substring("dialog_lines=".length).split("|")
                                 for (d in lines) {
                                     val t = d.trim(); if (t.isNotEmpty()) dialogLines.add(t)
                                 }
@@ -491,12 +479,14 @@ class ChatLogic(
                             reader.forEachLine { raw ->
                                 val l = raw.trim()
                                 if (l.isEmpty()) return@forEachLine
+
                                 if (l.startsWith(";")) {
                                     currentDialogParser?.takeIf { it.replies.isNotEmpty() }
                                         ?.let { dialogs.add(it) }
                                     currentDialogParser = Dialog(l.substring(1).trim())
                                     return@forEachLine
                                 }
+
                                 if (l.contains(">")) {
                                     val parts = l.split(">", limit = 2)
                                     if (parts.size == 2) {
@@ -510,6 +500,7 @@ class ChatLogic(
                                     }
                                     return@forEachLine
                                 }
+
                                 dialogLines.add(l)
                             }
                             currentDialogParser?.takeIf { it.replies.isNotEmpty() }
@@ -529,7 +520,6 @@ class ChatLogic(
             }
 
             rebuildInvertedIndex()
-            // notify UI about loaded metadata and suggestions
             ui.updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
             ui.updateAutoComplete(buildAutoCompleteSuggestions())
 
@@ -565,11 +555,7 @@ class ChatLogic(
         return null
     }
 
-    fun rebuildIndexPublic() {
-        rebuildInvertedIndex()
-    }
-
-    private fun buildAutoCompleteSuggestions(): List<String> {
+    fun buildAutoCompleteSuggestions(): List<String> {
         val suggestions = mutableListOf<String>()
         suggestions.addAll(templatesMap.keys)
         for (s in fallback) {
