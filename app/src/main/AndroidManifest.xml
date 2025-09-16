@@ -30,6 +30,13 @@
             </intent-filter>
         </activity>
 
+        <!-- SetupActivity -->
+        <activity
+            android:name=".SetupActivity"
+            android:exported="false"
+            android:parentActivityName=".MainActivity"
+            android:configChanges="orientation|screenSize" />
+
         <!-- ChatActivity -->
         <activity
             android:name=".ChatActivity"
