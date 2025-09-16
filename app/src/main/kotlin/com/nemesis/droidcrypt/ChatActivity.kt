@@ -40,7 +40,7 @@ class ChatActivity : AppCompatActivity() {
 
     private fun getFuzzyDistance(word: String): Int {
         return when {
-            word.length <= 4 -> 1
+            word.length <= 4 -> 2
             word.length <= 8 -> 2
             else -> 3
         }
