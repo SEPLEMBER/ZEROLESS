@@ -24,6 +24,7 @@ import java.util.*
 import kotlin.math.roundToInt
 import kotlin.math.min // <-- ADDED
 import kotlin.math.abs // <-- ADDED
+import android.graphics.drawable.ColorDrawable
 
 class ChatActivity : AppCompatActivity() {
 
