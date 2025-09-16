@@ -1,12 +1,13 @@
 package com.nemesis.droidcrypt
 
 import android.animation.ObjectAnimator
-import android.content.Intent
+import android.content.*
 import android.graphics.*
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.ColorDrawable
 import android.media.MediaPlayer
 import android.net.Uri
+import android.os.BatteryManager
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -24,6 +25,7 @@ import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.text.SimpleDateFormat
 import java.util.*
 import kotlin.math.abs
 import kotlin.math.min
@@ -68,6 +70,12 @@ class ChatActivity : AppCompatActivity() {
     private lateinit var messagesContainer: LinearLayout
     private var adapter: ArrayAdapter<String>? = null
 
+    // Added UI elements (status bar overlay)
+    private var batteryImageView: ImageView? = null
+    private var batteryPercentView: TextView? = null
+    private var timeTextView: TextView? = null
+    private var infoIconButton: ImageButton? = null
+
     // Data structures
     private val fallback = arrayOf("Привет", "Как дела?", "Расскажи о себе", "Выход")
     private val templatesMap = HashMap<String, MutableList<String>>() // keys are normalized triggers now
@@ -104,6 +112,12 @@ class ChatActivity : AppCompatActivity() {
 
     // send debounce
     private var lastSendTime = 0L
+
+    // battery/watch
+    private var lastBatteryWarningStage = Int.MAX_VALUE // high sentinel; we will detect downward crossing
+    private var batteryReceiver: BroadcastReceiver? = null
+    private val timeHandler = Handler(Looper.getMainLooper())
+    private var timeUpdaterRunnable: Runnable? = null
 
     private data class Dialog(val name: String, val replies: MutableList<Map<String, String>> = mutableListOf())
 
@@ -216,6 +230,9 @@ class ChatActivity : AppCompatActivity() {
             true
         }
 
+        // create top status overlay (battery, percent, time, info icon)
+        createTopStatusBar()
+
         // initial parse / fallback
         if (folderUri == null) {
             showCustomToast("Папка не выбрана! Открой настройки и выбери папку.")
@@ -262,17 +279,26 @@ class ChatActivity : AppCompatActivity() {
             dialogHandler.postDelayed(it, 5000)
         }
         loadToolbarIcons()
+
+        // register battery receiver
+        registerBatteryReceiver()
+        // start time updater
+        startTimeUpdater()
     }
 
     override fun onPause() {
         super.onPause()
         stopDialog()
         dialogHandler.removeCallbacksAndMessages(null)
+        unregisterBatteryReceiver()
+        stopTimeUpdater()
     }
 
     override fun onDestroy() {
         super.onDestroy()
         dialogHandler.removeCallbacksAndMessages(null)
+        unregisterBatteryReceiver()
+        stopTimeUpdater()
     }
 
     /// SECTION: Toolbar Helpers
@@ -291,23 +317,48 @@ class ChatActivity : AppCompatActivity() {
         try {
             val dir = DocumentFile.fromTreeUri(this, uri) ?: return
 
-            fun tryLoad(name: String, target: ImageButton?) {
+            fun tryLoadToImageButton(name: String, target: ImageButton?) {
+                if (target == null) return
                 try {
                     val file = dir.findFile(name)
                     if (file != null && file.exists()) {
                         contentResolver.openInputStream(file.uri)?.use { ins ->
                             val bmp = BitmapFactory.decodeStream(ins)
-                            target?.setImageBitmap(bmp)
+                            target.setImageBitmap(bmp)
                         }
                     }
                 } catch (_: Exception) {
                 }
             }
+
+            fun tryLoadToImageView(name: String, target: ImageView?) {
+                if (target == null) return
+                try {
+                    val file = dir.findFile(name)
+                    if (file != null && file.exists()) {
+                        contentResolver.openInputStream(file.uri)?.use { ins ->
+                            val bmp = BitmapFactory.decodeStream(ins)
+                            target.setImageBitmap(bmp)
+                        }
+                    }
+                } catch (_: Exception) {
+                }
+            }
+
             // top icons expected names
-            tryLoad("lock.png", btnLock)
-            tryLoad("trash.png", btnTrash)
-            tryLoad("envelope.png", btnEnvelopeTop)
-            tryLoad("settings.png", btnSettings)
+            tryLoadToImageButton("lock.png", btnLock)
+            tryLoadToImageButton("trash.png", btnTrash)
+            tryLoadToImageButton("envelope.png", btnEnvelopeTop)
+            tryLoadToImageButton("settings.png", btnSettings)
+
+            // new: load info.png into infoIconButton (if created)
+            tryLoadToImageButton("info.png", infoIconButton)
+
+            // send button near input (envelopeInputButton) — try load send.png
+            tryLoadToImageButton("send.png", envelopeInputButton)
+
+            // battery image is loaded dynamically by updateBatteryUI using battery_N.png
+            tryLoadToImageView("battery_5.png", batteryImageView) // attempt to load a default full image if present
 
         } catch (e: Exception) {
             e.printStackTrace()
@@ -1395,5 +1446,223 @@ class ChatActivity : AppCompatActivity() {
     private fun runOnUi(block: () -> Unit) {
         if (Looper.myLooper() == Looper.getMainLooper()) block()
         else runOnUiThread(block)
+    }
+
+    // -----------------------
+    // STATUS BAR / BATTERY
+    // -----------------------
+
+    private fun createTopStatusBar() {
+        // Build overlay linear layout and add to root content view
+        runOnUi {
+            try {
+                val root = findViewById<ViewGroup>(android.R.id.content)
+                // Prevent duplicate
+                if (root.findViewWithTag<View>("chat_status_overlay") != null) return@runOnUi
+
+                val overlay = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    tag = "chat_status_overlay"
+                    setPadding(dpToPx(8), dpToPx(6), dpToPx(8), dpToPx(6))
+                    layoutParams = FrameLayout.LayoutParams(
+                        FrameLayout.LayoutParams.MATCH_PARENT,
+                        FrameLayout.LayoutParams.WRAP_CONTENT
+                    )
+                    // transparent background
+                    setBackgroundColor(Color.TRANSPARENT)
+                }
+
+                // left: battery icon + percent
+                val leftGroup = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                }
+                batteryImageView = ImageView(this).apply {
+                    val size = dpToPx(28)
+                    layoutParams = LinearLayout.LayoutParams(size, size)
+                    scaleType = ImageView.ScaleType.CENTER_INSIDE
+                }
+                batteryPercentView = TextView(this).apply {
+                    text = "--%"
+                    textSize = 14f
+                    setPadding(dpToPx(6), 0, dpToPx(8), 0)
+                    setTextColor(Color.parseColor("#00BFFF")) // голубой
+                }
+                leftGroup.addView(batteryImageView)
+                leftGroup.addView(batteryPercentView)
+
+                // center: time
+                timeTextView = TextView(this).apply {
+                    text = "--:--"
+                    textSize = 16f
+                    setTextColor(Color.parseColor("#FFA500")) // оранжевый
+                    gravity = Gravity.CENTER
+                    layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                }
+
+                // right: info icon (and leave space for existing toolbar icons)
+                val rightGroup = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL or Gravity.END
+                }
+                infoIconButton = ImageButton(this).apply {
+                    setBackgroundColor(Color.TRANSPARENT)
+                    adjustViewBounds = true
+                    val size = dpToPx(32)
+                    layoutParams = LinearLayout.LayoutParams(size, size)
+                    scaleType = ImageView.ScaleType.CENTER_INSIDE
+                    setPadding(0, 0, dpToPx(6), 0)
+                }
+                setupIconTouchEffect(infoIconButton)
+                infoIconButton?.setOnClickListener {
+                    // show help / info
+                    addChatMessage(currentMascotName, "Я — твой чат-ассистент. Команды: /reload, /stats, /clear")
+                }
+
+                rightGroup.addView(infoIconButton)
+
+                overlay.addView(leftGroup)
+                overlay.addView(timeTextView)
+                overlay.addView(rightGroup)
+
+                // add overlay to root as first child so that it appears on top
+                root.addView(overlay)
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
+    private fun registerBatteryReceiver() {
+        if (batteryReceiver != null) return
+        batteryReceiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context?, intent: Intent?) {
+                if (intent == null) return
+                val level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
+                val scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, -1)
+                val percent = if (level >= 0 && scale > 0) ((level * 100) / scale) else -1
+                if (percent >= 0) {
+                    updateBatteryUI(percent)
+                }
+            }
+        }
+        registerReceiver(batteryReceiver, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+        // also fetch immediately by sticky intent
+        val sticky = registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+        sticky?.let {
+            val level = it.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
+            val scale = it.getIntExtra(BatteryManager.EXTRA_SCALE, -1)
+            val percent = if (level >= 0 && scale > 0) ((level * 100) / scale) else -1
+            if (percent >= 0) updateBatteryUI(percent)
+        }
+    }
+
+    private fun unregisterBatteryReceiver() {
+        try {
+            batteryReceiver?.let { unregisterReceiver(it) }
+        } catch (_: Exception) {
+        }
+        batteryReceiver = null
+    }
+
+    private fun updateBatteryUI(percent: Int) {
+        // UI update + possible bot messages when reaching thresholds
+        runOnUi {
+            // percent text
+            batteryPercentView?.text = "$percent%"
+
+            // color decisions
+            val lowThreshold = 25
+            val warningThreshold = 15
+            val urgentThreshold = 5
+
+            val normalBlue = Color.parseColor("#00BFFF")
+            val red = Color.RED
+
+            val textColor = if (percent <= lowThreshold) red else normalBlue
+            batteryPercentView?.setTextColor(textColor)
+
+            // choose icon index: map percent -> 1..5 (5 maps to >=80)
+            val iconIndex = when {
+                percent >= 80 -> 5
+                percent >= 60 -> 4
+                percent >= 40 -> 3
+                percent >= 20 -> 2
+                else -> 1
+            }
+
+            // load battery_{index}.png from SAF if available
+            val loaded = tryLoadBitmapFromFolder("battery_$iconIndex.png")
+            if (loaded != null) {
+                batteryImageView?.setImageBitmap(loaded)
+            } else {
+                // fallback attempt: battery_full or battery.png
+                tryLoadBitmapFromFolder("battery.png")?.let { batteryImageView?.setImageBitmap(it) }
+            }
+
+            // tint icon: blue normally, red when <= lowThreshold
+            try {
+                batteryImageView?.setColorFilter(if (percent <= lowThreshold) red else normalBlue)
+            } catch (_: Exception) {
+            }
+
+            // Bot messages on thresholds (only once per crossing)
+            // if we moved downward across warningThreshold and lastBatteryWarningStage > warningThreshold -> send warning
+            if (percent <= urgentThreshold && lastBatteryWarningStage > urgentThreshold) {
+                // urgent message at 5%
+                addChatMessage(currentMascotName, "Это не шутки. Поставь на зарядку.")
+            } else if (percent <= warningThreshold && lastBatteryWarningStage > warningThreshold) {
+                // pick one of three variations
+                val variants = listOf(
+                    "Пожалуйста, поставь устройство на зарядку — батарейка почти села.",
+                    "Аккумулятор низкий, лучше подключить зарядку.",
+                    "Осталось немного заряда, поставь телефон на заряд."
+                )
+                addChatMessage(currentMascotName, variants.random())
+            }
+            // update lastBatteryWarningStage to current percent
+            lastBatteryWarningStage = percent
+        }
+    }
+
+    // helper to read bitmap from SAF folder by filename
+    private fun tryLoadBitmapFromFolder(name: String): Bitmap? {
+        val uri = folderUri ?: return null
+        return try {
+            val dir = DocumentFile.fromTreeUri(this, uri) ?: return null
+            val f = dir.findFile(name) ?: return null
+            if (!f.exists()) return null
+            contentResolver.openInputStream(f.uri)?.use { ins ->
+                BitmapFactory.decodeStream(ins)
+            }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    // -----------------------
+    // TIME UPDATER
+    // -----------------------
+    private fun startTimeUpdater() {
+        stopTimeUpdater()
+        timeUpdaterRunnable = object : Runnable {
+            override fun run() {
+                val now = Date()
+                val fmt = SimpleDateFormat("HH:mm", Locale.getDefault())
+                val s = fmt.format(now)
+                runOnUi {
+                    timeTextView?.text = s
+                }
+                // schedule next update at next minute boundary
+                val delay = 60000L
+                timeHandler.postDelayed(this, delay)
+            }
+        }
+        timeHandler.post(timeUpdaterRunnable!!)
+    }
+
+    private fun stopTimeUpdater() {
+        timeUpdaterRunnable?.let { timeHandler.removeCallbacks(it) }
+        timeUpdaterRunnable = null
     }
 }
