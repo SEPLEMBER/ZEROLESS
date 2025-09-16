@@ -77,9 +77,6 @@ class ChatActivity : AppCompatActivity() {
     private val synonymsMap = HashMap<String, String>() // synonym -> canonical
     private val stopwords = HashSet<String>() // normalized stopwords set
 
-    // NEW: store source file(s) for each trigger key (intelligent folding needs source tags)
-    private val templatesSourceMap = HashMap<String, MutableSet<String>>() // trigger -> set of filenames
-
     private var currentMascotName = "Racky"
     private var currentMascotIcon = "raccoon_icon.png"
     private var currentThemeColor = "#00FF00"
@@ -325,7 +322,9 @@ class ChatActivity : AppCompatActivity() {
         val processedSubqueries = mutableSetOf<String>()
 
         // -----------------------
-        // NEW: Intent-based multi-topic handling with source tagging
+        // NEW: Intent-based multi-topic handling
+        // If user asked something like "что такое aes gcm" — detect intent and fetch answers for each topic,
+        // then combine into single message: "AES — ... . GCM — ..."
         // -----------------------
         val questionIntents = listOf(
             "что такое",
@@ -338,92 +337,74 @@ class ChatActivity : AppCompatActivity() {
         )
 
         val matchedIntent = questionIntents.find { intent ->
+            // check on normalized original string (qOrig)
             qOrig.startsWith(intent) || qOrig.contains(" $intent") || qOrig.contains("$intent ")
         }
 
         if (matchedIntent != null) {
+            // Build topic tokens: prefer already filtered/mapped tokens (qTokensFiltered).
+            // If empty, fall back to tokens from normalized original (and filter stopwords).
             val topicTokens = if (qTokensFiltered.isNotEmpty()) {
                 qTokensFiltered.toMutableList()
             } else {
                 tokenize(qOrig).map { normalizeText(it) }.filter { it.length > 1 && !stopwords.contains(it) }.toMutableList()
             }
 
-            // remove words that belong to intent phrase
+            // remove intent words themselves from topicTokens (if present)
             val intentWords = matchedIntent.split(Regex("\\s+")).map { normalizeText(it) }
             topicTokens.removeAll(intentWords)
 
-            // collect answers per token (with source)
+            // if there are combined topics like "aes gcm", iterate all tokens and collect answers
             for (t in topicTokens) {
                 if (subqueryResponses.size >= MAX_SUBQUERY_RESPONSES) break
-                if (t.isBlank()) continue
+                if (t.isBlank() || t.length < 1) continue
                 if (processedSubqueries.contains(t)) continue
 
-                // 1) direct key
-                val direct = templatesMap[t]
-                if (!direct.isNullOrEmpty()) {
-                    val resp = direct.random()
-                    val sources = templatesSourceMap[t] ?: mutableSetOf(currentContext)
-                    val srcLabel = sources.filter { it != currentContext }.joinToString(", ")
-                    val formatted = if (srcLabel.isNotEmpty()) "${t.uppercase(Locale.getDefault())}: $resp [$srcLabel]" else "${t.uppercase(Locale.getDefault())}: $resp"
-                    subqueryResponses.add(formatted)
-                    processedSubqueries.add(t)
-                    continue
+                // try a direct template match
+                templatesMap[t]?.let { possible ->
+                    if (possible.isNotEmpty()) {
+                        subqueryResponses.add("${t.uppercase(Locale.getDefault())}: ${possible.random()}")
+                        processedSubqueries.add(t)
+                        continue
+                    }
                 }
-
-                // 2) two-word key based on original sequence
+                // try two-token key (maybe topic is two words)
+                // attempt to find any templates with t + next token in original sequence
                 val origTokens = tokenize(qOrig)
                 val idx = origTokens.indexOfFirst { normalizeText(it) == t }
                 if (idx >= 0 && idx < origTokens.size - 1) {
                     val two = "${normalizeText(origTokens[idx])} ${normalizeText(origTokens[idx + 1])}"
-                    val twoResp = templatesMap[two]
-                    if (!twoResp.isNullOrEmpty()) {
-                        val resp = twoResp.random()
-                        val sources = templatesSourceMap[two] ?: mutableSetOf(currentContext)
-                        val srcLabel = sources.filter { it != currentContext }.joinToString(", ")
-                        val formatted = if (srcLabel.isNotEmpty()) "${two.uppercase(Locale.getDefault())}: $resp [$srcLabel]" else "${two.uppercase(Locale.getDefault())}: $resp"
-                        subqueryResponses.add(formatted)
-                        processedSubqueries.add(two)
-                        continue
-                    }
-                }
-
-                // 3) keywordResponses fallback
-                val kw = keywordResponses[t]
-                if (!kw.isNullOrEmpty()) {
-                    val resp = kw.random()
-                    subqueryResponses.add("${t.uppercase(Locale.getDefault())}: $resp")
-                    processedSubqueries.add(t)
-                    continue
-                }
-
-                // 4) inverted index fuzzy fallback: prefer triggers that contain token
-                val candidates = invertedIndex[t] ?: emptyList()
-                var pickedKey: String? = null
-                if (candidates.isNotEmpty()) {
-                    // choose candidate with most tokens in common (simple heuristic)
-                    var bestCand: String? = null
-                    var bestScore = -1
-                    val qSet = setOf(t)
-                    for (cand in candidates) {
-                        val candTokens = filterStopwordsAndMapSynonyms(cand).first.toSet()
-                        val score = qSet.intersect(candTokens).size
-                        if (score > bestScore) {
-                            bestScore = score
-                            bestCand = cand
+                    templatesMap[two]?.let { possible ->
+                        if (possible.isNotEmpty()) {
+                            subqueryResponses.add("${two.uppercase(Locale.getDefault())}: ${possible.random()}")
+                            processedSubqueries.add(two)
+                            continue
                         }
                     }
-                    pickedKey = bestCand
                 }
-                if (pickedKey != null) {
-                    val poss = templatesMap[pickedKey]
-                    if (!poss.isNullOrEmpty()) {
-                        val resp = poss.random()
-                        val sources = templatesSourceMap[pickedKey] ?: mutableSetOf(currentContext)
-                        val srcLabel = sources.filter { it != currentContext }.joinToString(", ")
-                        val formatted = if (srcLabel.isNotEmpty()) "${t.uppercase(Locale.getDefault())}: $resp [$srcLabel]" else "${t.uppercase(Locale.getDefault())}: $resp"
-                        subqueryResponses.add(formatted)
+
+                // keywordResponses fallback
+                keywordResponses[t]?.let { possible ->
+                    if (possible.isNotEmpty()) {
+                        subqueryResponses.add("${t.uppercase(Locale.getDefault())}: ${possible.random()}")
                         processedSubqueries.add(t)
                         continue
+                    }
+                }
+
+                // If nothing found in current context, try fuzzy lookup via inverted index
+                // Look for candidate triggers containing this token
+                val candidates = invertedIndex[t] ?: emptyList()
+                if (candidates.isNotEmpty()) {
+                    val pick = candidates.firstOrNull()
+                    pick?.let { p ->
+                        templatesMap[p]?.let { possible ->
+                            if (possible.isNotEmpty()) {
+                                subqueryResponses.add("${t.uppercase(Locale.getDefault())}: ${possible.random()}")
+                                processedSubqueries.add(t)
+                                continue
+                            }
+                        }
                     }
                 }
             }
@@ -436,7 +417,7 @@ class ChatActivity : AppCompatActivity() {
                 }, SUBQUERY_RESPONSE_DELAY)
                 answered = true
             }
-            // if matchedIntent but nothing found - continue normal flow
+            // if matchedIntent but nothing found - we continue to normal flow (so fallback can trigger)
         }
 
         // 1. Check for an exact match in the current context (templatesMap keys are normalized)
@@ -452,7 +433,7 @@ class ChatActivity : AppCompatActivity() {
         if (subqueryResponses.size < MAX_SUBQUERY_RESPONSES) {
             val tokens = if (qTokensFiltered.isNotEmpty()) qTokensFiltered else tokenize(qFiltered)
 
-            // Try individual tokens using ordinary for-loop (avoid inline-lambda break)
+            // Try individual tokens
             for (token in tokens) {
                 if (subqueryResponses.size >= MAX_SUBQUERY_RESPONSES) break
                 if (processedSubqueries.contains(token) || token.length < 2) continue // Ignore short tokens
@@ -465,15 +446,16 @@ class ChatActivity : AppCompatActivity() {
                 }
 
                 if (subqueryResponses.size < MAX_SUBQUERY_RESPONSES) {
-                    val kr = keywordResponses[token]
-                    if (!kr.isNullOrEmpty()) {
-                        subqueryResponses.add(kr.random())
-                        processedSubqueries.add(token)
+                    keywordResponses[token]?.let { possible ->
+                        if (possible.isNotEmpty()) {
+                            subqueryResponses.add(possible.random())
+                            processedSubqueries.add(token)
+                        }
                     }
                 }
             }
 
-            // Try two-token combinations (ordinary for-loop)
+            // Try two-token combinations
             if (subqueryResponses.size < MAX_SUBQUERY_RESPONSES && tokens.size > 1) {
                 for (i in 0 until tokens.size - 1) {
                     if (subqueryResponses.size >= MAX_SUBQUERY_RESPONSES) break
@@ -518,11 +500,12 @@ class ChatActivity : AppCompatActivity() {
         if (!answered) {
             val qTokens = if (qTokensFiltered.isNotEmpty()) qTokensFiltered else tokenize(qFiltered)
             val candidateCounts = HashMap<String, Int>()
+
+            // <-- FIX: avoid inline lambda forEach here; use explicit for-loop
             for (tok in qTokens) {
-                // avoid inline lambda: use ordinary for
-                val list = invertedIndex[tok]
-                if (list != null) {
-                    for (trig in list) {
+                val trigList = invertedIndex[tok]
+                if (trigList != null) {
+                    for (trig in trigList) {
                         candidateCounts[trig] = candidateCounts.getOrDefault(trig, 0) + 1
                     }
                 }
@@ -938,7 +921,6 @@ class ChatActivity : AppCompatActivity() {
     /// SECTION: Template Loading
     private fun loadTemplatesFromFile(filename: String) {
         templatesMap.clear()
-        templatesSourceMap.clear() // clear sources along with templates
         keywordResponses.clear()
         mascotList.clear()
         dialogLines.clear()
@@ -1046,11 +1028,8 @@ class ChatActivity : AppCompatActivity() {
                         val responseList =
                             responses.mapNotNull { it.trim().takeIf { s -> s.isNotEmpty() } }
                                 .toMutableList()
-                        if (triggerFiltered.isNotEmpty() && responseList.isNotEmpty()) {
-                            templatesMap[triggerFiltered] = responseList
-                            val set = templatesSourceMap.getOrPut(triggerFiltered) { mutableSetOf() }
-                            set.add(filename)
-                        }
+                        if (triggerFiltered.isNotEmpty() && responseList.isNotEmpty()) templatesMap[triggerFiltered] =
+                            responseList
                     }
                 }
             }
@@ -1181,15 +1160,11 @@ class ChatActivity : AppCompatActivity() {
         dialogs.clear()
         dialogLines.clear()
         mascotList.clear()
-        templatesSourceMap.clear()
-
         // store normalized keys in fallback as well (respect stopwords/synonyms)
         val t1 = filterStopwordsAndMapSynonyms(normalizeText("привет")).second
         templatesMap[t1] = mutableListOf("Привет! Чем могу помочь?", "Здравствуй!")
-        templatesSourceMap.getOrPut(t1) { mutableSetOf() }.add("fallback")
         val t2 = filterStopwordsAndMapSynonyms(normalizeText("как дела")).second
         templatesMap[t2] = mutableListOf("Всё отлично, а у тебя?", "Нормально, как дела?")
-        templatesSourceMap.getOrPut(t2) { mutableSetOf() }.add("fallback")
         keywordResponses["спасибо"] = mutableListOf("Рад, что помог!", "Всегда пожалуйста!")
     }
 
