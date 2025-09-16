@@ -34,6 +34,9 @@ class ChatActivity : AppCompatActivity() {
         private const val MAX_CONTEXT_SWITCH = 6 // Note: This is now unused due to logic simplification
         private const val MAX_MESSAGES = 250
         private const val CANDIDATE_TOKEN_THRESHOLD = 2 // <-- ADDED: минимальное число общих токенов для кандидата
+        private const val MAX_SUBQUERY_RESPONSES = 3 // Ограничение на количество подответов 
+        private const val SUBQUERY_RESPONSE_DELAY = 1500L // Задержка для индикатора "печатает..." }
+
         private const val MAX_CANDIDATES_FOR_LEV = 25 // <-- ADDED: ограничение числа кандидатов для Levenshtein
         private const val JACCARD_THRESHOLD = 0.50
     }
@@ -282,59 +285,115 @@ class ChatActivity : AppCompatActivity() {
 /// SECTION: Core Chat Logic — Основная логика чата (processUserQuery, clearChat) — Обработка ввода, антиспам, смена контекста, dummy-ответы; использует templatesMap, keywordResponses
     // === core: process user query ===
     private fun processUserQuery(userInput: String) {
-        // <-- ADDED: normalize input early (remove punctuation, collapse spaces)
-        val qOrigRaw = userInput.trim()
-        val qOrig = normalizeText(qOrigRaw)
-        // <-- ADDED: filter stopwords and map synonyms producing tokens and joined string
-        val (qTokensFiltered, qFiltered) = filterStopwordsAndMapSynonyms(qOrig)
+    // <-- ADDED: normalize input early (remove punctuation, collapse spaces)
+    val qOrigRaw = userInput.trim()
+    val qOrig = normalizeText(qOrigRaw)
+    // <-- ADDED: filter stopwords and map synonyms producing tokens and joined string
+    val (qTokensFiltered, qFiltered) = filterStopwordsAndMapSynonyms(qOrig)
 
-        // store/use normalized keys in queryCountMap to count repeats robustly
-        val qKeyForCount = qFiltered
+    // store/use normalized keys in queryCountMap to count repeats robustly
+    val qKeyForCount = qFiltered
 
-        if (qFiltered.isEmpty()) return
-        lastUserInputTime = System.currentTimeMillis()
-        stopDialog()
-        if (qKeyForCount == lastQuery) {
-            val cnt = queryCountMap.getOrDefault(qKeyForCount, 0)
-            queryCountMap[qKeyForCount] = cnt + 1
-        } else {
-            queryCountMap.clear()
-            queryCountMap[qKeyForCount] = 1
-            lastQuery = qKeyForCount
+    if (qFiltered.isEmpty()) return
+    lastUserInputTime = System.currentTimeMillis()
+    stopDialog()
+    if (qKeyForCount == lastQuery) {
+        val cnt = queryCountMap.getOrDefault(qKeyForCount, 0)
+        queryCountMap[qKeyForCount] = cnt + 1
+    } else {
+        queryCountMap.clear()
+        queryCountMap[qKeyForCount] = 1
+        lastQuery = qKeyForCount
+    }
+    addChatMessage("Ты", userInput)
+    
+    // Показать уведомление "Печатает..." с рандомной задержкой
+    showTypingIndicator()
+    
+    val repeats = queryCountMap.getOrDefault(qKeyForCount, 0)
+    if (repeats >= 5) {
+        val spamResp = antiSpamResponses.random()
+        addChatMessage(currentMascotName, spamResp)
+        startIdleTimer()
+        return
+    }
+    var answered = false
+
+    // ADDED: List to collect subquery responses for combining
+    val subqueryResponses = mutableListOf<String>()
+    val processedSubqueries = mutableSetOf<String>()
+
+    // 1. Check for an exact match in the current context (templatesMap keys are normalized)
+    templatesMap[qFiltered]?.let { possible ->
+        if (possible.isNotEmpty()) {
+            subqueryResponses.add(possible.random())
+            answered = true
+            processedSubqueries.add(qFiltered)
         }
-        addChatMessage("Ты", userInput)
-        
-        // Показать уведомление "Печатает..." с рандомной задержкой
-        showTypingIndicator()
-        
-        val repeats = queryCountMap.getOrDefault(qKeyForCount, 0)
-        if (repeats >= 5) {
-            val spamResp = antiSpamResponses.random()
-            addChatMessage(currentMascotName, spamResp)
-            startIdleTimer()
-            return
-        }
-        var answered = false
+    }
 
-        // 1. Check for an exact match in the current context (templatesMap keys are normalized)
-        templatesMap[qFiltered]?.let { possible ->
-            if (possible.isNotEmpty()) {
-                addChatMessage(currentMascotName, possible.random())
-                answered = true
+    // ADDED: 2. Try subqueries (individual tokens and two-token combinations)
+    if (subqueryResponses.size < MAX_SUBQUERY_RESPONSES) {
+        val tokens = if (qTokensFiltered.isNotEmpty()) qTokensFiltered else tokenize(qFiltered)
+        // Try individual tokens
+        for (token in tokens) {
+            if (subqueryResponses.size >= MAX_SUBQUERY_RESPONSES) break
+            if (token in processedSubqueries || token.length < 2) continue // Ignore short tokens
+            templatesMap[token]?.let { possible ->
+                if (possible.isNotEmpty()) {
+                    subqueryResponses.add(possible.random())
+                    processedSubqueries.add(token)
+                }
             }
-        }
-
-        // 2. If no exact match, check for keywords in the current context
-        if (!answered) {
-            for ((keyword, responses) in keywordResponses) {
-                // normalize keyword check
-                if (qFiltered.contains(keyword) && responses.isNotEmpty()) {
-                    addChatMessage(currentMascotName, responses.random())
-                    answered = true
-                    break
+            if (subqueryResponses.size < MAX_SUBQUERY_RESPONSES) {
+                keywordResponses[token]?.let { possible ->
+                    if (possible.isNotEmpty()) {
+                        subqueryResponses.add(possible.random())
+                        processedSubqueries.add(token)
+                    }
                 }
             }
         }
+
+        // Try two-token combinations
+        if (subqueryResponses.size < MAX_SUBQUERY_RESPONSES && tokens.size > 1) {
+            for (i in 0 until tokens.size - 1) {
+                if (subqueryResponses.size >= MAX_SUBQUERY_RESPONSES) break
+                val twoTokens = "${tokens[i]} ${tokens[i + 1]}"
+                if (twoTokens in processedSubqueries) continue
+                templatesMap[twoTokens]?.let { possible ->
+                    if (possible.isNotEmpty()) {
+                        subqueryResponses.add(possible.random())
+                        processedSubqueries.add(twoTokens)
+                    }
+                }
+            }
+        }
+    }
+
+    // ADDED: 3. Combine subquery responses into a single message
+    if (subqueryResponses.isNotEmpty()) {
+        val combinedResponse = subqueryResponses.joinToString(". ")
+        dialogHandler.postDelayed({
+            addChatMessage(currentMascotName, combinedResponse)
+        }, SUBQUERY_RESPONSE_DELAY)
+        answered = true
+    }
+
+    // MODIFIED: 4. If no subquery responses, check for keywords in the current context
+    if (!answered) {
+        for ((keyword, responses) in keywordResponses) {
+            // normalize keyword check
+            if (qFiltered.contains(keyword) && responses.isNotEmpty()) {
+                dialogHandler.postDelayed({
+                    addChatMessage(currentMascotName, responses.random())
+                }, SUBQUERY_RESPONSE_DELAY)
+                answered = true
+                break
+            }
+        }
+    }
+}
 
         // 2.5 FUZZY: Use inverted index to collect candidates and run Levenshtein only on them
         if (!answered) {
