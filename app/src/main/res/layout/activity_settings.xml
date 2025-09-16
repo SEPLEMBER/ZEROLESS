@@ -3,7 +3,8 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@color/background_black"
-    android:padding="16dp">
+    android:padding="16dp"
+    android:clipToPadding="false">
 
     <LinearLayout
         android:layout_width="match_parent"
@@ -17,9 +18,9 @@
             android:text="Настройки"
             android:textColor="@color/text_green"
             android:textSize="20sp"
-            android:layout_marginBottom="12dp" />
+            android:layout_marginBottom="16dp" />
 
-        <!-- Кнопка выбора папки на SD -->
+        <!-- Кнопка выбора папки -->
         <Button
             android:id="@+id/selectFolderButton"
             android:layout_width="match_parent"
@@ -27,7 +28,19 @@
             android:text="Выбрать папку на SD"
             android:textColor="@color/text_green"
             android:background="@color/button_transparent"
-            android:layout_marginBottom="12dp" />
+            android:layout_marginBottom="16dp"
+            android:padding="12dp"
+            android:textSize="16sp"/>
+
+        <!-- Статус выбранной папки -->
+        <TextView
+            android:id="@+id/folderStatusText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Папка не выбрана"
+            android:textColor="@color/text_green"
+            android:textSize="14sp"
+            android:layout_marginBottom="12dp"/>
 
         <EditText
             android:id="@+id/templatesInput"
@@ -40,7 +53,8 @@
             android:textColor="@color/text_green"
             android:textColorHint="#809F809F"
             android:background="@color/card_dark"
-            android:padding="8dp" />
+            android:padding="8dp"
+            android:textSize="14sp"/>
 
         <Button
             android:id="@+id/saveTemplatesButton"
@@ -49,7 +63,9 @@
             android:text="@string/save_templates"
             android:textColor="@color/text_green"
             android:background="@color/button_transparent"
-            android:layout_marginTop="12dp" />
+            android:layout_marginTop="12dp"
+            android:padding="12dp"
+            android:textSize="16sp"/>
 
         <Button
             android:id="@+id/clearTemplatesButton"
@@ -58,9 +74,10 @@
             android:text="Очистить шаблоны"
             android:textColor="@color/text_green"
             android:background="@color/button_transparent"
-            android:layout_marginTop="8dp" />
+            android:layout_marginTop="8dp"
+            android:padding="12dp"
+            android:textSize="16sp"/>
 
-        <!-- Переключатель для запрета/разрешения скриншотов -->
         <Switch
             android:id="@+id/disableScreenshotsSwitch"
             android:layout_width="match_parent"
@@ -70,7 +87,7 @@
             android:textSize="16sp"
             android:layout_marginTop="12dp"
             android:thumbTint="@color/text_green"
-            android:trackTint="#809F809F" />
+            android:trackTint="#809F809F"/>
 
         <Button
             android:id="@+id/backButton"
@@ -79,6 +96,8 @@
             android:text="@string/back"
             android:textColor="@color/text_green"
             android:background="@color/button_transparent"
-            android:layout_marginTop="8dp" />
+            android:layout_marginTop="16dp"
+            android:padding="12dp"
+            android:textSize="16sp"/>
     </LinearLayout>
 </ScrollView>
