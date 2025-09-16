@@ -1,4 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/chat_layout"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@color/background_black"
+    android:padding="8dp">
+
+    <!-- Top bar: Time + Battery (слева), иконки (справа) -->
     <LinearLayout
         android:id="@+id/topBar"
         android:layout_width="match_parent"
@@ -24,7 +33,7 @@
                 android:textColor="@color/typing_orange"
                 android:textSize="16sp"
                 android:paddingBottom="2dp"
-                android:fontFamily="monospace"/>
+                android:fontFamily="monospace" />
 
             <TextView
                 android:id="@+id/battery_text"
@@ -33,7 +42,7 @@
                 android:text="100%"
                 android:textColor="@color/typing_orange"
                 android:textSize="14sp"
-                android:fontFamily="monospace"/>
+                android:fontFamily="monospace" />
         </LinearLayout>
 
         <!-- Spacer -->
@@ -82,3 +91,58 @@
             android:scaleType="centerInside"
             android:adjustViewBounds="true" />
     </LinearLayout>
+
+    <!-- Chat area background slightly lighter than page -->
+    <ScrollView
+        android:id="@+id/scrollView"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:fillViewport="true"
+        android:background="@color/chat_area_bg"
+        android:padding="8dp">
+
+        <LinearLayout
+            android:id="@+id/chatMessagesContainer"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical" />
+    </ScrollView>
+
+    <!-- Input row: text + envelope (send) -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingTop="8dp"
+        android:background="@color/input_bg"
+        android:padding="8dp">
+
+        <AutoCompleteTextView
+            android:id="@+id/queryInput"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:hint="Напиши сообщение..."
+            android:textColor="@color/mascot_racky_text"
+            android:textColorHint="@color/mascot_racky_text"
+            android:background="@android:color/transparent"
+            android:padding="8dp"
+            android:inputType="textMultiLine"
+            android:maxLines="3"
+            android:scrollbars="vertical"
+            android:popupBackground="@color/popup_bg" />
+
+        <ImageButton
+            android:id="@+id/envelope_button"
+            android:layout_width="56dp"
+            android:layout_height="56dp"
+            android:layout_marginStart="8dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/send"
+            android:scaleType="centerInside"
+            android:adjustViewBounds="true" />
+    </LinearLayout>
+
+</LinearLayout>
