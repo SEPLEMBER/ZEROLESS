@@ -9,7 +9,6 @@ import android.util.Log
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.documentfile.provider.DocumentFile
-import androidx.preference.PreferenceManager
 import java.io.BufferedReader
 import java.io.InputStreamReader
 
@@ -33,7 +32,8 @@ class MainActivity : AppCompatActivity() {
         matrixText.setTextColor(0xFF00FF00.toInt()) // зеленый
         matrixText.text = ""
 
-        prefs = PreferenceManager.getDefaultSharedPreferences(this)
+        // Используем стандартные SharedPreferences без PreferenceManager
+        prefs = getSharedPreferences("CyberBeastBot", MODE_PRIVATE)
         folderUri = prefs.getString("pref_folder_uri", null)?.let { Uri.parse(it) }
 
         if (folderUri != null) {
@@ -57,14 +57,10 @@ class MainActivity : AppCompatActivity() {
                 return
             }
 
-            var fullText = ""
-            for (file in txtFiles) {
-                contentResolver.openInputStream(file.uri)?.use { input ->
-                    BufferedReader(InputStreamReader(input, Charsets.UTF_8)).use { reader ->
-                        fullText += reader.readText() + "\n"
-                    }
-                }
+            val fullText = txtFiles.joinToString("\n") { file ->
+                contentResolver.openInputStream(file.uri)?.bufferedReader(Charsets.UTF_8)?.use { it.readText() } ?: ""
             }
+
             animateText(matrixText, fullText.trim())
         } catch (e: Exception) {
             Log.e(TAG, "Error loading files", e)
