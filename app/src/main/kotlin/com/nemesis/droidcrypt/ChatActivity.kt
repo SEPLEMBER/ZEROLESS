@@ -1,5 +1,3 @@
-package com.nemesis.droidcrypt
-
 import android.animation.ObjectAnimator
 import android.annotation.SuppressLint
 import android.content.Intent
@@ -528,36 +526,41 @@ class ChatActivity : AppCompatActivity() {
         }
     }
 
-    private fun levenshtein(s: String, t: String): Int {
-        if (s == t) return 0
-        val n = s.length
-        val m = t.length
-        if (n == 0) return m
-        if (m == 0) return n
-        if (abs(n - m) > MAX_FUZZY_DISTANCE) return MAX_FUZZY_DISTANCE + 1
+private fun levenshtein(s: String, t: String): Int {
+    if (s == t) return 0
+    val n = s.length
+    val m = t.length
+    if (n == 0) return m
+    if (m == 0) return n
+    if (abs(n - m) > MAX_FUZZY_DISTANCE) return MAX_FUZZY_DISTANCE + 1
 
-        var prev = IntArray(m + 1) { it }
-        var curr = IntArray(m + 1)
+    // Используем val для массивов, но не переназначаем ссылки — копируем содержимое
+    val prev = IntArray(m + 1) { it }
+    val curr = IntArray(m + 1)
 
-        for (i in 1..n) {
-            curr[0] = i
-            val si = s[i - 1]
-            var minInRow = curr[0]
+    for (i in 1..n) {
+        curr[0] = i
+        val si = s[i - 1]
+        var minInRow = curr[0]
 
-            for (j in 1..m) {
-                val cost = if (si == t[j - 1]) 0 else 1
-                curr[j] = minOf(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + cost)
-                if (curr[j] < minInRow) minInRow = curr[j]
-            }
-
-            if (minInRow > MAX_FUZZY_DISTANCE) return MAX_FUZZY_DISTANCE + 1
-            // swap arrays safely
-            val tmp = prev
-            prev = curr
-            curr = tmp
+        for (j in 1..m) {
+            val cost = if (si == t[j - 1]) 0 else 1
+            val insertion = prev[j] + 1
+            val deletion = curr[j - 1] + 1
+            val substitution = prev[j - 1] + cost
+            val v = minOf(insertion, deletion, substitution)
+            curr[j] = v
+            if (v < minInRow) minInRow = v
         }
-        return prev[m]
+
+        if (minInRow > MAX_FUZZY_DISTANCE) return MAX_FUZZY_DISTANCE + 1
+
+        // Копируем содержимое curr в prev — не переназначаем prev
+        System.arraycopy(curr, 0, prev, 0, m + 1)
     }
+
+    return prev[m]
+}
 
     // UI Messages
     private fun addChatMessage(sender: String, text: String) {
