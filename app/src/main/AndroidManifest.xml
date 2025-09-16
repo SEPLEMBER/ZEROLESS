@@ -1,6 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools"
-    package="com.example.myapp">
+    package="com.nemesis.droidcrypt">
 
     <!-- Storage (только для API <= 30) -->
     <uses-permission
