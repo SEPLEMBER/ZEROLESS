@@ -390,7 +390,7 @@ templatesMap.keys.filter { abs(it.length - qFiltered.length) <= maxDist }
                 for (key in candidates) {
                     val maxDist = getFuzzyDistance(qFiltered)
 if (abs(key.length - qFiltered.length) > maxDist + 1) continue
-val d = levenshtein(qFiltered, key)
+val d = levenshtein(qFiltered, key, qFiltered)
 if (d < bestDist) {
     bestDist = d
     bestKey = key
@@ -578,40 +578,44 @@ if (bestKey != null && bestDist <= maxDist) {
     }
 
     // <-- ADDED: Levenshtein implementation (optimized with rolling rows and early exit)
-    private fun levenshtein(s: String, t: String): Int {
-        // quick shortcuts
-        if (s == t) return 0
-        val n = s.length
-        val m = t.length
-        if (n == 0) return m
-        if (m == 0) return n
-        val maxDist = getFuzzyDistance(qFiltered)
-        if (abs(n - m) > maxDist + 2) return Int.MAX_VALUE / 2
+private fun levenshtein(s: String, t: String, qFiltered: String): Int {
+    // quick shortcuts
+    if (s == t) return 0
+    val n = s.length
+    val m = t.length
+    if (n == 0) return m
+    if (m == 0) return n
 
+    val maxDist = getFuzzyDistance(qFiltered)
+    if (abs(n - m) > maxDist + 2) return Int.MAX_VALUE / 2
 
-        // use two rolling rows to save memory
-        val prev = IntArray(m + 1) { it }
-        val curr = IntArray(m + 1)
+    // use two rolling rows to save memory
+    val prev = IntArray(m + 1) { it }
+    val curr = IntArray(m + 1)
 
-        for (i in 1..n) {
-            curr[0] = i
-            var minInRow = curr[0]
-            val si = s[i - 1]
-            for (j in 1..m) {
-                val cost = if (si == t[j - 1]) 0 else 1
-                val deletion = prev[j] + 1
-                val insertion = curr[j - 1] + 1
-                val substitution = prev[j - 1] + cost
-                curr[j] = min(min(deletion, insertion), substitution)
-                if (curr[j] < minInRow) minInRow = curr[j]
-            }
-            val maxDist = getFuzzyDistance(qFiltered)
-if (minInRow > maxDist + 2) return Int.MAX_VALUE / 2
-            for (k in 0..m) prev[k] = curr[k]
+    for (i in 1..n) {
+        curr[0] = i
+        var minInRow = curr[0]
+        val si = s[i - 1]
+        for (j in 1..m) {
+            val cost = if (si == t[j - 1]) 0 else 1
+            val deletion = prev[j] + 1
+            val insertion = curr[j - 1] + 1
+            val substitution = prev[j - 1] + cost
+            curr[j] = min(min(deletion, insertion), substitution)
+            if (curr[j] < minInRow) minInRow = curr[j]
         }
-        return prev[m]
+
+        val maxDistRow = getFuzzyDistance(qFiltered)
+        if (minInRow > maxDistRow + 2) return Int.MAX_VALUE / 2
+
+        for (k in 0..m) prev[k] = curr[k]
     }
-    // <-- END ADDED
+
+    return prev[m]
+}
+// <-- END ADDED
+
 
     /// SECTION: UI Messages — Создание и добавление сообщений в чат (addChatMessage, createMessageBubble и утилиты) — UI-логика пузырей, аватаров, скролла; использует currentThemeColor
     // === UI: add message with avatar left for mascots, right-aligned for user ===
