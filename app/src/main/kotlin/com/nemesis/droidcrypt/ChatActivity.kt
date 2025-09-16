@@ -280,10 +280,6 @@ class ChatActivity : AppCompatActivity() {
     private fun setupToolbar() {
         val topBar = findViewById<LinearLayout>(R.id.topBar)
 
-        // Скрываем старые текстовые элементы времени и батареи
-        findViewById<TextView>(R.id.time_text)?.visibility = View.GONE
-        findViewById<TextView>(R.id.battery_text)?.visibility = View.GONE
-
         // Настраиваем левую секцию для иконки батареи и процента
         val leftLayout = topBar.getChildAt(0) as LinearLayout
         leftLayout.removeAllViews()
