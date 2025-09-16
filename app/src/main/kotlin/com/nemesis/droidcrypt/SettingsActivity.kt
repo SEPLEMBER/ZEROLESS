@@ -1,10 +1,8 @@
 package com.nemesis.droidcrypt
 
 import android.content.Intent
-import android.content.SharedPreferences
 import android.net.Uri
 import android.os.Bundle
-import android.os.ParcelFileDescriptor
 import android.preference.PreferenceManager
 import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
@@ -27,6 +25,7 @@ class SettingsActivity : AppCompatActivity() {
         private const val REQUEST_CODE_OPEN_DIRECTORY = 1
         private const val PREF_KEY_FOLDER_URI = "pref_folder_uri"
         private const val PREF_KEY_DISABLE_SCREENSHOTS = "pref_disable_screenshots"
+        private const val PREF_KEY_IS_REGISTERED = "isRegistered"
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -161,7 +160,10 @@ class SettingsActivity : AppCompatActivity() {
                     } catch (_: SecurityException) {
                     }
                 }
-                prefs.edit().putString(PREF_KEY_FOLDER_URI, folderUri.toString()).apply()
+                prefs.edit()
+                    .putString(PREF_KEY_FOLDER_URI, folderUri.toString())
+                    .putBoolean(PREF_KEY_IS_REGISTERED, true)
+                    .apply()
                 Toast.makeText(this, "Папка выбрана", Toast.LENGTH_SHORT).show()
                 loadTemplatesFromFile("base.txt")
             } else {
