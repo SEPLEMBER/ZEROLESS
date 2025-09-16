@@ -36,6 +36,15 @@ class ChatActivity : AppCompatActivity() {
         private const val JACCARD_THRESHOLD = 0.35
     }
 
+    // ---------- Shared contract between Logic and UI ----------
+    private interface UIBridge {
+        fun addChatMessage(sender: String, text: String)
+        fun showTypingIndicator(durationMs: Long, colorHex: String)
+        fun playNotifySound()
+        fun updateAutoCompleteSuggestions(suggestions: List<String>)
+        fun loadTemplatesFromFileRequest(filename: String)
+    }
+
     // Переменные для инициализации UI и Logic
     private lateinit var logic: Logic
     private lateinit var ui: UIManager
@@ -44,12 +53,10 @@ class ChatActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_chat)
 
-        // Создаём логику (без доступа к Android-IO) и UI-менеджер, затем связываем
         logic = Logic()
         ui = UIManager(this, logic)
         logic.setUIBridge(ui)
 
-        // Запускаем UI init (бинды + начальная загрузка файлов)
         ui.initViewsAndLoad()
     }
 
@@ -70,25 +77,9 @@ class ChatActivity : AppCompatActivity() {
     }
 
     // -----------------------
-    // SECTION: Logic (всё, что отвечает за поведение/поиск/парсинг строк/алгоритмы)
+    // SECTION: Logic (поведение / тестируемая логика)
     // -----------------------
-
     inner class Logic {
-
-        // Callback interface — UIManager реализует этот интерфейс
-        interface UIBridge {
-            fun addChatMessage(sender: String, text: String)
-            fun showTypingIndicator(durationMs: Long, colorHex: String)
-            fun playNotifySound()
-            fun updateAutoCompleteSuggestions(suggestions: List<String>)
-            fun loadTemplatesFromFileRequest(filename: String)
-        }
-
-        private var uiBridge: UIBridge? = null
-
-        fun setUIBridge(bridge: UIBridge) {
-            uiBridge = bridge
-        }
 
         // Data structures (логика)
         private val templatesMap = HashMap<String, MutableList<String>>()
@@ -103,7 +94,7 @@ class ChatActivity : AppCompatActivity() {
         private val antiSpamResponses = mutableListOf<String>()
         private val random = Random()
 
-        // State
+        // State (public read-only)
         var currentMascotName = "Racky"
             private set
         var currentMascotIcon = "raccoon_icon.png"
@@ -115,7 +106,7 @@ class ChatActivity : AppCompatActivity() {
         var currentContext = "base.txt"
             private set
 
-        // Dialogs/idle stuff runs on UI/main looper
+        // Dialogs/idle
         private val handler = Handler(Looper.getMainLooper())
         private var dialogRunnable: Runnable? = null
         private var idleChecker: Runnable? = null
@@ -143,6 +134,14 @@ class ChatActivity : AppCompatActivity() {
                 )
             )
         }
+
+        // UIBridge (устанавливается UIManager)
+        private var uiBridge: UIBridge? = null
+        fun setUIBridge(bridge: UIBridge) { uiBridge = bridge }
+
+        // Expose synonyms/stopwords as read-only for UI helpers
+        fun getSynonyms(): Map<String, String> = synonymsMap
+        fun getStopwords(): Set<String> = stopwords
 
         // --- API для UI: наполнение данных (UI читает файлы и вызывает эти методы) ---
         fun clearTemplatesAndState() {
@@ -213,7 +212,6 @@ class ChatActivity : AppCompatActivity() {
                     invertedIndex.getOrPut(token) { mutableListOf() }.apply { if (!contains(key)) add(key) }
                 }
             }
-            // Update UI autocomplete
             uiBridge?.updateAutoCompleteSuggestions((templatesMap.keys + listOf("Привет", "Как дела?", "Расскажи о себе", "Выход")).toList())
         }
 
@@ -253,7 +251,7 @@ class ChatActivity : AppCompatActivity() {
             val computedResponse = computeResponse(qFiltered, qOrig, qTokensFiltered)
 
             // typing simulation
-            val afterTypingDelay = (1500L + random.nextInt(3500)) // 1.5s .. 5s
+            val afterTypingDelay = (1500L + random.nextInt(3500))
             handler.post {
                 uiBridge?.showTypingIndicator(afterTypingDelay + 600L, "#FFA500")
             }
@@ -316,9 +314,7 @@ class ChatActivity : AppCompatActivity() {
                 detectContext(qFiltered)?.let { newContext ->
                     if (newContext != currentContext) {
                         currentContext = newContext
-                        // просим UI загрузить новый контекстный файл (UI выполнит SAF-IO)
                         uiBridge?.loadTemplatesFromFileRequest(newContext)
-                        // после загрузки UI должен вызвать rebuildInvertedIndex()
                     }
                 }
             } catch (e: Exception) {
@@ -451,7 +447,6 @@ class ChatActivity : AppCompatActivity() {
                     if (dialogLines.isEmpty()) return@postDelayed
                     val dialog = dialogLines.random()
                     val mascotName = if (mascotList.isNotEmpty()) mascotList.random()["name"] ?: currentMascotName else currentMascotName
-                    // Notify UI
                     uiBridge?.addChatMessage(mascotName, dialog)
                 }, 1500)
             }
@@ -496,11 +491,10 @@ class ChatActivity : AppCompatActivity() {
     // -----------------------
     // SECTION: UIManager (вся Android-специфичная работа: view binding, SAF IO, рисование сообщений)
     // -----------------------
-
     inner class UIManager(
         private val activity: ChatActivity,
         private val logic: Logic
-    ) : Logic.UIBridge {
+    ) : UIBridge {
 
         // Views
         private var folderUri: Uri? = null
@@ -516,10 +510,6 @@ class ChatActivity : AppCompatActivity() {
         private var adapter: ArrayAdapter<String>? = null
 
         private val handler = Handler(Looper.getMainLooper())
-
-        init {
-            // nothing heavy here
-        }
 
         fun initViewsAndLoad() {
             // bind views
@@ -544,7 +534,7 @@ class ChatActivity : AppCompatActivity() {
                 prefs.getString(PREF_KEY_FOLDER_URI, null)?.let { folderUri = try { Uri.parse(it) } catch (_: Exception) { null } }
             }
 
-            // setup window background and secure flag
+            // window background and secure flag
             try {
                 val resId = resources.getIdentifier("background_black", "color", activity.packageName)
                 val bgColor = if (resId != 0) activity.getColor(resId) else Color.BLACK
@@ -561,7 +551,7 @@ class ChatActivity : AppCompatActivity() {
                 }
             } catch (_: Exception) {}
 
-            // toolbar icons
+            // toolbar icons + listeners
             loadToolbarIcons()
             setupIconTouchEffect(btnLock)
             setupIconTouchEffect(btnTrash)
@@ -588,7 +578,7 @@ class ChatActivity : AppCompatActivity() {
                 logic.processUserQuery(selected)
             }
 
-            // initial load templates
+            // initial templates load
             if (folderUri == null) {
                 showCustomToast("Папка не выбрана! Открой настройки и выбери папку.")
                 loadFallbackTemplatesToLogic()
@@ -598,22 +588,17 @@ class ChatActivity : AppCompatActivity() {
                 loadTemplatesFromFile("base.txt")
             }
 
-            // welcome
             addChatMessage(logic.currentMascotName, "Добро пожаловать!")
-
-            // start idle timer in logic
             logic.startIdleTimer()
         }
 
         fun onResume() {
-            // reload templates if SAF present
             folderUri?.let { loadTemplatesFromFile(logic.currentContext) }
             logic.startIdleTimer()
             loadToolbarIcons()
         }
 
         fun onPause() {
-            // stop any UI handlers
             handler.removeCallbacksAndMessages(null)
         }
 
@@ -621,7 +606,7 @@ class ChatActivity : AppCompatActivity() {
             handler.removeCallbacksAndMessages(null)
         }
 
-        // --- UIBridge implementation (Logic вызывает эти методы) ---
+        // UIBridge methods
         override fun addChatMessage(sender: String, text: String) {
             handler.post {
                 try {
@@ -755,13 +740,11 @@ class ChatActivity : AppCompatActivity() {
         }
 
         override fun loadTemplatesFromFileRequest(filename: String) {
-            // UI отвечает за SAF IO — запускаем загрузку
             handler.post { loadTemplatesFromFile(filename) }
         }
 
-        // --- UI: SAF I/O и парсинг файлов (UIManager читает файлы и передаёт данные в Logic) ---
-        fun loadTemplatesFromFile(filename: String) {
-            // здесь UI читает файлы из folderUri и наполняет Logic данными
+        // --- SAF I/O and parsing into Logic ---
+        private fun loadTemplatesFromFile(filename: String) {
             if (folderUri == null) {
                 loadFallbackTemplatesToLogic()
                 logic.rebuildInvertedIndex()
@@ -775,14 +758,11 @@ class ChatActivity : AppCompatActivity() {
                 return
             }
 
-            // clear current logic templates for fresh load
             logic.clearTemplatesAndState()
-            // if base, set defaults
             if (filename == "base.txt") {
                 logic.setMascotFromMetadata("Racky", "raccoon_icon.png", "#00FF00", "#000000")
             }
 
-            // read main file
             dir.findFile(filename)?.uri?.let { fileUri ->
                 try {
                     activity.contentResolver.openInputStream(fileUri)?.bufferedReader()?.useLines { lines ->
@@ -794,11 +774,9 @@ class ChatActivity : AppCompatActivity() {
                     loadFallbackTemplatesToLogic()
                 }
             } ?: run {
-                // file not found -> fallback
                 loadFallbackTemplatesToLogic()
             }
 
-            // metadata
             val metadataFilename = filename.replace(".txt", "_metadata.txt")
             dir.findFile(metadataFilename)?.uri?.let { metaUri ->
                 try {
@@ -808,18 +786,14 @@ class ChatActivity : AppCompatActivity() {
                 } catch (_: Exception) {}
             }
 
-            // optional dialogs file
             dir.findFile("randomreply.txt")?.uri?.let { dialogsUri ->
                 try {
                     activity.contentResolver.openInputStream(dialogsUri)?.bufferedReader()?.use { r ->
-                        val lines = r.readLines()
-                        parseDialogsFileToLogic(lines)
+                        parseDialogsFileToLogic(r.readLines())
                     }
                 } catch (_: Exception) {}
             }
 
-            // synonyms & stopwords
-            // synonyms file
             dir.findFile("synonims.txt")?.uri?.let { synUri ->
                 try {
                     val map = mutableMapOf<String, String>()
@@ -836,7 +810,6 @@ class ChatActivity : AppCompatActivity() {
                 } catch (_: Exception) {}
             }
 
-            // stopwords file
             dir.findFile("stopwords.txt")?.uri?.let { swUri ->
                 try {
                     val set = mutableSetOf<String>()
@@ -848,11 +821,6 @@ class ChatActivity : AppCompatActivity() {
                 } catch (_: Exception) {}
             }
 
-            // choose random mascot if base and mascot list filled in logic
-            // NOTE: mascots could be added during parseMetadataLineToLogic
-            // logic already has mascotList if parsed; but we set defaults above
-
-            // rebuild index and update UI
             logic.rebuildInvertedIndex()
             updateUI()
         }
@@ -946,7 +914,6 @@ class ChatActivity : AppCompatActivity() {
             }
         }
 
-        // Helper: create fallback templates locally and push to logic
         private fun loadFallbackTemplatesToLogic() {
             logic.clearTemplatesAndState()
             logic.addTemplate(filterStopwordsAndMapSynonymsForUI("привет"), listOf("Привет! Чем могу помочь?", "Здравствуй!"))
@@ -954,7 +921,7 @@ class ChatActivity : AppCompatActivity() {
             logic.addKeywordResponse("спасибо", listOf("Рад, что помог!", "Всегда пожалуйста!"))
         }
 
-        // --- UI helper methods (draw bubble, load avatar, etc.) ---
+        // UI helper methods
         private fun createMessageBubble(sender: String, text: String): LinearLayout {
             val accent = safeParseColorOrDefault(logic.currentThemeColor, Color.parseColor("#00FF00"))
             return LinearLayout(activity).apply {
@@ -1012,7 +979,6 @@ class ChatActivity : AppCompatActivity() {
             val uri = folderUri ?: return
             try {
                 val dir = DocumentFile.fromTreeUri(activity, uri) ?: return
-
                 fun tryLoad(name: String, target: ImageButton?) {
                     try {
                         val file = dir.findFile(name) ?: return
@@ -1029,14 +995,12 @@ class ChatActivity : AppCompatActivity() {
                 tryLoad("trash.png", btnTrash)
                 tryLoad("envelope.png", btnEnvelopeTop)
                 tryLoad("settings.png", btnSettings)
-
                 val sendIcon = dir.findFile("send.png")
                 if (sendIcon != null && sendIcon.exists()) {
                     tryLoad("send.png", envelopeInputButton)
                 } else {
                     tryLoad("envelope.png", envelopeInputButton)
                 }
-
                 mascotTopImage?.visibility = View.GONE
             } catch (e: Exception) {
                 e.printStackTrace()
@@ -1059,7 +1023,6 @@ class ChatActivity : AppCompatActivity() {
                     activity.title = "Pawstribe - ${logic.currentMascotName}"
                     mascotTopImage?.visibility = View.GONE
                     try { messagesContainer.setBackgroundColor(Color.parseColor(logic.currentThemeBackground)) } catch (_: Exception) {}
-                    // refresh autocomplete
                     logic.rebuildInvertedIndex()
                 } catch (_: Exception) {}
             }
@@ -1094,16 +1057,18 @@ class ChatActivity : AppCompatActivity() {
             return try { Color.parseColor(spec) } catch (_: Exception) { fallback }
         }
 
+        // Use read-only getters from Logic instead of accessing private fields
         private fun filterStopwordsAndMapSynonymsForUI(input: String): String {
-            // A light-weight helper for UI-side normalization when building triggers before passing to logic
+            val synonyms = logic.getSynonyms()
+            val stop = logic.getStopwords()
             val tokens = input
                 .lowercase(Locale.getDefault())
                 .replace(Regex("[^\\p{L}\\p{Nd}\\s]"), " ")
                 .split(Regex("\\s+"))
                 .map { it.trim() }
                 .filter { it.isNotEmpty() }
-                .map { logic.synonymsMap[it] ?: it }
-                .filter { !logic.stopwords.contains(it) }
+                .map { synonyms[it] ?: it }
+                .filter { !stop.contains(it) }
             return tokens.joinToString(" ")
         }
 
@@ -1112,7 +1077,5 @@ class ChatActivity : AppCompatActivity() {
             val cleaned = lower.replace(Regex("[^\\p{L}\\p{Nd}\\s]"), " ")
             return cleaned.replace(Regex("\\s+"), " ").trim()
         }
-
-        // --- end UIManager ---
     }
 }
