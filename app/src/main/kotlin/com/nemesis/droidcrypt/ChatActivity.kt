@@ -33,14 +33,19 @@ class ChatActivity : AppCompatActivity() {
         private const val PREF_KEY_DISABLE_SCREENSHOTS = "pref_disable_screenshots"
         private const val MAX_CONTEXT_SWITCH = 6 // Note: This is now unused due to logic simplification
         private const val MAX_MESSAGES = 250
-        private const val MAX_FUZZY_DISTANCE = 4 // <-- ADDED: допустимая дистанция для фаззи-матчинга
-        private const val CANDIDATE_TOKEN_THRESHOLD = 1 // <-- ADDED: минимальное число общих токенов для кандидата
-        private const val MAX_CANDIDATES_FOR_LEV = 40 // <-- ADDED: ограничение числа кандидатов для Levenshtein
-
-        // <-- ADDED: Jaccard threshold
+        private const val CANDIDATE_TOKEN_THRESHOLD = 2 // <-- ADDED: минимальное число общих токенов для кандидата
+        private const val MAX_CANDIDATES_FOR_LEV = 25 // <-- ADDED: ограничение числа кандидатов для Levenshtein
         private const val JACCARD_THRESHOLD = 0.50
     }
 
+    private fun getFuzzyDistance(word: String): Int {
+    return when {
+        word.length <= 4 -> 1
+        word.length <= 8 -> 2
+        else -> 3
+    }
+}
+    
     /// SECTION: UI и Data — Объявление переменных (UI-элементы, карты шаблонов, состояния маскотов/контекста, idle-данные)
     // UI
     private var folderUri: Uri? = null
