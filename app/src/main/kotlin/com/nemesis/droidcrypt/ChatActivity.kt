@@ -1,3 +1,5 @@
+package com.nemesis.droidcrypt
+
 import android.animation.ObjectAnimator
 import android.annotation.SuppressLint
 import android.content.Intent
