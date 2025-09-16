@@ -20,6 +20,11 @@
     <color name="mascot_crow_text">#800080</color>
     <color name="mascot_crow_background">#000000</color>
 
+    <color name="battery_low">#FF4500</color> <!-- красный при низком заряде -->
+    <color name="battery_ok">#FFA500</color>  <!-- оранжевый -->
+    <color name="battery_full">#00FF00</color> <!-- зелёный -->
+
+
     <!-- accents and UI -->
     <color name="neon_accent">#39FF14</color>
     <color name="bubble_bg">#0B0B0D</color>
