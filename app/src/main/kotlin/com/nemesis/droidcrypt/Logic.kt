@@ -1,74 +1,55 @@
 package com.nemesis.droidcrypt
 
-import android.os.Handler
-import android.os.Looper
-import java.lang.ref.WeakReference
+import android.content.Context
+import android.net.Uri
+import androidx.documentfile.provider.DocumentFile
 import java.util.*
-import java.util.concurrent.ExecutorService
-import java.util.concurrent.Executors
 import kotlin.math.abs
+import kotlin.math.min
 
-/**
- * Логика вынесена в отдельный файл.
- * - Не держит сильных ссылок на Activity/UI (WeakReference).
- * - Выполняет тяжёлую работу в bgExecutor (single thread).
- * - Постит UI-операции через mainHandler.
- */
-class Logic(
-    private val mainHandler: Handler = Handler(Looper.getMainLooper())
+class ChatLogic(
+    private val context: Context,
+    var folderUri: Uri?,
+    private val ui: ChatUi
 ) {
 
-    interface UIBridge {
-        fun addChatMessage(sender: String, text: String)
-        fun showTypingIndicator(durationMs: Long, colorHex: String)
-        fun playNotifySound()
-        fun updateAutoCompleteSuggestions(suggestions: List<String>)
-        fun loadTemplatesFromFileRequest(filename: String)
+    companion object {
+        private const val MAX_MESSAGES = 250
+        private const val MAX_FUZZY_DISTANCE = 5
+        private const val CANDIDATE_TOKEN_THRESHOLD = 1
+        private const val MAX_CANDIDATES_FOR_LEV = 40
+        private const val JACCARD_THRESHOLD = 0.50
     }
 
-    // weak ref to UI to avoid leaks
-    private var uiBridgeRef: WeakReference<UIBridge>? = null
-    fun setUIBridge(bridge: UIBridge?) {
-        uiBridgeRef = if (bridge == null) null else WeakReference(bridge)
-    }
-
-    private fun uiBridge(): UIBridge? = uiBridgeRef?.get()
-
-    // single-threaded executor for background work (search/indexing)
-    private val bgExecutor: ExecutorService = Executors.newSingleThreadExecutor()
-
-    // ---- Data (synchronized access) ----
-    private val templatesMap = HashMap<String, MutableList<String>>()
-    private val keywordResponses = HashMap<String, MutableList<String>>()
+    // Data structures (moved from Activity)
+    private val fallback = arrayOf("Привет", "Как дела?", "Расскажи о себе", "Выход")
+    val templatesMap = HashMap<String, MutableList<String>>() // normalized trigger -> responses
     private val contextMap = HashMap<String, String>()
+    private val keywordResponses = HashMap<String, MutableList<String>>()
+    private val antiSpamResponses = mutableListOf<String>()
+    private val mascotList = mutableListOf<Map<String, String>>()
     private val dialogLines = mutableListOf<String>()
     private val dialogs = mutableListOf<Dialog>()
-    private val mascotList = mutableListOf<Map<String, String>>()
+
+    // inverted index token -> list of triggers
     private val invertedIndex = HashMap<String, MutableList<String>>()
+
+    // synonyms and stopwords
     private val synonymsMap = HashMap<String, String>()
     private val stopwords = HashSet<String>()
-    private val antiSpamResponses = mutableListOf<String>()
 
-    // state
-    @Volatile var currentMascotName = "Racky"; private set
-    @Volatile var currentMascotIcon = "raccoon_icon.png"; private set
-    @Volatile var currentThemeColor = "#00FF00"; private set
-    @Volatile var currentThemeBackground = "#000000"; private set
-    @Volatile var currentContext = "base.txt"; private set
+    private var currentMascotName = "Racky"
+    private var currentMascotIcon = "raccoon_icon.png"
+    private var currentThemeColor = "#00FF00"
+    private var currentThemeBackground = "#000000"
+    var currentContext = "base.txt"
+        private set
 
-    // idle/dialogs
-    private val handler = mainHandler
-    private var dialogRunnable: Runnable? = null
-    private var idleChecker: Runnable? = null
-    private var lastUserInputTime = System.currentTimeMillis()
-    private val queryCountMap = HashMap<String, Int>()
     private var lastQuery = ""
-    private var currentDialog: Dialog? = null
-    private var currentDialogIndex = 0
+    private val random = Random()
+    private val queryCountMap = HashMap<String, Int>()
 
     private data class Dialog(val name: String, val replies: MutableList<Map<String, String>> = mutableListOf())
-
-    private val random = Random()
 
     init {
         antiSpamResponses.addAll(
@@ -80,233 +61,521 @@ class Logic(
                 "Эй, не зацикливайся, попробуй другой вопрос!",
                 "Повторяешь одно и то же? Давай разнообразие!",
                 "Слишком много повторов, я же не робот... ну, почти.",
-                "Не спамь, пожалуйста, задай новый запрос!",
+                "Не спамь, пожалуйста, задай новый вопрос!",
                 "Пять раз одно и то же? Попробуй что-то другое.",
                 "Я уже ответил, давай новый запрос!"
             )
         )
+        // try load synonyms/stopwords early if folder provided
+        loadSynonymsAndStopwords()
     }
 
-    // ---- Thread-safe getters for UI ----
-    @Synchronized fun getSynonyms(): Map<String, String> = HashMap(synonymsMap)
-    @Synchronized fun getStopwords(): Set<String> = HashSet(stopwords)
-
-    // ---- Methods for UI to populate data (called from UI thread) ----
-    @Synchronized fun clearTemplatesAndState() {
-        templatesMap.clear()
-        keywordResponses.clear()
-        contextMap.clear()
-        dialogs.clear()
-        dialogLines.clear()
-        mascotList.clear()
-        invertedIndex.clear()
-        synonymsMap.clear()
-        stopwords.clear()
+    // UI bridge interface that Activity implements
+    interface ChatUi {
+        fun addChatMessage(sender: String, text: String)
+        fun showTypingIndicator()
+        fun startIdleTimer()
+        fun updateAutoComplete(suggestions: List<String>)
+        fun updateUI(mascotName: String, mascotIcon: String, themeColor: String, themeBackground: String)
+        fun showCustomToast(message: String)
+        fun triggerRandomDialog()
     }
 
-    @Synchronized fun addTemplate(trigger: String, responses: List<String>) {
-        val t = trigger.trim().lowercase(Locale.getDefault())
-        if (t.isEmpty() || responses.isEmpty()) return
-        templatesMap.getOrPut(t) { mutableListOf() }.addAll(responses)
+    // === Public API used by Activity ===
+    fun setFolderUri(uri: Uri?) {
+        folderUri = uri
     }
 
-    @Synchronized fun addKeywordResponse(keyword: String, responses: List<String>) {
-        val k = keyword.trim().lowercase(Locale.getDefault())
-        if (k.isEmpty() || responses.isEmpty()) return
-        keywordResponses.getOrPut(k) { mutableListOf() }.addAll(responses)
-    }
-
-    @Synchronized fun addContextMapping(key: String, value: String) {
-        if (key.isBlank()) return
-        contextMap[key.trim().lowercase(Locale.getDefault())] = value.trim()
-    }
-
-    @Synchronized fun addDialogLine(line: String) {
-        if (line.isNotBlank()) dialogLines.add(line.trim())
-    }
-
-    @Synchronized fun addDialog(name: String, replies: List<Pair<String, String>>) {
-        val d = Dialog(name)
-        replies.forEach { (mascot, text) -> d.replies.add(mapOf("mascot" to mascot, "text" to text)) }
-        if (d.replies.isNotEmpty()) dialogs.add(d)
-    }
-
-    @Synchronized fun addMascotEntry(name: String, icon: String, color: String, background: String) {
-        if (name.isBlank()) return
-        mascotList.add(mapOf("name" to name, "icon" to icon, "color" to color, "background" to background))
-    }
-
-    @Synchronized fun setMascotFromMetadata(name: String?, icon: String?, color: String?, background: String?) {
-        name?.let { if (it.isNotBlank()) currentMascotName = it }
-        icon?.let { if (it.isNotBlank()) currentMascotIcon = it }
-        color?.let { if (it.isNotBlank()) currentThemeColor = it }
-        background?.let { if (it.isNotBlank()) currentThemeBackground = it }
-    }
-
-    @Synchronized fun setSynonyms(map: Map<String, String>) {
-        synonymsMap.clear()
-        synonymsMap.putAll(map)
-    }
-
-    @Synchronized fun setStopwords(set: Set<String>) {
-        stopwords.clear()
-        stopwords.addAll(set)
-    }
-
-    /**
-     * Rebuild inverted index in bg thread and notify UI when ready.
-     */
-    fun rebuildInvertedIndexAsync() {
-        bgExecutor.submit {
-            synchronized(this) {
-                invertedIndex.clear()
-                for (key in templatesMap.keys) {
-                    val toks = filterStopwordsAndMapSynonymsLocked(key).first
-                    for (t in toks) {
-                        invertedIndex.getOrPut(t) { mutableListOf() }.apply { if (!contains(key)) add(key) }
-                    }
-                }
-            }
-            // prepare suggestions snapshot
-            val suggestions: List<String> = synchronized(this) {
-                (templatesMap.keys + listOf("Привет", "Как дела?", "Расскажи о себе", "Выход")).toList()
-            }
-            mainHandler.post { uiBridge()?.updateAutoCompleteSuggestions(suggestions) }
-        }
-    }
-
-    /**
-     * Вход: UI вызывает processUserQuery (обычно из main thread).
-     * Мы делаем: постим user message немедленно, запускаем bg compute, показываем индикатор печати и по завершении постим ответ.
-     */
     fun processUserQuery(userInput: String) {
         val qOrigRaw = userInput.trim()
         val qOrig = normalizeText(qOrigRaw)
-        val (qTokensFiltered, qFiltered) = synchronized(this) { filterStopwordsAndMapSynonymsLocked(qOrig) }
+        val (qTokensFiltered, qFiltered) = filterStopwordsAndMapSynonyms(qOrig)
 
+        val qKeyForCount = qFiltered
         if (qFiltered.isEmpty()) return
 
-        lastUserInputTime = System.currentTimeMillis()
-        stopDialog()
-
-        synchronized(this) {
-            if (qFiltered == lastQuery) {
-                val cnt = queryCountMap.getOrDefault(qFiltered, 0) + 1
-                queryCountMap[qFiltered] = cnt
-            } else {
-                queryCountMap.clear()
-                queryCountMap[qFiltered] = 1
-                lastQuery = qFiltered
-            }
+        // update repeated query counters
+        if (qKeyForCount == lastQuery) {
+            val cnt = queryCountMap.getOrDefault(qKeyForCount, 0)
+            queryCountMap[qKeyForCount] = cnt + 1
+        } else {
+            queryCountMap.clear()
+            queryCountMap[qKeyForCount] = 1
+            lastQuery = qKeyForCount
         }
+        // show user's input in UI
+        ui.addChatMessage("Ты", userInput)
 
-        // add user message immediately on UI
-        mainHandler.post { uiBridge()?.addChatMessage("Ты", userInput) }
+        // show typing indicator
+        ui.showTypingIndicator()
 
-        val repeats = synchronized(this) { queryCountMap.getOrDefault(qFiltered, 0) }
+        val repeats = queryCountMap.getOrDefault(qKeyForCount, 0)
         if (repeats >= 5) {
             val spamResp = antiSpamResponses.random()
-            mainHandler.postDelayed({
-                uiBridge()?.addChatMessage(currentMascotName, spamResp)
-                uiBridge()?.playNotifySound()
-            }, 1200)
-            startIdleTimer()
+            ui.addChatMessage(currentMascotName, spamResp)
+            ui.startIdleTimer()
             return
         }
 
-        // show typing indicator quickly (UI on main)
-        val afterTypingDelay = (1500L + random.nextInt(3500))
-        mainHandler.post { uiBridge()?.showTypingIndicator(afterTypingDelay + 600L, "#FFA500") }
+        var answered = false
 
-        // compute response in bg
-        bgExecutor.submit {
-            val response = computeResponseLocked(qFiltered, qOrig, qTokensFiltered)
-            // post result to UI
-            mainHandler.postDelayed({
-                uiBridge()?.addChatMessage(currentMascotName, response)
-                uiBridge()?.playNotifySound()
-            }, afterTypingDelay + 700L)
+        // 1. Exact match
+        templatesMap[qFiltered]?.let { possible ->
+            if (possible.isNotEmpty()) {
+                ui.addChatMessage(currentMascotName, possible.random())
+                answered = true
+            }
         }
 
-        triggerRandomDialog()
-        startIdleTimer()
-    }
-
-    // computeResponse must not touch UI directly; return String. Access shared data inside synchronized blocks.
-    private fun computeResponseLocked(qFiltered: String, qOrig: String, qTokensFiltered: List<String>): String {
-        try {
-            synchronized(this) {
-                templatesMap[qFiltered]?.randomOrNull()?.let { return it }
-                for ((keyword, responses) in keywordResponses) {
-                    if (qFiltered.contains(keyword)) {
-                        responses.randomOrNull()?.let { return it }
-                    }
+        // 2. keyword matching
+        if (!answered) {
+            for ((keyword, responses) in keywordResponses) {
+                if (qFiltered.contains(keyword) && responses.isNotEmpty()) {
+                    ui.addChatMessage(currentMascotName, responses.random())
+                    answered = true
+                    break
                 }
             }
+        }
 
+        // 2.5 Fuzzy using inverted index -> jaccard -> levenshtein
+        if (!answered) {
             val qTokens = if (qTokensFiltered.isNotEmpty()) qTokensFiltered else tokenize(qFiltered)
-            val candidates = findBestCandidatesLocked(qTokens, qFiltered)
-
-            val qSet = qTokens.toSet()
-            var bestByJaccard: String? = null
-            var bestJaccard = 0.0
-            for (key in candidates) {
-                val keyTokens = synchronized(this) { filterStopwordsAndMapSynonymsLocked(key).first.toSet() }
-                if (keyTokens.isEmpty()) continue
-                val inter = qSet.intersect(keyTokens).size.toDouble()
-                val union = qSet.union(keyTokens).size.toDouble()
-                val j = if (union > 0) inter / union else 0.0
-                if (j > bestJaccard) {
-                    bestJaccard = j
-                    bestByJaccard = key
-                }
-            }
-            if (bestByJaccard != null && bestJaccard >= JACCARD_THRESHOLD) {
-                synchronized(this) { templatesMap[bestByJaccard]?.randomOrNull()?.let { return it } }
-            }
-
-            var bestKey: String? = null
-            var bestDist = MAX_FUZZY_DISTANCE + 1
-            for (key in candidates) {
-                if (abs(key.length - qFiltered.length) > MAX_FUZZY_DISTANCE) continue
-                val d = levenshtein(qFiltered, key)
-                if (d < bestDist) {
-                    bestDist = d
-                    bestKey = key
-                }
-                if (bestDist == 0) break
-            }
-            if (bestKey != null && bestDist <= MAX_FUZZY_DISTANCE) {
-                synchronized(this) { templatesMap[bestKey]?.randomOrNull()?.let { return it } }
-            }
-
-            val ctx = synchronized(this) { detectContextLocked(qFiltered) }
-            ctx?.let { newContext ->
-                if (newContext != currentContext) {
-                    currentContext = newContext
-                    mainHandler.post { uiBridge()?.loadTemplatesFromFileRequest(newContext) }
-                }
-            }
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-
-        return getDummyResponse(qOrig)
-    }
-
-    // ---- helper locked versions ----
-    private fun findBestCandidatesLocked(qTokens: List<String>, qFiltered: String): List<String> {
-        val candidateCounts = HashMap<String, Int>()
-        synchronized(this) {
-            qTokens.forEach { tok ->
+            val candidateCounts = HashMap<String, Int>()
+            for (tok in qTokens) {
                 invertedIndex[tok]?.forEach { trig ->
                     candidateCounts[trig] = candidateCounts.getOrDefault(trig, 0) + 1
                 }
             }
-            return if (candidateCounts.isNotEmpty()) {
+            val candidates = if (candidateCounts.isNotEmpty()) {
                 candidateCounts.entries
                     .filter { it.value >= CANDIDATE_TOKEN_THRESHOLD }
                     .sortedByDescending { it.value }
                     .map { it.key }
                     .take(MAX_CANDIDATES_FOR_LEV)
             } else {
+                templatesMap.keys.filter { abs(it.length - qFiltered.length) <= MAX_FUZZY_DISTANCE }
+                    .take(MAX_CANDIDATES_FOR_LEV)
+            }
+
+            // Jaccard
+            var bestByJaccard: String? = null
+            var bestJaccard = 0.0
+            val qSet = qTokens.toSet()
+            for (key in candidates) {
+                val keyTokens = filterStopwordsAndMapSynonyms(key).first.toSet()
+                if (keyTokens.isEmpty()) continue
+                val inter = qSet.intersect(keyTokens).size.toDouble()
+                val union = qSet.union(keyTokens).size.toDouble()
+                val j = if (union == 0.0) 0.0 else inter / union
+                if (j > bestJaccard) {
+                    bestJaccard = j
+                    bestByJaccard = key
+                }
+            }
+            if (bestByJaccard != null && bestJaccard >= JACCARD_THRESHOLD) {
+                val possible = templatesMap[bestByJaccard]
+                if (!possible.isNullOrEmpty()) {
+                    ui.addChatMessage(currentMascotName, possible.random())
+                    answered = true
+                }
+            }
+
+            // Levenshtein fallback
+            if (!answered) {
+                var bestKey: String? = null
+                var bestDist = Int.MAX_VALUE
+                for (key in candidates) {
+                    if (abs(key.length - qFiltered.length) > MAX_FUZZY_DISTANCE + 1) continue
+                    val d = levenshtein(qFiltered, key)
+                    if (d < bestDist) {
+                        bestDist = d
+                        bestKey = key
+                    }
+                    if (bestDist == 0) break
+                }
+                if (bestKey != null && bestDist <= MAX_FUZZY_DISTANCE) {
+                    val possible = templatesMap[bestKey]
+                    if (!possible.isNullOrEmpty()) {
+                        ui.addChatMessage(currentMascotName, possible.random())
+                        answered = true
+                    }
+                }
+            }
+        }
+
+        // 3. Try context switch
+        if (!answered) {
+            detectContext(qFiltered)?.let { newContext ->
+                if (newContext != currentContext) {
+                    currentContext = newContext
+                    loadTemplatesFromFile(currentContext)
+                    // notify UI about new suggestions and UI metadata
+                    ui.updateAutoComplete(buildAutoCompleteSuggestions())
+                    ui.updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
+                    // re-check in the new context
+                    templatesMap[qFiltered]?.let { possible ->
+                        if (possible.isNotEmpty()) {
+                            ui.addChatMessage(currentMascotName, possible.random())
+                            answered = true
+                        }
+                    }
+                }
+            }
+        }
+
+        // 4. fallback
+        if (!answered) {
+            val fallbackResp = getDummyResponse(qOrig)
+            ui.addChatMessage(currentMascotName, fallbackResp)
+        }
+
+        // trigger idle/dialog events on UI side and start idle timer
+        ui.triggerRandomDialog()
+        ui.startIdleTimer()
+    }
+
+    // === Helpers & moved methods ===
+
+    private fun getDummyResponse(query: String): String {
+        val lower = query.lowercase(Locale.ROOT)
+        return when {
+            lower.contains("привет") -> "Привет! Чем могу помочь?"
+            lower.contains("как дела") -> "Всё отлично, а у тебя?"
+            else -> "Не понял запрос. Попробуй другой вариант."
+        }
+    }
+
+    private fun normalizeText(s: String): String {
+        val lower = s.lowercase(Locale.getDefault())
+        val cleaned = lower.replace(Regex("[^\\p{L}\\p{Nd}\\s]"), " ")
+        val collapsed = cleaned.replace(Regex("\\s+"), " ").trim()
+        return collapsed
+    }
+
+    private fun tokenize(s: String): List<String> {
+        if (s.isBlank()) return emptyList()
+        return s.split(Regex("\\s+")).map { it.trim() }.filter { it.isNotEmpty() }
+    }
+
+    private fun loadSynonymsAndStopwords() {
+        synonymsMap.clear()
+        stopwords.clear()
+        val uri = folderUri ?: return
+        try {
+            val dir = DocumentFile.fromTreeUri(context, uri) ?: return
+
+            val synFile = dir.findFile("synonims.txt")
+            if (synFile != null && synFile.exists()) {
+                context.contentResolver.openInputStream(synFile.uri)?.bufferedReader()?.use { reader ->
+                    reader.forEachLine { raw ->
+                        var l = raw.trim()
+                        if (l.isEmpty()) return@forEachLine
+                        if (l.startsWith("*") && l.endsWith("*") && l.length > 1) {
+                            l = l.substring(1, l.length - 1)
+                        }
+                        val parts = l.split(";").map { normalizeText(it).trim() }.filter { it.isNotEmpty() }
+                        if (parts.isEmpty()) return@forEachLine
+                        val canonical = parts.last()
+                        for (p in parts) synonymsMap[p] = canonical
+                    }
+                }
+            }
+
+            val stopFile = dir.findFile("stopwords.txt")
+            if (stopFile != null && stopFile.exists()) {
+                context.contentResolver.openInputStream(stopFile.uri)?.bufferedReader()?.use { reader ->
+                    val all = reader.readText()
+                    if (all.isNotEmpty()) {
+                        val parts = all.split("^").map { normalizeText(it).trim() }.filter { it.isNotEmpty() }
+                        for (p in parts) stopwords.add(p)
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            // ignore silently
+        }
+    }
+
+    // returns Pair(listOfTokens, joinedNormalizedString)
+    private fun filterStopwordsAndMapSynonyms(input: String): Pair<List<String>, String> {
+        val toks = tokenize(input)
+        val mapped = toks.map { tok ->
+            val n = normalizeText(tok)
+            val s = synonymsMap[n] ?: n
+            s
+        }.filter { it.isNotEmpty() && !stopwords.contains(it) }
+        val joined = mapped.joinToString(" ")
+        return Pair(mapped, joined)
+    }
+
+    private fun rebuildInvertedIndex() {
+        invertedIndex.clear()
+        for (key in templatesMap.keys) {
+            val toks = filterStopwordsAndMapSynonyms(key).first
+            for (t in toks) {
+                val list = invertedIndex.getOrPut(t) { mutableListOf() }
+                if (!list.contains(key)) list.add(key)
+            }
+        }
+    }
+
+    private fun levenshtein(s: String, t: String): Int {
+        if (s == t) return 0
+        val n = s.length
+        val m = t.length
+        if (n == 0) return m
+        if (m == 0) return n
+        if (abs(n - m) > MAX_FUZZY_DISTANCE + 2) return Int.MAX_VALUE / 2
+
+        val prev = IntArray(m + 1) { it }
+        val curr = IntArray(m + 1)
+
+        for (i in 1..n) {
+            curr[0] = i
+            var minInRow = curr[0]
+            val si = s[i - 1]
+            for (j in 1..m) {
+                val cost = if (si == t[j - 1]) 0 else 1
+                val deletion = prev[j] + 1
+                val insertion = curr[j - 1] + 1
+                val substitution = prev[j - 1] + cost
+                curr[j] = min(min(deletion, insertion), substitution)
+                if (curr[j] < minInRow) minInRow = curr[j]
+            }
+            if (minInRow > MAX_FUZZY_DISTANCE + 2) return Int.MAX_VALUE / 2
+            for (k in 0..m) prev[k] = curr[k]
+        }
+        return prev[m]
+    }
+
+    // === Template loading / parsing (moved) ===
+    fun loadTemplatesFromFile(filename: String) {
+        templatesMap.clear()
+        keywordResponses.clear()
+        mascotList.clear()
+        dialogLines.clear()
+        dialogs.clear()
+
+        if (filename == "base.txt") {
+            contextMap.clear()
+        }
+
+        currentMascotName = "Racky"
+        currentMascotIcon = "raccoon_icon.png"
+        currentThemeColor = "#00FF00"
+        currentThemeBackground = "#000000"
+
+        loadSynonymsAndStopwords()
+
+        if (folderUri == null) {
+            loadFallbackTemplates()
+            rebuildInvertedIndex()
+            ui.updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
+            return
+        }
+
+        try {
+            val dir = DocumentFile.fromTreeUri(context, folderUri!!) ?: run {
+                loadFallbackTemplates()
+                rebuildInvertedIndex()
+                ui.updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
+                return
+            }
+
+            val file = dir.findFile(filename)
+            if (file == null || !file.exists()) {
+                loadFallbackTemplates()
+                rebuildInvertedIndex()
+                ui.updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
+                return
+            }
+
+            context.contentResolver.openInputStream(file.uri)?.bufferedReader()?.use { reader ->
+                reader.forEachLine { raw ->
+                    val l = raw.trim()
+                    if (l.isEmpty()) return@forEachLine
+                    if (filename == "base.txt" && l.startsWith(":") && l.endsWith(":")) {
+                        val contextLine = l.substring(1, l.length - 1)
+                        if (contextLine.contains("=")) {
+                            val parts = contextLine.split("=", limit = 2)
+                            if (parts.size == 2) {
+                                val keyword = parts[0].trim().lowercase(Locale.ROOT)
+                                val contextFile = parts[1].trim()
+                                if (keyword.isNotEmpty() && contextFile.isNotEmpty()) contextMap[keyword] =
+                                    contextFile
+                            }
+                        }
+                        return@forEachLine
+                    }
+                    if (l.startsWith("-")) {
+                        val keywordLine = l.substring(1)
+                        if (keywordLine.contains("=")) {
+                            val parts = keywordLine.split("=", limit = 2)
+                            if (parts.size == 2) {
+                                val keyword = parts[0].trim().lowercase(Locale.ROOT)
+                                val responses = parts[1].split("|")
+                                val responseList =
+                                    responses.mapNotNull { it.trim().takeIf { s -> s.isNotEmpty() } }
+                                        .toMutableList()
+                                if (keyword.isNotEmpty() && responseList.isNotEmpty()) keywordResponses[keyword] =
+                                    responseList
+                            }
+                        }
+                        return@forEachLine
+                    }
+                    if (!l.contains("=")) return@forEachLine
+                    val parts = l.split("=", limit = 2)
+                    if (parts.size == 2) {
+                        val triggerRaw = parts[0].trim()
+                        val trigger = normalizeText(triggerRaw)
+                        val triggerFiltered = filterStopwordsAndMapSynonyms(trigger).second
+                        val responses = parts[1].split("|")
+                        val responseList =
+                            responses.mapNotNull { it.trim().takeIf { s -> s.isNotEmpty() } }
+                                .toMutableList()
+                        if (triggerFiltered.isNotEmpty() && responseList.isNotEmpty()) templatesMap[triggerFiltered] =
+                            responseList
+                    }
+                }
+            }
+
+            val metadataFilename = filename.replace(".txt", "_metadata.txt")
+            val metadataFile = dir.findFile(metadataFilename)
+            if (metadataFile != null && metadataFile.exists()) {
+                context.contentResolver.openInputStream(metadataFile.uri)?.bufferedReader()?.use { reader ->
+                    reader.forEachLine { raw ->
+                        val line = raw.trim()
+                        when {
+                            line.startsWith("mascot_list=") -> {
+                                val mascots = line.substring("mascot_list=".length).split("|")
+                                for (mascot in mascots) {
+                                    val parts = mascot.split(":")
+                                    if (parts.size == 4) {
+                                        val mascotData = mapOf(
+                                            "name" to parts[0].trim(),
+                                            "icon" to parts[1].trim(),
+                                            "color" to parts[2].trim(),
+                                            "background" to parts[3].trim()
+                                        )
+                                        mascotList.add(mascotData)
+                                    }
+                                }
+                            }
+                            line.startsWith("mascot_name=") -> currentMascotName =
+                                line.substring("mascot_name=".length).trim()
+                            line.startsWith("mascot_icon=") -> currentMascotIcon =
+                                line.substring("mascot_icon=".length).trim()
+                            line.startsWith("theme_color=") -> currentThemeColor =
+                                line.substring("theme_color=".length).trim()
+                            line.startsWith("theme_background=") -> currentThemeBackground =
+                                line.substring("theme_background=".length).trim()
+                            line.startsWith("dialog_lines=") -> {
+                                val lines =
+                                    line.substring("dialog_lines=".length).split("|")
+                                for (d in lines) {
+                                    val t = d.trim(); if (t.isNotEmpty()) dialogLines.add(t)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            val dialogFile = dir.findFile("randomreply.txt")
+            if (dialogFile != null && dialogFile.exists()) {
+                try {
+                    context.contentResolver.openInputStream(dialogFile.uri)?.bufferedReader()
+                        ?.use { reader ->
+                            var currentDialogParser: Dialog? = null
+                            reader.forEachLine { raw ->
+                                val l = raw.trim()
+                                if (l.isEmpty()) return@forEachLine
+                                if (l.startsWith(";")) {
+                                    currentDialogParser?.takeIf { it.replies.isNotEmpty() }
+                                        ?.let { dialogs.add(it) }
+                                    currentDialogParser = Dialog(l.substring(1).trim())
+                                    return@forEachLine
+                                }
+                                if (l.contains(">")) {
+                                    val parts = l.split(">", limit = 2)
+                                    if (parts.size == 2) {
+                                        val mascot = parts[0].trim()
+                                        val text = parts[1].trim()
+                                        if (mascot.isNotEmpty() && text.isNotEmpty()) {
+                                            val cur = currentDialogParser
+                                                ?: Dialog("default").also { currentDialogParser = it }
+                                            cur.replies.add(mapOf("mascot" to mascot, "text" to text))
+                                        }
+                                    }
+                                    return@forEachLine
+                                }
+                                dialogLines.add(l)
+                            }
+                            currentDialogParser?.takeIf { it.replies.isNotEmpty() }
+                                ?.let { dialogs.add(it) }
+                        }
+                } catch (e: Exception) {
+                    ui.showCustomToast("Ошибка чтения randomreply.txt: ${e.message}")
+                }
+            }
+
+            if (filename == "base.txt" && mascotList.isNotEmpty()) {
+                val selected = mascotList.random()
+                selected["name"]?.let { currentMascotName = it }
+                selected["icon"]?.let { currentMascotIcon = it }
+                selected["color"]?.let { currentThemeColor = it }
+                selected["background"]?.let { currentThemeBackground = it }
+            }
+
+            rebuildInvertedIndex()
+            // notify UI about loaded metadata and suggestions
+            ui.updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
+            ui.updateAutoComplete(buildAutoCompleteSuggestions())
+
+        } catch (e: Exception) {
+            ui.showCustomToast("Ошибка чтения файла: ${e.message}")
+            loadFallbackTemplates()
+            rebuildInvertedIndex()
+            ui.updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
+            ui.updateAutoComplete(buildAutoCompleteSuggestions())
+        }
+    }
+
+    private fun loadFallbackTemplates() {
+        templatesMap.clear()
+        contextMap.clear()
+        keywordResponses.clear()
+        dialogs.clear()
+        dialogLines.clear()
+        mascotList.clear()
+
+        val t1 = filterStopwordsAndMapSynonyms(normalizeText("привет")).second
+        templatesMap[t1] = mutableListOf("Привет! Чем могу помочь?", "Здравствуй!")
+        val t2 = filterStopwordsAndMapSynonyms(normalizeText("как дела")).second
+        templatesMap[t2] = mutableListOf("Всё отлично, а у тебя?", "Нормально, как дела?")
+        keywordResponses["спасибо"] = mutableListOf("Рад, что помог!", "Всегда пожалуйста!")
+    }
+
+    private fun detectContext(input: String): String? {
+        val lower = normalizeText(input)
+        for ((keyword, value) in contextMap) {
+            if (lower.contains(keyword)) return value
+        }
+        return null
+    }
+
+    fun rebuildIndexPublic() {
+        rebuildInvertedIndex()
+    }
+
+    private fun buildAutoCompleteSuggestions(): List<String> {
+        val suggestions = mutableListOf<String>()
+        suggestions.addAll(templatesMap.keys)
+        for (s in fallback) {
+            val low = s.lowercase(Locale.ROOT)
+            if (!suggestions.contains(low)) suggestions.add(low)
+        }
+        return suggestions
+    }
+}
