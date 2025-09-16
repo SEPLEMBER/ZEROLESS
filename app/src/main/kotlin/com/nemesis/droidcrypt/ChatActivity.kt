@@ -1,4 +1,4 @@
-package com.nemesis.droidcrypt
+package com.nemesis.pawscribe
 
 import android.animation.ObjectAnimator
 import android.content.Intent
@@ -321,6 +321,105 @@ class ChatActivity : AppCompatActivity() {
         val subqueryResponses = mutableListOf<String>()
         val processedSubqueries = mutableSetOf<String>()
 
+        // -----------------------
+        // NEW: Intent-based multi-topic handling
+        // If user asked something like "что такое aes gcm" — detect intent and fetch answers for each topic,
+        // then combine into single message: "AES — ... . GCM — ..."
+        // -----------------------
+        val questionIntents = listOf(
+            "что такое",
+            "кто такой",
+            "как работает",
+            "расскажи о",
+            "объясни",
+            "что это",
+            "что такое ли"
+        )
+
+        val matchedIntent = questionIntents.find { intent ->
+            // check on normalized original string (qOrig)
+            qOrig.startsWith(intent) || qOrig.contains(" $intent") || qOrig.contains("$intent ")
+        }
+
+        if (matchedIntent != null) {
+            // Build topic tokens: prefer already filtered/mapped tokens (qTokensFiltered).
+            // If empty, fall back to tokens from normalized original (and filter stopwords).
+            val topicTokens = if (qTokensFiltered.isNotEmpty()) {
+                qTokensFiltered.toMutableList()
+            } else {
+                tokenize(qOrig).map { normalizeText(it) }.filter { it.length > 1 && !stopwords.contains(it) }.toMutableList()
+            }
+
+            // remove intent words themselves from topicTokens (if present)
+            val intentWords = matchedIntent.split(Regex("\\s+")).map { normalizeText(it) }
+            topicTokens.removeAll(intentWords)
+
+            // if there are combined topics like "aes gcm", iterate all tokens and collect answers
+            for (t in topicTokens) {
+                if (subqueryResponses.size >= MAX_SUBQUERY_RESPONSES) break
+                if (t.isBlank() || t.length < 1) continue
+                if (processedSubqueries.contains(t)) continue
+
+                // try a direct template match
+                templatesMap[t]?.let { possible ->
+                    if (possible.isNotEmpty()) {
+                        subqueryResponses.add("${t.uppercase(Locale.getDefault())}: ${possible.random()}")
+                        processedSubqueries.add(t)
+                        continue
+                    }
+                }
+                // try two-token key (maybe topic is two words)
+                // attempt to find any templates with t + next token in original sequence
+                val origTokens = tokenize(qOrig)
+                val idx = origTokens.indexOfFirst { normalizeText(it) == t }
+                if (idx >= 0 && idx < origTokens.size - 1) {
+                    val two = "${normalizeText(origTokens[idx])} ${normalizeText(origTokens[idx + 1])}"
+                    templatesMap[two]?.let { possible ->
+                        if (possible.isNotEmpty()) {
+                            subqueryResponses.add("${two.uppercase(Locale.getDefault())}: ${possible.random()}")
+                            processedSubqueries.add(two)
+                            continue
+                        }
+                    }
+                }
+
+                // keywordResponses fallback
+                keywordResponses[t]?.let { possible ->
+                    if (possible.isNotEmpty()) {
+                        subqueryResponses.add("${t.uppercase(Locale.getDefault())}: ${possible.random()}")
+                        processedSubqueries.add(t)
+                        continue
+                    }
+                }
+
+                // If nothing found in current context, try fuzzy lookup via inverted index
+                // Look for candidate triggers containing this token
+                val candidates = invertedIndex[t] ?: emptyList()
+                if (candidates.isNotEmpty()) {
+                    val pick = candidates.firstOrNull()
+                    pick?.let { p ->
+                        templatesMap[p]?.let { possible ->
+                            if (possible.isNotEmpty()) {
+                                subqueryResponses.add("${t.uppercase(Locale.getDefault())}: ${possible.random()}")
+                                processedSubqueries.add(t)
+                                continue
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (subqueryResponses.isNotEmpty()) {
+                val combined = subqueryResponses.joinToString(". ")
+                dialogHandler.postDelayed({
+                    addChatMessage(currentMascotName, combined)
+                    startIdleTimer()
+                }, SUBQUERY_RESPONSE_DELAY)
+                answered = true
+            }
+            // if matchedIntent but nothing found - we continue to normal flow (so fallback can trigger)
+        }
+
         // 1. Check for an exact match in the current context (templatesMap keys are normalized)
         templatesMap[qFiltered]?.let { possible ->
             if (possible.isNotEmpty()) {
@@ -374,7 +473,7 @@ class ChatActivity : AppCompatActivity() {
         }
 
         // 3. Combine subquery responses into a single message
-        if (subqueryResponses.isNotEmpty()) {
+        if (subqueryResponses.isNotEmpty() && !answered) {
             val combinedResponse = subqueryResponses.joinToString(". ")
             dialogHandler.postDelayed({
                 addChatMessage(currentMascotName, combinedResponse)
