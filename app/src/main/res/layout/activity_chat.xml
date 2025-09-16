@@ -7,7 +7,7 @@
     android:background="@color/background_black"
     android:padding="8dp">
 
-    <!-- Top bar: Time + Battery (слева), иконки (справа) -->
+    <!-- Top bar: Battery icon + percentage (left), time (center), icons (right) -->
     <LinearLayout
         android:id="@+id/topBar"
         android:layout_width="match_parent"
@@ -18,44 +18,59 @@
         android:paddingEnd="8dp"
         android:background="@color/card_dark">
 
-        <!-- Секция слева -->
+        <!-- Left section: Battery icon and percentage -->
         <LinearLayout
             android:layout_width="wrap_content"
             android:layout_height="match_parent"
-            android:orientation="vertical"
+            android:orientation="horizontal"
             android:gravity="center_vertical">
 
-            <TextView
-                android:id="@+id/time_text"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="00:00"
-                android:textColor="@color/typing_orange"
-                android:textSize="16sp"
-                android:paddingBottom="2dp"
-                android:fontFamily="monospace" />
+            <ImageView
+                android:id="@+id/battery_image"
+                android:layout_width="56dp"
+                android:layout_height="56dp"
+                android:scaleType="centerInside"
+                android:adjustViewBounds="true"
+                android:contentDescription="@string/battery" />
 
             <TextView
-                android:id="@+id/battery_text"
+                android:id="@+id/battery_percent"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="100%"
+                android:text="--%"
                 android:textColor="@color/typing_orange"
-                android:textSize="14sp"
+                android:textSize="16sp"
+                android:layout_marginStart="8dp"
                 android:fontFamily="monospace" />
         </LinearLayout>
 
-        <!-- Spacer -->
-        <View
+        <!-- Centered time -->
+        <TextView
+            android:id="@+id/time_text"
             android:layout_width="0dp"
             android:layout_height="match_parent"
-            android:layout_weight="1" />
+            android:layout_weight="1"
+            android:text="--:--"
+            android:textColor="@color/typing_orange"
+            android:textSize="20sp"
+            android:gravity="center"
+            android:fontFamily="monospace" />
 
-        <!-- Иконки справа -->
+        <!-- Right section: Icons -->
+        <ImageButton
+            android:id="@+id/info_icon_button"
+            android:layout_width="56dp"
+            android:layout_height="56dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/info"
+            android:scaleType="centerInside"
+            android:adjustViewBounds="true" />
+
         <ImageButton
             android:id="@+id/btn_lock"
             android:layout_width="56dp"
             android:layout_height="56dp"
+            android:layout_marginStart="6dp"
             android:background="?attr/selectableItemBackgroundBorderless"
             android:contentDescription="@string/lock"
             android:scaleType="centerInside"
@@ -90,6 +105,17 @@
             android:contentDescription="@string/settings"
             android:scaleType="centerInside"
             android:adjustViewBounds="true" />
+
+        <ImageButton
+            android:id="@+id/btn_charging"
+            android:layout_width="56dp"
+            android:layout_height="56dp"
+            android:layout_marginStart="6dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/charging"
+            android:scaleType="centerInside"
+            android:adjustViewBounds="true"
+            android:visibility="gone" />
     </LinearLayout>
 
     <!-- Chat area background slightly lighter than page -->
