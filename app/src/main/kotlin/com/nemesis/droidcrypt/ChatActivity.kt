@@ -5,6 +5,7 @@ import android.content.Intent
 import android.graphics.*
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.ColorDrawable
+import android.media.MediaPlayer
 import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
@@ -117,6 +118,12 @@ class ChatActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_chat)
+
+        // Установка полупрозрачного тёмного фона для action bar
+        supportActionBar?.setBackgroundDrawable(ColorDrawable(Color.argb(128, 0, 0, 0)))
+
+        // Установка чёрного фона для окна, чтобы избежать белого фона при открытии клавиатуры
+        window.setBackgroundDrawable(ColorDrawable(Color.BLACK))
 
         // refs
         scrollView = findViewById(R.id.scrollView)
@@ -727,6 +734,26 @@ class ChatActivity : AppCompatActivity() {
             repeat(removeCount) { messagesContainer.removeViewAt(0) }
         }
         scrollView.post { scrollView.smoothScrollTo(0, messagesContainer.bottom) }
+
+        // Проигрывание звука уведомления для входящих сообщений (не от пользователя)
+        if (!isUser) {
+            playNotificationSound()
+        }
+    }
+
+    private fun playNotificationSound() {
+        val uri = folderUri ?: return
+        try {
+            val dir = DocumentFile.fromTreeUri(this, uri) ?: return
+            val soundFile = dir.findFile("notify.ogg") ?: return
+            if (!soundFile.exists()) return
+
+            val player = MediaPlayer.create(this, soundFile.uri)
+            player?.setOnCompletionListener { it.release() }
+            player?.start()
+        } catch (_: Exception) {
+            // Игнорируем ошибки проигрывания
+        }
     }
 
     private fun spaceView(): View = View(this).apply {
