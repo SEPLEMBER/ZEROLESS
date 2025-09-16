@@ -354,9 +354,10 @@ class ChatActivity : AppCompatActivity() {
                     .map { it.key }
                     .take(MAX_CANDIDATES_FOR_LEV)
             } else {
-                // fallback: if no token overlap, consider all keys but with quick length filter
-                templatesMap.keys.filter { abs(it.length - qFiltered.length) <= MAX_FUZZY_DISTANCE }
-                    .take(MAX_CANDIDATES_FOR_LEV)
+                val maxDist = getFuzzyDistance(qFiltered)
+templatesMap.keys.filter { abs(it.length - qFiltered.length) <= maxDist }
+    .take(MAX_CANDIDATES_FOR_LEV)
+
             }
 
             // <-- ADDED: Try Jaccard first on token-sets (stopwords removed / synonyms mapped)
@@ -387,22 +388,25 @@ class ChatActivity : AppCompatActivity() {
                 var bestKey: String? = null
                 var bestDist = Int.MAX_VALUE
                 for (key in candidates) {
-                    // quick length filter
-                    if (abs(key.length - qFiltered.length) > MAX_FUZZY_DISTANCE + 1) continue
-                    val d = levenshtein(qFiltered, key)
-                    if (d < bestDist) {
-                        bestDist = d
-                        bestKey = key
-                    }
+                    val maxDist = getFuzzyDistance(qFiltered)
+if (abs(key.length - qFiltered.length) > maxDist + 1) continue
+val d = levenshtein(qFiltered, key)
+if (d < bestDist) {
+    bestDist = d
+    bestKey = key
+}
+
                     if (bestDist == 0) break
                 }
-                if (bestKey != null && bestDist <= MAX_FUZZY_DISTANCE) {
-                    val possible = templatesMap[bestKey]
-                    if (!possible.isNullOrEmpty()) {
-                        addChatMessage(currentMascotName, possible.random())
-                        answered = true
-                    }
-                }
+                val maxDist = getFuzzyDistance(qFiltered)
+if (bestKey != null && bestDist <= maxDist) {
+    val possible = templatesMap[bestKey]
+    if (!possible.isNullOrEmpty()) {
+        addChatMessage(currentMascotName, possible.random())
+        answered = true
+    }
+}
+
             }
         } // <-- FUZZY BLOCK ADDED
 
@@ -581,8 +585,9 @@ class ChatActivity : AppCompatActivity() {
         val m = t.length
         if (n == 0) return m
         if (m == 0) return n
-        // optional early exit if difference too big (speedup)
-        if (abs(n - m) > MAX_FUZZY_DISTANCE + 2) return Int.MAX_VALUE / 2
+        val maxDist = getFuzzyDistance(qFiltered)
+        if (abs(n - m) > maxDist + 2) return Int.MAX_VALUE / 2
+
 
         // use two rolling rows to save memory
         val prev = IntArray(m + 1) { it }
@@ -600,9 +605,8 @@ class ChatActivity : AppCompatActivity() {
                 curr[j] = min(min(deletion, insertion), substitution)
                 if (curr[j] < minInRow) minInRow = curr[j]
             }
-            // early stop if minimum in this row already exceeds threshold
-            if (minInRow > MAX_FUZZY_DISTANCE + 2) return Int.MAX_VALUE / 2
-            // copy curr -> prev
+            val maxDist = getFuzzyDistance(qFiltered)
+if (minInRow > maxDist + 2) return Int.MAX_VALUE / 2
             for (k in 0..m) prev[k] = curr[k]
         }
         return prev[m]
