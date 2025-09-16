@@ -51,5 +51,12 @@
             android:parentActivityName=".MainActivity"
             android:configChanges="orientation|screenSize" />
 
+        <!-- PostsActivity -->
+        <activity
+            android:name=".PostsActivity"
+            android:exported="false"
+            android:parentActivityName=".PostsActivity"
+            android:configChanges="orientation|screenSize" />
+
     </application>
 </manifest>
