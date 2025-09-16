@@ -20,6 +20,10 @@ import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.graphics.ColorUtils
 import androidx.documentfile.provider.DocumentFile
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.*
 import kotlin.math.abs
 import kotlin.math.min
@@ -37,6 +41,9 @@ class ChatActivity : AppCompatActivity() {
         private const val SUBQUERY_RESPONSE_DELAY = 1500L // Задержка для индикатора "печатает..."
         private const val MAX_CANDIDATES_FOR_LEV = 25 // ограничение числа кандидатов для Levenshtein
         private const val JACCARD_THRESHOLD = 0.50
+
+        // Debounce for send button
+        private const val SEND_DEBOUNCE_MS = 400L
     }
 
     private fun getFuzzyDistance(word: String): Int {
@@ -95,6 +102,9 @@ class ChatActivity : AppCompatActivity() {
     private val random = Random()
     private val queryCountMap = HashMap<String, Int>()
 
+    // send debounce
+    private var lastSendTime = 0L
+
     private data class Dialog(val name: String, val replies: MutableList<Map<String, String>> = mutableListOf())
 
     init {
@@ -114,7 +124,7 @@ class ChatActivity : AppCompatActivity() {
         )
     }
 
-    /// SECTION: Lifecycle — Инициализация Activity (onCreate, onResume, onPause)
+    /// SECTION: Lifecycle — Инициализация Activity (onCreate, onResume, onPause, onDestroy)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_chat)
@@ -181,13 +191,29 @@ class ChatActivity : AppCompatActivity() {
         btnSettings?.setOnClickListener { startActivity(Intent(this, SettingsActivity::class.java)) }
         btnEnvelopeTop?.setOnClickListener { startActivity(Intent(this, PostsActivity::class.java)) }
 
-        // envelope near input — отправка
+        // envelope near input — отправка (с дебаунсом)
         envelopeInputButton?.setOnClickListener {
+            val now = System.currentTimeMillis()
+            if (now - lastSendTime < SEND_DEBOUNCE_MS) return@setOnClickListener
+            lastSendTime = now
             val input = queryInput.text.toString().trim()
             if (input.isNotEmpty()) {
                 processUserQuery(input)
                 queryInput.setText("")
             }
+        }
+
+        // allow Enter key press to send (optional)
+        queryInput.setOnEditorActionListener { _, _, _ ->
+            val now = System.currentTimeMillis()
+            if (now - lastSendTime < SEND_DEBOUNCE_MS) return@setOnEditorActionListener true
+            lastSendTime = now
+            val input = queryInput.text.toString().trim()
+            if (input.isNotEmpty()) {
+                processUserQuery(input)
+                queryInput.setText("")
+            }
+            true
         }
 
         // initial parse / fallback
@@ -244,6 +270,11 @@ class ChatActivity : AppCompatActivity() {
         dialogHandler.removeCallbacksAndMessages(null)
     }
 
+    override fun onDestroy() {
+        super.onDestroy()
+        dialogHandler.removeCallbacksAndMessages(null)
+    }
+
     /// SECTION: Toolbar Helpers
     private fun setupIconTouchEffect(btn: ImageButton?) {
         btn?.setOnTouchListener { v, event ->
@@ -285,6 +316,12 @@ class ChatActivity : AppCompatActivity() {
 
     // === SECTION core: process user query ===
     private fun processUserQuery(userInput: String) {
+        // command handling: if starts with '/', treat as admin/cli command
+        if (userInput.startsWith("/")) {
+            handleCommand(userInput.trim())
+            return
+        }
+
         // normalize input early (remove punctuation, collapse spaces)
         val qOrigRaw = userInput.trim()
         val qOrig = normalizeText(qOrigRaw)
@@ -309,9 +346,10 @@ class ChatActivity : AppCompatActivity() {
             lastQuery = qKeyForCount
         }
 
+        // show user message immediately (UI)
         addChatMessage("Ты", userInput)
 
-        // Показать уведомление "Печатает..."
+        // show typing indicator
         showTypingIndicator()
 
         val repeats = queryCountMap.getOrDefault(qKeyForCount, 0)
@@ -322,94 +360,123 @@ class ChatActivity : AppCompatActivity() {
             return
         }
 
-        var answered = false
+        // Snapshot necessary structures to avoid races while computing in background
+        val templatesSnapshot = HashMap(templatesMap)
+        val invertedIndexSnapshot = HashMap<String, MutableList<String>>()
+        // Deep copy lists for invertedIndex
+        for ((k, v) in invertedIndex) invertedIndexSnapshot[k] = ArrayList(v)
+        val synonymsSnapshot = HashMap(synonymsMap)
+        val stopwordsSnapshot = HashSet(stopwords)
+        val keywordResponsesSnapshot = HashMap<String, MutableList<String>>()
+        for ((k, v) in keywordResponses) keywordResponsesSnapshot[k] = ArrayList(v)
+        val contextMapSnapshot = HashMap(contextMap)
 
-        // List to collect subquery responses for combining
-        val subqueryResponses = mutableListOf<String>()
-        val processedSubqueries = mutableSetOf<String>()
+        // launch background computation
+        lifecycleScope.launch(Dispatchers.Default) {
+            data class ResponseResult(val text: String? = null, val wantsContextSwitch: String? = null)
 
-        // 1. Check for an exact match in the current context (templatesMap keys are normalized)
-        templatesMap[qFiltered]?.let { possible ->
-            if (possible.isNotEmpty()) {
-                subqueryResponses.add(possible.random())
-                answered = true
-                processedSubqueries.add(qFiltered)
+            // local helpers using snapshots
+            fun tokenizeLocal(s: String): List<String> {
+                if (s.isBlank()) return emptyList()
+                return s.split(Regex("\\s+")).map { it.trim() }.filter { it.isNotEmpty() }
             }
-        }
 
-        // 2. Try subqueries (individual tokens and two-token combinations)
-        if (subqueryResponses.size < MAX_SUBQUERY_RESPONSES) {
-            val tokens = if (qTokensFiltered.isNotEmpty()) qTokensFiltered else tokenize(qFiltered)
+            fun normalizeLocal(s: String): String {
+                val lower = s.lowercase(Locale.getDefault())
+                val cleaned = lower.replace(Regex("[^\\p{L}\\p{Nd}\\s]"), " ")
+                val collapsed = cleaned.replace(Regex("\\s+"), " ").trim()
+                return collapsed
+            }
 
-            // Try individual tokens
-            for (token in tokens) {
-                if (subqueryResponses.size >= MAX_SUBQUERY_RESPONSES) break
-                if (processedSubqueries.contains(token) || token.length < 2) continue // Ignore short tokens
+            fun filterStopwordsAndMapSynonymsLocal(input: String): Pair<List<String>, String> {
+                val toks = tokenizeLocal(input)
+                val mapped = toks.map { tok ->
+                    val n = normalizeLocal(tok)
+                    val s = synonymsSnapshot[n] ?: n
+                    s
+                }.filter { it.isNotEmpty() && !stopwordsSnapshot.contains(it) }
+                val joined = mapped.joinToString(" ")
+                return Pair(mapped, joined)
+            }
 
-                templatesMap[token]?.let { possible ->
-                    if (possible.isNotEmpty()) {
-                        subqueryResponses.add(possible.random())
-                        processedSubqueries.add(token)
-                    }
+            // Begin matching logic (based on original algorithm, but using snapshots)
+            var answered = false
+            val subqueryResponses = mutableListOf<String>()
+            val processedSubqueries = mutableSetOf<String>()
+
+            // 1. exact match in templatesSnapshot
+            templatesSnapshot[qFiltered]?.let { possible ->
+                if (possible.isNotEmpty()) {
+                    subqueryResponses.add(possible.random())
+                    answered = true
+                    processedSubqueries.add(qFiltered)
                 }
+            }
 
-                if (subqueryResponses.size < MAX_SUBQUERY_RESPONSES) {
-                    keywordResponses[token]?.let { possible ->
+            // 2. subqueries (tokens & two-token combos)
+            if (subqueryResponses.size < MAX_SUBQUERY_RESPONSES) {
+                val tokens = if (qTokensFiltered.isNotEmpty()) qTokensFiltered else tokenizeLocal(qFiltered)
+
+                for (token in tokens) {
+                    if (subqueryResponses.size >= MAX_SUBQUERY_RESPONSES) break
+                    if (processedSubqueries.contains(token) || token.length < 2) continue
+
+                    templatesSnapshot[token]?.let { possible ->
                         if (possible.isNotEmpty()) {
                             subqueryResponses.add(possible.random())
                             processedSubqueries.add(token)
                         }
                     }
+                    if (subqueryResponses.size < MAX_SUBQUERY_RESPONSES) {
+                        keywordResponsesSnapshot[token]?.let { possible ->
+                            if (possible.isNotEmpty()) {
+                                subqueryResponses.add(possible.random())
+                                processedSubqueries.add(token)
+                            }
+                        }
+                    }
                 }
-            }
 
-            // Try two-token combinations
-            if (subqueryResponses.size < MAX_SUBQUERY_RESPONSES && tokens.size > 1) {
-                for (i in 0 until tokens.size - 1) {
-                    if (subqueryResponses.size >= MAX_SUBQUERY_RESPONSES) break
-                    val twoTokens = "${tokens[i]} ${tokens[i + 1]}"
-                    if (processedSubqueries.contains(twoTokens)) continue
+                if (subqueryResponses.size < MAX_SUBQUERY_RESPONSES && tokens.size > 1) {
+                    for (i in 0 until tokens.size - 1) {
+                        if (subqueryResponses.size >= MAX_SUBQUERY_RESPONSES) break
+                        val twoTokens = "${tokens[i]} ${tokens[i + 1]}"
+                        if (processedSubqueries.contains(twoTokens)) continue
 
-                    templatesMap[twoTokens]?.let { possible ->
-                        if (possible.isNotEmpty()) {
-                            subqueryResponses.add(possible.random())
-                            processedSubqueries.add(twoTokens)
+                        templatesSnapshot[twoTokens]?.let { possible ->
+                            if (possible.isNotEmpty()) {
+                                subqueryResponses.add(possible.random())
+                                processedSubqueries.add(twoTokens)
+                            }
                         }
                     }
                 }
             }
-        }
 
-        // 3. Combine subquery responses into a single message
-        if (subqueryResponses.isNotEmpty()) {
-            val combinedResponse = subqueryResponses.joinToString(". ")
-            dialogHandler.postDelayed({
-                addChatMessage(currentMascotName, combinedResponse)
-                startIdleTimer()
-            }, SUBQUERY_RESPONSE_DELAY)
-            answered = true
-        }
-
-        // 4. If no subquery responses, check for keywords in the current context
-        if (!answered) {
-            for ((keyword, responses) in keywordResponses) {
-                if (qFiltered.contains(keyword) && responses.isNotEmpty()) {
-                    dialogHandler.postDelayed({
-                        addChatMessage(currentMascotName, responses.random())
-                        startIdleTimer()
-                    }, SUBQUERY_RESPONSE_DELAY)
-                    answered = true
-                    break
+            if (subqueryResponses.isNotEmpty()) {
+                val combined = subqueryResponses.joinToString(". ")
+                // return combined result
+                return@launch withContext(Dispatchers.Main) {
+                    addChatMessage(currentMascotName, combined)
+                    startIdleTimer()
                 }
             }
-        }
 
-        // 5. FUZZY matching (inverted index -> Jaccard -> Levenshtein)
-        if (!answered) {
-            val qTokens = if (qTokensFiltered.isNotEmpty()) qTokensFiltered else tokenize(qFiltered)
+            // 4. keyword responses
+            for ((keyword, responses) in keywordResponsesSnapshot) {
+                if (qFiltered.contains(keyword) && responses.isNotEmpty()) {
+                    return@launch withContext(Dispatchers.Main) {
+                        addChatMessage(currentMascotName, responses.random())
+                        startIdleTimer()
+                    }
+                }
+            }
+
+            // 5. FUZZY matching (invertedIndexSnapshot -> Jaccard -> Levenshtein)
+            val qTokens = if (qTokensFiltered.isNotEmpty()) qTokensFiltered else tokenizeLocal(qFiltered)
             val candidateCounts = HashMap<String, Int>()
             for (tok in qTokens) {
-                invertedIndex[tok]?.forEach { trig ->
+                invertedIndexSnapshot[tok]?.forEach { trig ->
                     candidateCounts[trig] = candidateCounts.getOrDefault(trig, 0) + 1
                 }
             }
@@ -422,7 +489,7 @@ class ChatActivity : AppCompatActivity() {
                     .take(MAX_CANDIDATES_FOR_LEV)
             } else {
                 val maxDist = getFuzzyDistance(qFiltered)
-                templatesMap.keys.filter { abs(it.length - qFiltered.length) <= maxDist }
+                templatesSnapshot.keys.filter { abs(it.length - qFiltered.length) <= maxDist }
                     .take(MAX_CANDIDATES_FOR_LEV)
             }
 
@@ -431,7 +498,7 @@ class ChatActivity : AppCompatActivity() {
             var bestJaccard = 0.0
             val qSet = qTokens.toSet()
             for (key in candidates) {
-                val keyTokens = filterStopwordsAndMapSynonyms(key).first.toSet()
+                val keyTokens = filterStopwordsAndMapSynonymsLocal(key).first.toSet()
                 if (keyTokens.isEmpty()) continue
                 val inter = qSet.intersect(keyTokens).size.toDouble()
                 val union = qSet.union(keyTokens).size.toDouble()
@@ -442,102 +509,153 @@ class ChatActivity : AppCompatActivity() {
                 }
             }
             if (bestByJaccard != null && bestJaccard >= JACCARD_THRESHOLD) {
-                val possible = templatesMap[bestByJaccard]
+                val possible = templatesSnapshot[bestByJaccard]
                 if (!possible.isNullOrEmpty()) {
-                    addChatMessage(currentMascotName, possible.random())
-                    answered = true
-                }
-            }
-
-            // fallback to Levenshtein if needed
-            if (!answered) {
-                var bestKey: String? = null
-                var bestDist = Int.MAX_VALUE
-                for (key in candidates) {
-                    val maxDist = getFuzzyDistance(qFiltered)
-                    if (abs(key.length - qFiltered.length) > maxDist + 1) continue
-                    val d = levenshtein(qFiltered, key, qFiltered)
-                    if (d < bestDist) {
-                        bestDist = d
-                        bestKey = key
-                    }
-                    if (bestDist == 0) break
-                }
-                val maxDist = getFuzzyDistance(qFiltered)
-                if (bestKey != null && bestDist <= maxDist) {
-                    val possible = templatesMap[bestKey]
-                    if (!possible.isNullOrEmpty()) {
+                    return@launch withContext(Dispatchers.Main) {
                         addChatMessage(currentMascotName, possible.random())
-                        answered = true
+                        startIdleTimer()
                     }
                 }
             }
-        }
 
-        // 6. If still no answer, try to switch context and re-check
-        if (!answered) {
-            detectContext(qFiltered)?.let { newContext ->
-                if (newContext != currentContext) {
-                    currentContext = newContext
-                    loadTemplatesFromFile(currentContext)
-                    rebuildInvertedIndex()
-                    updateAutoComplete()
-                    // Re-check for an answer in the new context after switching
-                    templatesMap[qFiltered]?.let { possible ->
-                        if (possible.isNotEmpty()) {
-                            addChatMessage(currentMascotName, possible.random())
-                            answered = true
+            // fallback to Levenshtein
+            var bestKey: String? = null
+            var bestDist = Int.MAX_VALUE
+            for (key in candidates) {
+                val maxDist = getFuzzyDistance(qFiltered)
+                if (abs(key.length - qFiltered.length) > maxDist + 1) continue
+                val d = levenshtein(qFiltered, key, qFiltered)
+                if (d < bestDist) {
+                    bestDist = d
+                    bestKey = key
+                }
+                if (bestDist == 0) break
+            }
+            val maxDist = getFuzzyDistance(qFiltered)
+            if (bestKey != null && bestDist <= maxDist) {
+                val possible = templatesSnapshot[bestKey]
+                if (!possible.isNullOrEmpty()) {
+                    return@launch withContext(Dispatchers.Main) {
+                        addChatMessage(currentMascotName, possible.random())
+                        startIdleTimer()
+                    }
+                }
+            }
+
+            // 6. If still no answer, request a context switch suggestion (do not load files here)
+            val lower = normalizeLocal(qFiltered)
+            for ((keyword, value) in contextMapSnapshot) {
+                if (lower.contains(keyword)) {
+                    // signal to main thread to possibly load new context and re-check
+                    return@launch withContext(Dispatchers.Main) {
+                        // Attempt to switch context on main thread (commit)
+                        if (value != currentContext) {
+                            currentContext = value
+                            loadTemplatesFromFile(currentContext)
+                            rebuildInvertedIndex()
+                            updateAutoComplete()
+                            // Re-check for an answer in the new context after switching
+                            templatesMap[qFiltered]?.let { possible ->
+                                if (possible.isNotEmpty()) {
+                                    addChatMessage(currentMascotName, possible.random())
+                                    startIdleTimer()
+                                    return@withContext
+                                }
+                            }
                         }
+                        // If still nothing, fallback
+                        addChatMessage(currentMascotName, getDummyResponse(qOrig))
+                        startIdleTimer()
                     }
                 }
             }
-        }
 
-        // 7. Final fallback
-        if (!answered) {
-            val fallbackResp = getDummyResponse(qOrig)
-            addChatMessage(currentMascotName, fallbackResp)
+            // 7. Final fallback
+            return@launch withContext(Dispatchers.Main) {
+                addChatMessage(currentMascotName, getDummyResponse(qOrig))
+                startIdleTimer()
+            }
         }
+    }
 
-        // Trigger idle events after processing the query
-        triggerRandomDialog()
-        startIdleTimer()
+    // Command handler
+    private fun handleCommand(cmdRaw: String) {
+        val cmd = cmdRaw.trim().lowercase(Locale.getDefault())
+        when {
+            cmd == "/reload" -> {
+                addChatMessage(currentMascotName, "Перезагружаю шаблоны...")
+                loadTemplatesFromFile(currentContext)
+                rebuildInvertedIndex()
+                updateAutoComplete()
+                addChatMessage(currentMascotName, "Шаблоны перезагружены.")
+            }
+            cmd == "/stats" -> {
+                val templatesCount = templatesMap.size
+                val keywordsCount = keywordResponses.size
+                val msg = "Контекст: $currentContext. Шаблонов: $templatesCount. Ключевых ответов: $keywordsCount."
+                addChatMessage(currentMascotName, msg)
+            }
+            cmd == "/clear" -> {
+                clearChat()
+            }
+            else -> {
+                addChatMessage(currentMascotName, "Неизвестная команда: $cmdRaw")
+            }
+        }
     }
 
     // Новый метод для показа полупрозрачного уведомления "Печатает..."
     private fun showTypingIndicator() {
-        val typingView = TextView(this).apply {
-            text = "печатает..."
-            textSize = 14f
-            setTextColor(getColor(android.R.color.white))
-            setBackgroundColor(0x80000000.toInt()) // Полупрозрачный чёрный фон
-            alpha = 0.7f // Дополнительная полупрозрачность
-            setPadding(16, 8, 16, 8)
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply {
-                setMargins(0, 16, 0, 0) // Отступ сверху для размещения вверху чата
-            }
-        }
-        messagesContainer.addView(typingView, 0) // Добавляем в начало контейнера (вверху)
+        runOnUi {
+            val existing = messagesContainer.findViewWithTag<View>("typingView")
+            if (existing != null) return@runOnUi
 
-        // Рандомная задержка 1–3 секунды перед удалением
-        val randomDelay = (1000..3000).random().toLong()
-        Handler(Looper.getMainLooper()).postDelayed({
-            messagesContainer.removeView(typingView)
-        }, randomDelay)
+            val typingView = TextView(this).apply {
+                text = "печатает..."
+                textSize = 14f
+                setTextColor(getColor(android.R.color.white))
+                setBackgroundColor(0x80000000.toInt()) // Полупрозрачный чёрный фон
+                alpha = 0.7f // Дополнительная полупрозрачность
+                setPadding(16, 8, 16, 8)
+                tag = "typingView"
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply {
+                    setMargins(0, 16, 0, 0)
+                }
+            }
+            // Добавляем в конец (нижняя часть)
+            messagesContainer.addView(typingView)
+            scrollView.post { scrollView.smoothScrollTo(0, messagesContainer.bottom) }
+
+            // Рандомная задержка 1–3 секунды перед удалением
+            val randomDelay = (1000..3000).random().toLong()
+            Handler(Looper.getMainLooper()).postDelayed({
+                runOnUi {
+                    messagesContainer.findViewWithTag<View>("typingView")?.let { messagesContainer.removeView(it) }
+                }
+            }, randomDelay)
+        }
+    }
+
+    private fun removeTypingIndicator() {
+        runOnUi {
+            messagesContainer.findViewWithTag<View>("typingView")?.let { messagesContainer.removeView(it) }
+        }
     }
 
     private fun clearChat() {
-        messagesContainer.removeAllViews()
-        queryCountMap.clear()
-        lastQuery = ""
-        currentContext = "base.txt"
-        loadTemplatesFromFile(currentContext)
-        rebuildInvertedIndex()
-        updateAutoComplete()
-        addChatMessage(currentMascotName, "Чат очищен. Возвращаюсь к началу.")
+        runOnUi {
+            messagesContainer.removeAllViews()
+            queryCountMap.clear()
+            lastQuery = ""
+            currentContext = "base.txt"
+            loadTemplatesFromFile(currentContext)
+            rebuildInvertedIndex()
+            updateAutoComplete()
+            addChatMessage(currentMascotName, "Чат очищен. Возвращаюсь к началу.")
+        }
     }
 
     private fun detectContext(input: String): String? {
@@ -685,59 +803,64 @@ class ChatActivity : AppCompatActivity() {
 
     /// SECTION: UI Messages — Создание и добавление сообщений в чат
     private fun addChatMessage(sender: String, text: String) {
-        val row = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            val pad = dpToPx(6)
-            setPadding(pad, pad / 2, pad, pad / 2)
-            layoutParams =
-                LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT
-                )
-        }
-
-        val isUser = sender.equals("Ты", ignoreCase = true)
-
-        if (isUser) {
-            val bubble = createMessageBubble(sender, text, isUser)
-            val lp =
-                LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT
-                )
-            lp.gravity = Gravity.END
-            lp.marginStart = dpToPx(48)
-            row.addView(spaceView(), LinearLayout.LayoutParams(0, 0, 1f))
-            row.addView(bubble, lp)
-        } else {
-            val avatarView = ImageView(this).apply {
-                val size = dpToPx(64)
-                layoutParams = LinearLayout.LayoutParams(size, size)
-                scaleType = ImageView.ScaleType.CENTER_CROP
-                adjustViewBounds = true
-                loadAvatarInto(this, sender)
+        runOnUi {
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                val pad = dpToPx(6)
+                setPadding(pad, pad / 2, pad, pad / 2)
+                layoutParams =
+                    LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT
+                    )
             }
-            val bubble = createMessageBubble(sender, text, isUser)
-            val bubbleLp =
-                LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT
-                )
-            bubbleLp.marginStart = dpToPx(8)
-            row.addView(avatarView)
-            row.addView(bubble, bubbleLp)
-        }
 
-        messagesContainer.addView(row)
-        if (messagesContainer.childCount > MAX_MESSAGES) {
-            val removeCount = messagesContainer.childCount - MAX_MESSAGES
-            repeat(removeCount) { messagesContainer.removeViewAt(0) }
-        }
-        scrollView.post { scrollView.smoothScrollTo(0, messagesContainer.bottom) }
+            val isUser = sender.equals("Ты", ignoreCase = true)
 
-        // Проигрывание звука уведомления для входящих сообщений (не от пользователя)
-        if (!isUser) {
-            playNotificationSound()
+            if (isUser) {
+                val bubble = createMessageBubble(sender, text, isUser)
+                val lp =
+                    LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.WRAP_CONTENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT
+                    )
+                lp.gravity = Gravity.END
+                lp.marginStart = dpToPx(48)
+                row.addView(spaceView(), LinearLayout.LayoutParams(0, 0, 1f))
+                row.addView(bubble, lp)
+            } else {
+                val avatarView = ImageView(this).apply {
+                    val size = dpToPx(64)
+                    layoutParams = LinearLayout.LayoutParams(size, size)
+                    scaleType = ImageView.ScaleType.CENTER_CROP
+                    adjustViewBounds = true
+                    loadAvatarInto(this, sender)
+                }
+                val bubble = createMessageBubble(sender, text, isUser)
+                val bubbleLp =
+                    LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.WRAP_CONTENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT
+                    )
+                bubbleLp.marginStart = dpToPx(8)
+                row.addView(avatarView)
+                row.addView(bubble, bubbleLp)
+            }
+
+            messagesContainer.addView(row)
+            // remove typing indicator if present
+            messagesContainer.findViewWithTag<View>("typingView")?.let { messagesContainer.removeView(it) }
+
+            if (messagesContainer.childCount > MAX_MESSAGES) {
+                val removeCount = messagesContainer.childCount - MAX_MESSAGES
+                repeat(removeCount) { messagesContainer.removeViewAt(0) }
+            }
+            scrollView.post { scrollView.smoothScrollTo(0, messagesContainer.bottom) }
+
+            // Проигрывание звука уведомления для входящих сообщений (не от пользователя)
+            if (!isUser) {
+                playNotificationSound()
+            }
         }
     }
 
@@ -748,9 +871,20 @@ class ChatActivity : AppCompatActivity() {
             val soundFile = dir.findFile("notify.ogg") ?: return
             if (!soundFile.exists()) return
 
-            val player = MediaPlayer.create(this, soundFile.uri)
-            player?.setOnCompletionListener { it.release() }
-            player?.start()
+            // safer MediaPlayer usage
+            val afd = contentResolver.openAssetFileDescriptor(soundFile.uri, "r") ?: return
+            val player = MediaPlayer()
+            try {
+                player.setDataSource(afd.fileDescriptor, afd.startOffset, afd.length)
+                afd.close()
+                player.prepareAsync()
+                player.setOnPreparedListener { it.start() }
+                player.setOnCompletionListener { it.reset(); it.release() }
+                player.setOnErrorListener { mp, _, _ -> try { mp.reset(); mp.release() } catch (_: Exception) {}; true }
+            } catch (e: Exception) {
+                try { afd.close() } catch (_: Exception) {}
+                try { player.reset(); player.release() } catch (_: Exception) {}
+            }
         } catch (_: Exception) {
             // Игнорируем ошибки проигрывания
         }
@@ -1220,12 +1354,14 @@ class ChatActivity : AppCompatActivity() {
         themeColor: String,
         themeBackground: String
     ) {
-        title = "Pawstribe - $mascotName"
-        mascotTopImage?.visibility = View.GONE
+        runOnUi {
+            title = "Pawstribe - $mascotName"
+            mascotTopImage?.visibility = View.GONE
 
-        try {
-            messagesContainer.setBackgroundColor(Color.parseColor(themeBackground))
-        } catch (_: Exception) {
+            try {
+                messagesContainer.setBackgroundColor(Color.parseColor(themeBackground))
+            } catch (_: Exception) {
+            }
         }
     }
 
@@ -1253,5 +1389,11 @@ class ChatActivity : AppCompatActivity() {
                 5000
             )
         }
+    }
+
+    // helper to ensure code runs on UI thread
+    private fun runOnUi(block: () -> Unit) {
+        if (Looper.myLooper() == Looper.getMainLooper()) block()
+        else runOnUiThread(block)
     }
 }
