@@ -1,4 +1,4 @@
-package com.nemesis.droidcrypt
+package com.nemesis.pawscribe
 
 import android.animation.ObjectAnimator
 import android.content.Intent
@@ -433,7 +433,7 @@ class ChatActivity : AppCompatActivity() {
         if (subqueryResponses.size < MAX_SUBQUERY_RESPONSES) {
             val tokens = if (qTokensFiltered.isNotEmpty()) qTokensFiltered else tokenize(qFiltered)
 
-            // Try individual tokens
+            // Try individual tokens (explicit for-loop to allow break/continue)
             for (token in tokens) {
                 if (subqueryResponses.size >= MAX_SUBQUERY_RESPONSES) break
                 if (processedSubqueries.contains(token) || token.length < 2) continue // Ignore short tokens
