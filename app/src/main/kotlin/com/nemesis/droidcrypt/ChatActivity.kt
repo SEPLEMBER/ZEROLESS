@@ -642,7 +642,7 @@ class ChatActivity : AppCompatActivity() {
     }
 
     // UI Messages
-    private fun addChatMessage(sender: String, text: String) {
+    private fun addChatMessage(sender: String, message: String) {
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             val pad = dpToPx(6)
@@ -656,7 +656,7 @@ class ChatActivity : AppCompatActivity() {
         val isUser = sender.equals("Ты", ignoreCase = true)
 
         if (isUser) {
-            val bubble = createMessageBubble(sender, text, true)
+            val bubble = createMessageBubble(sender, message, true)
             val lp = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
@@ -692,7 +692,7 @@ class ChatActivity : AppCompatActivity() {
                 adjustViewBounds = true
                 loadAvatarInto(this, sender)
             }
-            val bubble = createMessageBubble(sender, text, false)
+            val bubble = createMessageBubble(sender, message, false)
             val bubbleLp = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
@@ -712,7 +712,7 @@ class ChatActivity : AppCompatActivity() {
         layoutParams = LinearLayout.LayoutParams(0, 0, 1f)
     }
 
-    private fun createMessageBubble(sender: String, text: String, isUser: Boolean): LinearLayout {
+    private fun createMessageBubble(sender: String, message: String, isUser: Boolean): LinearLayout {
         val container = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val tvSender = TextView(this).apply {
             text = "$sender:"
@@ -720,7 +720,7 @@ class ChatActivity : AppCompatActivity() {
             setTextColor(Color.parseColor("#AAAAAA"))
         }
         val tv = TextView(this).apply {
-            text = text
+            text = message
             textSize = 16f
             setTextIsSelectable(true)
             val pad = dpToPx(10)
