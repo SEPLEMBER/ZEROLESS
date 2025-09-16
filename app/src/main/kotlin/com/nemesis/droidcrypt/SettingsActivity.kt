@@ -1,9 +1,11 @@
 package com.nemesis.droidcrypt
 
 import android.content.Intent
+import android.content.SharedPreferences
 import android.net.Uri
 import android.os.Bundle
 import android.preference.PreferenceManager
+import android.util.Log
 import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
 import androidx.documentfile.provider.DocumentFile
@@ -11,220 +13,361 @@ import java.io.*
 
 class SettingsActivity : AppCompatActivity() {
 
-    private var folderUri: Uri? = null
+    companion object {
+        private const val TAG = "SettingsActivity"
+        private const val REQUEST_CODE_OPEN_DIRECTORY = 1
+        private const val PREF_KEY_FOLDER_URI = "pref_folder_uri"
+        private const val PREF_KEY_DISABLE_SCREENSHOTS = "pref_disable_screenshots"
+        private const val BASE_TEMPLATES_FILE = "base.txt"
+    }
+
+    // UI элементы
     private lateinit var selectFolderButton: Button
     private lateinit var clearTemplatesButton: Button
     private lateinit var backButton: Button
     private lateinit var saveTemplatesButton: Button
     private lateinit var templatesInput: EditText
     private lateinit var disableScreenshotsSwitch: Switch
+    private lateinit var folderStatusText: TextView
 
+    // Данные
+    private var folderUri: Uri? = null
     private lateinit var prefs: SharedPreferences
-
-    companion object {
-        private const val REQUEST_CODE_OPEN_DIRECTORY = 1
-        private const val PREF_KEY_FOLDER_URI = "pref_folder_uri"
-        private const val PREF_KEY_DISABLE_SCREENSHOTS = "pref_disable_screenshots"
-        private const val PREF_KEY_IS_REGISTERED = "isRegistered"
-    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_settings)
+        
+        try {
+            setContentView(R.layout.activity_settings)
+            initializeComponents()
+            setupEventListeners()
+            loadSavedSettings()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error in onCreate", e)
+            showError("Ошибка инициализации настроек")
+            finish()
+        }
+    }
 
+    private fun initializeComponents() {
         prefs = PreferenceManager.getDefaultSharedPreferences(this)
-
+        
+        // Инициализация UI элементов
         selectFolderButton = findViewById(R.id.selectFolderButton)
         clearTemplatesButton = findViewById(R.id.clearTemplatesButton)
         backButton = findViewById(R.id.backButton)
         saveTemplatesButton = findViewById(R.id.saveTemplatesButton)
         templatesInput = findViewById(R.id.templatesInput)
         disableScreenshotsSwitch = findViewById(R.id.disableScreenshotsSwitch)
-
-        templatesInput.setText("")
-
-        disableScreenshotsSwitch.isChecked = prefs.getBoolean(PREF_KEY_DISABLE_SCREENSHOTS, false)
-
-        // restore saved folder uri
-        prefs.getString(PREF_KEY_FOLDER_URI, null)?.let { saved ->
-            try {
-                folderUri = Uri.parse(saved)
-                folderUri?.let { uri ->
-                    try {
-                        contentResolver.takePersistableUriPermission(
-                            uri,
-                            Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-                        )
-                    } catch (_: SecurityException) {
-                    }
-                }
-                loadTemplatesFromFile("base.txt")
-            } catch (e: Exception) {
-                folderUri = null
+        
+        // Пытаемся найти элемент для отображения статуса папки (если есть в layout)
+        folderStatusText = findViewById<TextView?>(R.id.folderStatusText) ?: run {
+            // Создаем TextView программно, если его нет в layout
+            TextView(this).apply {
+                text = "Папка не выбрана"
+                textSize = 12f
             }
         }
+        
+        // Очищаем поле ввода
+        templatesInput.setText("")
+    }
 
-        selectFolderButton.setOnClickListener { openFolderPicker() }
+    private fun setupEventListeners() {
+        selectFolderButton.setOnClickListener { 
+            openFolderPicker() 
+        }
 
         clearTemplatesButton.setOnClickListener {
-            templatesInput.setText("")
-            Toast.makeText(this, "Поле очищено", Toast.LENGTH_SHORT).show()
+            clearTemplates()
         }
 
         saveTemplatesButton.setOnClickListener {
-            if (folderUri == null) {
-                Toast.makeText(this, "Сначала выберите папку", Toast.LENGTH_SHORT).show()
-                return@setOnClickListener
-            }
-            val all = templatesInput.text.toString()
-            if (all.trim().isEmpty()) {
-                saveTemplatesToFile("base.txt", "")
-                Toast.makeText(this, "Шаблоны очищены", Toast.LENGTH_SHORT).show()
-                return@setOnClickListener
-            }
-            val lines = all.split("\r?\n".toRegex())
-            val sb = StringBuilder()
-            var savedCount = 0
-            var skipped = 0
-            for (raw in lines) {
-                val line = raw.trim()
-                if (line.isEmpty()) continue
-                if (!line.contains("=")) {
-                    skipped++
-                    continue
-                }
-                val parts = line.split("=", limit = 2)
-                val key = parts[0].trim().lowercase()
-                val value = if (parts.size > 1) parts[1].trim() else ""
-                if (key.isEmpty()) {
-                    skipped++
-                    continue
-                }
-                if (sb.isNotEmpty()) sb.append("\n")
-                sb.append(key).append("=").append(value)
-                savedCount++
-            }
-            val content = sb.toString()
-            saveTemplatesToFile("base.txt", content)
-            Toast.makeText(
-                this,
-                "Сохранено: $savedCount, пропущено: $skipped",
-                Toast.LENGTH_SHORT
-            ).show()
+            saveTemplates()
         }
 
         disableScreenshotsSwitch.setOnCheckedChangeListener { _, isChecked ->
-            prefs.edit().putBoolean(PREF_KEY_DISABLE_SCREENSHOTS, isChecked).apply()
-            Toast.makeText(
-                this,
-                if (isChecked) "Скриншоты запрещены" else "Скриншоты разрешены",
-                Toast.LENGTH_SHORT
-            ).show()
+            handleScreenshotToggle(isChecked)
         }
 
         backButton.setOnClickListener {
-            prefs.edit().putBoolean(
-                PREF_KEY_DISABLE_SCREENSHOTS,
-                disableScreenshotsSwitch.isChecked
-            ).apply()
+            finishWithResult()
+        }
+    }
 
-            val resultIntent = Intent().apply {
-                putExtra("folderUri", folderUri)
-                putExtra("disableScreenshots", disableScreenshotsSwitch.isChecked)
+    private fun loadSavedSettings() {
+        // Загружаем настройку скриншотов
+        disableScreenshotsSwitch.isChecked = prefs.getBoolean(PREF_KEY_DISABLE_SCREENSHOTS, false)
+
+        // Восстанавливаем URI папки
+        val savedUri = prefs.getString(PREF_KEY_FOLDER_URI, null)
+        if (!savedUri.isNullOrEmpty()) {
+            restoreFolderUri(savedUri)
+        } else {
+            updateFolderStatus("Папка не выбрана")
+        }
+    }
+
+    private fun restoreFolderUri(savedUri: String) {
+        try {
+            folderUri = Uri.parse(savedUri)
+            folderUri?.let { uri ->
+                if (validateAndRequestPermissions(uri)) {
+                    updateFolderStatus("Папка: ${uri.lastPathSegment ?: "Выбрана"}")
+                    loadTemplatesFromFile(BASE_TEMPLATES_FILE)
+                } else {
+                    folderUri = null
+                    updateFolderStatus("Папка недоступна")
+                }
             }
-            setResult(RESULT_OK, resultIntent)
-            finish()
+        } catch (e: Exception) {
+            Log.w(TAG, "Error restoring folder URI", e)
+            folderUri = null
+            updateFolderStatus("Ошибка восстановления папки")
+        }
+    }
+
+    private fun validateAndRequestPermissions(uri: Uri): Boolean {
+        return try {
+            contentResolver.takePersistableUriPermission(
+                uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            )
+            true
+        } catch (e: SecurityException) {
+            Log.w(TAG, "Cannot take persistable URI permission", e)
+            false
         }
     }
 
     private fun openFolderPicker() {
-        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
-            addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+        try {
+            val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+                addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+            }
+            startActivityForResult(intent, REQUEST_CODE_OPEN_DIRECTORY)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error opening folder picker", e)
+            showError("Не удалось открыть выбор папки")
         }
-        startActivityForResult(intent, REQUEST_CODE_OPEN_DIRECTORY)
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == REQUEST_CODE_OPEN_DIRECTORY && resultCode == RESULT_OK && data != null) {
-            val uri = data.data
-            if (uri != null) {
-                folderUri = uri
-                folderUri?.let { safeUri ->
-                    try {
-                        contentResolver.takePersistableUriPermission(
-                            safeUri,
-                            Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-                        )
-                    } catch (_: SecurityException) {
-                    }
-                }
+        
+        if (requestCode == REQUEST_CODE_OPEN_DIRECTORY && resultCode == RESULT_OK) {
+            handleFolderSelection(data)
+        }
+    }
+
+    private fun handleFolderSelection(data: Intent?) {
+        val uri = data?.data
+        
+        if (uri == null) {
+            showError("Ошибка: папка не выбрана")
+            return
+        }
+
+        try {
+            folderUri = uri
+            
+            if (validateAndRequestPermissions(uri)) {
+                // Сохраняем URI в настройках
                 prefs.edit()
                     .putString(PREF_KEY_FOLDER_URI, folderUri.toString())
-                    .putBoolean(PREF_KEY_IS_REGISTERED, true)
                     .apply()
-                Toast.makeText(this, "Папка выбрана", Toast.LENGTH_SHORT).show()
-                loadTemplatesFromFile("base.txt")
+                
+                updateFolderStatus("Папка: ${uri.lastPathSegment ?: "Выбрана"}")
+                showSuccess("Папка выбрана")
+                loadTemplatesFromFile(BASE_TEMPLATES_FILE)
             } else {
-                Toast.makeText(this, "Ошибка: папка не выбрана", Toast.LENGTH_SHORT).show()
+                folderUri = null
+                updateFolderStatus("Нет прав доступа к папке")
+                showError("Нет прав доступа к выбранной папке")
             }
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Error handling folder selection", e)
+            folderUri = null
+            updateFolderStatus("Ошибка выбора папки")
+            showError("Ошибка при выборе папки")
+        }
+    }
+
+    private fun clearTemplates() {
+        templatesInput.setText("")
+        showSuccess("Поле очищено")
+    }
+
+    private fun saveTemplates() {
+        if (folderUri == null) {
+            showError("Сначала выберите папку")
+            return
+        }
+
+        val content = templatesInput.text.toString()
+        
+        if (content.trim().isEmpty()) {
+            saveTemplatesToFile(BASE_TEMPLATES_FILE, "")
+            showSuccess("Шаблоны очищены")
+            return
+        }
+
+        val processedContent = processTemplatesContent(content)
+        val stats = getProcessingStats(content, processedContent)
+        
+        saveTemplatesToFile(BASE_TEMPLATES_FILE, processedContent)
+        showSuccess("Сохранено: ${stats.first}, пропущено: ${stats.second}")
+    }
+
+    private fun processTemplatesContent(content: String): String {
+        val lines = content.split("\r?\n".toRegex())
+        val processedLines = mutableListOf<String>()
+        
+        for (rawLine in lines) {
+            val line = rawLine.trim()
+            
+            if (line.isEmpty() || !line.contains("=")) {
+                continue
+            }
+            
+            val parts = line.split("=", limit = 2)
+            val key = parts[0].trim().lowercase()
+            val value = if (parts.size > 1) parts[1].trim() else ""
+            
+            if (key.isNotEmpty()) {
+                processedLines.add("$key=$value")
+            }
+        }
+        
+        return processedLines.joinToString("\n")
+    }
+
+    private fun getProcessingStats(original: String, processed: String): Pair<Int, Int> {
+        val originalLines = original.split("\r?\n".toRegex()).count { it.trim().isNotEmpty() }
+        val processedLines = processed.split("\n").size
+        val skipped = originalLines - processedLines
+        
+        return Pair(processedLines, maxOf(0, skipped))
+    }
+
+    private fun handleScreenshotToggle(isChecked: Boolean) {
+        prefs.edit()
+            .putBoolean(PREF_KEY_DISABLE_SCREENSHOTS, isChecked)
+            .apply()
+        
+        val message = if (isChecked) "Скриншоты запрещены" else "Скриншоты разрешены"
+        showSuccess(message)
+    }
+
+    private fun finishWithResult() {
+        try {
+            // Сохраняем текущие настройки
+            prefs.edit()
+                .putBoolean(PREF_KEY_DISABLE_SCREENSHOTS, disableScreenshotsSwitch.isChecked)
+                .apply()
+
+            // Возвращаем результат для ChatActivity
+            val resultIntent = Intent().apply {
+                putExtra("folderUri", folderUri?.toString())
+                putExtra("disableScreenshots", disableScreenshotsSwitch.isChecked)
+            }
+            
+            setResult(RESULT_OK, resultIntent)
+            finish()
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Error finishing with result", e)
+            finish()
         }
     }
 
     private fun saveTemplatesToFile(filename: String, content: String) {
+        if (folderUri == null) {
+            showError("Папка не выбрана")
+            return
+        }
+
         try {
             val dir = DocumentFile.fromTreeUri(this, folderUri!!)
+            
             if (dir == null || !dir.exists() || !dir.isDirectory) {
-                Toast.makeText(this, "Ошибка: папка недоступна", Toast.LENGTH_SHORT).show()
+                showError("Ошибка: папка недоступна")
                 return
             }
+
             var file = dir.findFile(filename)
-            if (file == null) file = dir.createFile("text/plain", filename)
             if (file == null) {
-                Toast.makeText(this, "Ошибка создания файла", Toast.LENGTH_SHORT).show()
+                file = dir.createFile("text/plain", filename)
+            }
+            
+            if (file == null) {
+                showError("Ошибка создания файла")
                 return
             }
+
             contentResolver.openFileDescriptor(file.uri, "w")?.use { pfd ->
                 FileOutputStream(pfd.fileDescriptor).use { fos ->
-                    fos.write(content.toByteArray())
+                    OutputStreamWriter(fos, Charsets.UTF_8).use { writer ->
+                        writer.write(content)
+                    }
                 }
             }
-            Toast.makeText(this, "Сохранено успешно", Toast.LENGTH_SHORT).show()
+
         } catch (e: Exception) {
-            Toast.makeText(this, "Ошибка сохранения: ${e.message}", Toast.LENGTH_SHORT).show()
+            Log.e(TAG, "Error saving templates", e)
+            showError("Ошибка сохранения: ${e.message}")
         }
     }
 
     private fun loadTemplatesFromFile(filename: String) {
-        val sb = StringBuilder()
+        if (folderUri == null) {
+            templatesInput.setText("")
+            return
+        }
+
         try {
             val dir = DocumentFile.fromTreeUri(this, folderUri!!)
+            
             if (dir == null || !dir.exists() || !dir.isDirectory) {
-                Toast.makeText(this, "Ошибка: папка недоступна", Toast.LENGTH_SHORT).show()
                 templatesInput.setText("")
                 return
             }
+
             val file = dir.findFile(filename)
             if (file == null || !file.exists()) {
                 templatesInput.setText("")
                 return
             }
+
             contentResolver.openFileDescriptor(file.uri, "r")?.use { pfd ->
                 FileInputStream(pfd.fileDescriptor).use { fis ->
-                    BufferedReader(InputStreamReader(fis)).use { reader ->
-                        var line: String?
-                        while (reader.readLine().also { line = it } != null) {
-                            if (sb.isNotEmpty()) sb.append("\n")
-                            sb.append(line)
+                    InputStreamReader(fis, Charsets.UTF_8).use { reader ->
+                        BufferedReader(reader).use { bufferedReader ->
+                            val content = bufferedReader.readText()
+                            templatesInput.setText(content)
                         }
                     }
                 }
             }
-            templatesInput.setText(sb.toString())
+
         } catch (e: Exception) {
-            Toast.makeText(this, "Ошибка загрузки: ${e.message}", Toast.LENGTH_SHORT).show()
+            Log.e(TAG, "Error loading templates", e)
+            showError("Ошибка загрузки: ${e.message}")
             templatesInput.setText("")
         }
+    }
+
+    private fun updateFolderStatus(status: String) {
+        folderStatusText.text = status
+    }
+
+    private fun showSuccess(message: String) {
+        Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+    }
+
+    private fun showError(message: String) {
+        Toast.makeText(this, message, Toast.LENGTH_LONG).show()
     }
 }
