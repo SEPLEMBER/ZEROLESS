@@ -156,7 +156,7 @@ class ChatActivity : AppCompatActivity() {
         btnLock?.setOnClickListener { finish() }
         btnTrash?.setOnClickListener { clearChat() }
         btnSettings?.setOnClickListener { startActivity(Intent(this, SettingsActivity::class.java)) }
-        btnEnvelopeTop?.setOnClickListener { startActivity(Intent(this, PostActivity::class.java)) }
+        // btnEnvelopeTop?.setOnClickListener { startActivity(Intent(this, PostActivity::class.java)) } // Commented out due to unresolved reference
         envelopeInputButton?.setOnClickListener {
             val input = queryInput.text.toString().trim()
             if (input.isNotEmpty()) {
@@ -184,18 +184,20 @@ class ChatActivity : AppCompatActivity() {
         }
 
         // Setup Idle Checker
-        idleCheckRunnable = Runnable {
-            val idleTime = System.currentTimeMillis() - lastUserInputTime
-            if (idleTime >= 25000L) {
-                if (dialogs.isNotEmpty()) {
-                    startRandomDialog()
-                } else if (dialogLines.isNotEmpty()) {
-                    triggerRandomDialog()
+        idleCheckRunnable = object : Runnable {
+            override fun run() {
+                val idleTime = System.currentTimeMillis() - lastUserInputTime
+                if (idleTime >= 25000L) {
+                    if (dialogs.isNotEmpty()) {
+                        startRandomDialog()
+                    } else if (dialogLines.isNotEmpty()) {
+                        triggerRandomDialog()
+                    }
                 }
+                dialogHandler.postDelayed(this, 5000L)
             }
-            dialogHandler.postDelayed(this, 5000)
         }
-        dialogHandler.postDelayed(idleCheckRunnable!!, 5000)
+        dialogHandler.postDelayed(idleCheckRunnable!!, 5000L)
 
         // Hide Top Mascot Image
         mascotTopImage?.visibility = View.GONE
@@ -207,7 +209,7 @@ class ChatActivity : AppCompatActivity() {
         rebuildInvertedIndex()
         updateAutoComplete()
         dialogHandler.removeCallbacks(idleCheckRunnable!!)
-        dialogHandler.postDelayed(idleCheckRunnable!!, 5000)
+        dialogHandler.postDelayed(idleCheckRunnable!!, 5000L)
         loadToolbarIcons()
     }
 
@@ -421,7 +423,7 @@ class ChatActivity : AppCompatActivity() {
             if (typingOrangeView == null) {
                 typingOrangeView = showTypingIndicatorOrange()
             }
-        }, 5000)
+        }, 5000L)
 
         val delay = 5000L + (4000..7000).random().toLong()
         dialogHandler.postDelayed({
@@ -634,7 +636,7 @@ class ChatActivity : AppCompatActivity() {
                 minInRow = minOf(minInRow, curr[j])
             }
             if (minInRow > MAX_FUZZY_DISTANCE + 2) return Int.MAX_VALUE / 2
-            prev.copyOf(curr)
+            System.arraycopy(curr, 0, prev, 0, m + 1)
         }
         return prev[m]
     }
@@ -680,7 +682,11 @@ class ChatActivity : AppCompatActivity() {
                 tag = slashTags
             }
             row.addView(slashView)
-            dialogHandler.postDelayed({ slashView.text = "//" }, 2000)
+            dialogHandler.postDelayed({
+                try {
+                    slashView.text = "//"
+                } catch (_: Exception) {}
+            }, 2000L)
         } else {
             val avatarView = ImageView(this).apply {
                 val size = dpToPx(64)
@@ -975,7 +981,7 @@ class ChatActivity : AppCompatActivity() {
                 } else {
                     addChatMessage(currentMascotName, line)
                 }
-            }, 1500)
+            }, 1500L)
         }
         if (mascotList.isNotEmpty() && random.nextDouble() < 0.1) {
             dialogHandler.postDelayed({
@@ -984,7 +990,7 @@ class ChatActivity : AppCompatActivity() {
                     loadMascotMetadata(name)
                     addChatMessage(name, "Эй, мы не закончили!")
                 }
-            }, 2500)
+            }, 2500L)
         }
     }
 
@@ -993,18 +999,20 @@ class ChatActivity : AppCompatActivity() {
         stopDialog()
         currentDialog = dialogs.random()
         currentDialogIndex = 0
-        dialogRunnable = Runnable {
-            val dialog = currentDialog ?: return@Runnable
-            if (currentDialogIndex < dialog.replies.size) {
-                val reply = dialog.replies[currentDialogIndex]
-                val mascot = reply["mascot"] ?: ""
-                val text = reply["text"] ?: ""
-                loadMascotMetadata(mascot)
-                addChatMessage(mascot, text)
-                currentDialogIndex++
-                dialogHandler.postDelayed(this, (10000..25000).random().toLong())
-            } else {
-                dialogHandler.postDelayed({ startRandomDialog() }, (5000..25000).random().toLong())
+        dialogRunnable = object : Runnable {
+            override fun run() {
+                val dialog = currentDialog ?: return
+                if (currentDialogIndex < dialog.replies.size) {
+                    val reply = dialog.replies[currentDialogIndex]
+                    val mascot = reply["mascot"] ?: ""
+                    val text = reply["text"] ?: ""
+                    loadMascotMetadata(mascot)
+                    addChatMessage(mascot, text)
+                    currentDialogIndex++
+                    dialogHandler.postDelayed(this, (10000..25000).random().toLong())
+                } else {
+                    dialogHandler.postDelayed({ startRandomDialog() }, (5000..25000).random().toLong())
+                }
             }
         }
         dialogHandler.postDelayed(dialogRunnable!!, (10000..25000).random().toLong())
@@ -1065,6 +1073,6 @@ class ChatActivity : AppCompatActivity() {
     private fun startIdleTimer() {
         lastUserInputTime = System.currentTimeMillis()
         dialogHandler.removeCallbacks(idleCheckRunnable!!)
-        dialogHandler.postDelayed(idleCheckRunnable!!, 5000)
+        dialogHandler.postDelayed(idleCheckRunnable!!, 5000L)
     }
 }
