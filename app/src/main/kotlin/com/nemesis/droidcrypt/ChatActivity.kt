@@ -84,8 +84,6 @@ class ChatActivity : AppCompatActivity() {
     private val keywordResponses = HashMap<String, MutableList<String>>()
     private val antiSpamResponses = mutableListOf<String>()
     private val mascotList = mutableListOf<Map<String, String>>()
-    private val dialogLines = mutableListOf<String>()
-    private val dialogs = mutableListOf<Dialog>()
 
     // inverted index token -> list of triggers (normalized)
     private val invertedIndex = HashMap<String, MutableList<String>>() // token -> list of trigger keys
@@ -101,11 +99,8 @@ class ChatActivity : AppCompatActivity() {
     private var currentContext = "base.txt"
     private var lastQuery = ""
 
-    // Dialogs / idle
-    private var currentDialog: Dialog? = null
-    private var currentDialogIndex = 0
+    // Dialogs / idle (удалена логика randomreply.txt)
     private val dialogHandler = Handler(Looper.getMainLooper())
-    private var dialogRunnable: Runnable? = null
     private var idleCheckRunnable: Runnable? = null
     private var lastUserInputTime = System.currentTimeMillis()
     private val random = Random()
@@ -119,8 +114,6 @@ class ChatActivity : AppCompatActivity() {
     private var batteryReceiver: BroadcastReceiver? = null
     private val timeHandler = Handler(Looper.getMainLooper())
     private var timeUpdaterRunnable: Runnable? = null
-
-    private data class Dialog(val name: String, val replies: MutableList<Map<String, String>> = mutableListOf())
 
     init {
         antiSpamResponses.addAll(
@@ -214,6 +207,7 @@ class ChatActivity : AppCompatActivity() {
         btnSettings?.setOnClickListener { startActivity(Intent(this, SettingsActivity::class.java)) }
         btnEnvelopeTop?.setOnClickListener { startActivity(Intent(this, PostsActivity::class.java)) }
         infoIconButton?.setOnClickListener { startActivity(Intent(this, PostsActivity::class.java)) }
+        btnCharging?.setOnClickListener { startActivity(Intent(this, PostsActivity::class.java)) }
 
         // envelope near input — отправка (с дебаунсом)
         envelopeInputButton?.setOnClickListener {
@@ -260,13 +254,9 @@ class ChatActivity : AppCompatActivity() {
             processUserQuery(selected)
         }
 
-        // idle runnable
+        // idle runnable (упрощена, без randomreply)
         idleCheckRunnable = object : Runnable {
             override fun run() {
-                val idle = System.currentTimeMillis() - lastUserInputTime
-                if (idle >= 25000) {
-                    if (dialogs.isNotEmpty()) startRandomDialog() else if (dialogLines.isNotEmpty()) triggerRandomDialog()
-                }
                 dialogHandler.postDelayed(this, 5000)
             }
         }
@@ -289,7 +279,7 @@ class ChatActivity : AppCompatActivity() {
         batteryImageView = ImageView(this).apply {
             val iconSize = dpToPx(56)
             layoutParams = LinearLayout.LayoutParams(iconSize, iconSize)
-            scaleType = ImageView.ScaleType.CENTER_INSIDE
+            scaleType = ImageView.ScaleType.FIT_CENTER
             adjustViewBounds = true
         }
         batteryPercentView = TextView(this).apply {
@@ -329,9 +319,11 @@ class ChatActivity : AppCompatActivity() {
         infoIconButton = ImageButton(this).apply {
             background = null
             val iconSize = dpToPx(56)
-            val lp = LinearLayout.LayoutParams(iconSize, iconSize)
+            val lp = LinearLayout.LayoutParams(iconSize, iconSize).apply {
+                marginStart = dpToPx(6)
+            }
             layoutParams = lp
-            scaleType = ImageView.ScaleType.CENTER_INSIDE
+            scaleType = ImageView.ScaleType.FIT_CENTER
             adjustViewBounds = true
         }
         topBar.addView(infoIconButton, 2) // Вставляем перед btn_lock (теперь на позиции 3)
@@ -344,7 +336,7 @@ class ChatActivity : AppCompatActivity() {
                 marginStart = dpToPx(6)
             }
             layoutParams = lp
-            scaleType = ImageView.ScaleType.CENTER_INSIDE
+            scaleType = ImageView.ScaleType.FIT_CENTER
             adjustViewBounds = true
             visibility = View.GONE
         }
@@ -370,7 +362,6 @@ class ChatActivity : AppCompatActivity() {
 
     override fun onPause() {
         super.onPause()
-        stopDialog()
         dialogHandler.removeCallbacksAndMessages(null)
         unregisterBatteryReceiver()
         stopTimeUpdater()
@@ -503,7 +494,6 @@ class ChatActivity : AppCompatActivity() {
         if (qFiltered.isEmpty()) return
 
         lastUserInputTime = System.currentTimeMillis()
-        stopDialog()
 
         if (qKeyForCount == lastQuery) {
             val cnt = queryCountMap.getOrDefault(qKeyForCount, 0)
@@ -1003,6 +993,10 @@ class ChatActivity : AppCompatActivity() {
                     scaleType = ImageView.ScaleType.CENTER_CROP
                     adjustViewBounds = true
                     loadAvatarInto(this, sender)
+                    // Добавляем клик на аватарку маскота для случайного сообщения из ouch.txt
+                    setOnClickListener {
+                        loadAndSendOuchMessage()
+                    }
                 }
                 val bubble = createMessageBubble(sender, text, isUser)
                 val bubbleLp =
@@ -1029,6 +1023,27 @@ class ChatActivity : AppCompatActivity() {
             if (!isUser) {
                 playNotificationSound()
             }
+        }
+    }
+
+    // Метод для загрузки и отправки случайного сообщения из ouch.txt
+    private fun loadAndSendOuchMessage() {
+        val uri = folderUri ?: return
+        try {
+            val dir = DocumentFile.fromTreeUri(this, uri) ?: return
+            val ouchFile = dir.findFile("ouch.txt")
+            if (ouchFile != null && ouchFile.exists()) {
+                contentResolver.openInputStream(ouchFile.uri)?.bufferedReader()?.use { reader ->
+                    val allText = reader.readText()
+                    val responses = allText.split("|").map { it.trim() }.filter { it.isNotEmpty() }
+                    if (responses.isNotEmpty()) {
+                        val randomResponse = responses.random()
+                        addChatMessage(currentMascotName, randomResponse)
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            showCustomToast("Ошибка загрузки ouch.txt: ${e.message}")
         }
     }
 
@@ -1148,8 +1163,6 @@ class ChatActivity : AppCompatActivity() {
         templatesMap.clear()
         keywordResponses.clear()
         mascotList.clear()
-        dialogLines.clear()
-        dialogs.clear()
 
         // Reset to default before parsing, especially contextMap for base.txt
         if (filename == "base.txt") {
@@ -1290,58 +1303,8 @@ class ChatActivity : AppCompatActivity() {
                                 line.substring("theme_color=".length).trim()
                             line.startsWith("theme_background=") -> currentThemeBackground =
                                 line.substring("theme_background=".length).trim()
-                            line.startsWith("dialog_lines=") -> {
-                                val lines =
-                                    line.substring("dialog_lines=".length).split("|")
-                                for (d in lines) {
-                                    val t = d.trim(); if (t.isNotEmpty()) dialogLines.add(t)
-                                }
-                            }
                         }
                     }
-                }
-            }
-
-            // randomreply.txt parsing (robust)
-            val dialogFile = dir.findFile("randomreply.txt")
-            if (dialogFile != null && dialogFile.exists()) {
-                try {
-                    contentResolver.openInputStream(dialogFile.uri)?.bufferedReader()
-                        ?.use { reader ->
-                            var currentDialogParser: Dialog? = null
-                            reader.forEachLine { raw ->
-                                val l = raw.trim()
-                                if (l.isEmpty()) return@forEachLine
-
-                                if (l.startsWith(";")) {
-                                    currentDialogParser?.takeIf { it.replies.isNotEmpty() }
-                                        ?.let { dialogs.add(it) }
-                                    currentDialogParser = Dialog(l.substring(1).trim())
-                                    return@forEachLine
-                                }
-
-                                if (l.contains(">")) {
-                                    val parts = l.split(">", limit = 2)
-                                    if (parts.size == 2) {
-                                        val mascot = parts[0].trim()
-                                        val text = parts[1].trim()
-                                        if (mascot.isNotEmpty() && text.isNotEmpty()) {
-                                            val cur = currentDialogParser
-                                                ?: Dialog("default").also { currentDialogParser = it }
-                                            cur.replies.add(mapOf("mascot" to mascot, "text" to text))
-                                        }
-                                    }
-                                    return@forEachLine
-                                }
-
-                                // fallback short dialog line
-                                dialogLines.add(l)
-                            }
-                            currentDialogParser?.takeIf { it.replies.isNotEmpty() }
-                                ?.let { dialogs.add(it) }
-                        }
-                } catch (e: Exception) {
-                    showCustomToast("Ошибка чтения randomreply.txt: ${e.message}")
                 }
             }
 
@@ -1382,8 +1345,6 @@ class ChatActivity : AppCompatActivity() {
         templatesMap.clear()
         contextMap.clear()
         keywordResponses.clear()
-        dialogs.clear()
-        dialogLines.clear()
         mascotList.clear()
         // store normalized keys in fallback as well (respect stopwords/synonyms)
         val t1 = filterStopwordsAndMapSynonyms(normalizeText("привет")).second
@@ -1416,69 +1377,6 @@ class ChatActivity : AppCompatActivity() {
             adapter?.clear()
             adapter?.addAll(suggestions)
             adapter?.notifyDataSetChanged()
-        }
-    }
-
-    /// SECTION: Idle & Dialogs
-    private fun triggerRandomDialog() {
-        if (dialogLines.isNotEmpty() && random.nextDouble() < 0.3) {
-            dialogHandler.postDelayed({
-                if (dialogLines.isEmpty()) return@postDelayed
-                val dialog = dialogLines.random()
-                if (mascotList.isNotEmpty()) {
-                    val rnd = mascotList.random()
-                    val rndName = rnd["name"] ?: currentMascotName
-                    loadMascotMetadata(rndName)
-                    addChatMessage(rndName, dialog)
-                } else addChatMessage(currentMascotName, dialog)
-            }, 1500)
-        }
-        if (mascotList.isNotEmpty() && random.nextDouble() < 0.1) {
-            dialogHandler.postDelayed({
-                val rnd = mascotList.random()
-                val rndName = rnd["name"] ?: currentMascotName
-                loadMascotMetadata(rndName)
-                addChatMessage(rndName, "Эй, мы не закончили!")
-            }, 2500)
-        }
-    }
-
-    private fun startRandomDialog() {
-        if (dialogs.isEmpty()) return
-        stopDialog()
-        currentDialog = dialogs.random()
-        currentDialogIndex = 0
-        dialogRunnable = object : Runnable {
-            override fun run() {
-                val dialog = currentDialog ?: return
-                if (currentDialogIndex < dialog.replies.size) {
-                    val reply = dialog.replies[currentDialogIndex]
-                    val mascot = reply["mascot"] ?: ""
-                    val text = reply["text"] ?: ""
-                    loadMascotMetadata(mascot)
-                    addChatMessage(mascot, text)
-                    currentDialogIndex++
-                    dialogHandler.postDelayed(this, (random.nextInt(15000) + 10000).toLong())
-                } else {
-                    dialogHandler.postDelayed(
-                        { startRandomDialog() },
-                        (random.nextInt(20000) + 5000).toLong()
-                    )
-                }
-            }
-        }
-        dialogRunnable?.let {
-            dialogHandler.postDelayed(
-                it,
-                (random.nextInt(15000) + 10000).toLong()
-            )
-        }
-    }
-
-    private fun stopDialog() {
-        dialogRunnable?.let {
-            dialogHandler.removeCallbacks(it)
-            dialogRunnable = null
         }
     }
 
@@ -1640,11 +1538,7 @@ class ChatActivity : AppCompatActivity() {
                 tryLoadBitmapFromFolder("battery.png")?.let { batteryImageView?.setImageBitmap(it) }
             }
 
-            // tint icon: blue normally, red when <= lowThreshold
-            try {
-                batteryImageView?.setColorFilter(if (percent <= lowThreshold) red else normalBlue)
-            } catch (_: Exception) {
-            }
+            // Убрали setColorFilter, чтобы не перекрашивать PNG-иконку батареи
 
             // Показываем/скрываем иконку зарядки
             if (plugged > 0) {
