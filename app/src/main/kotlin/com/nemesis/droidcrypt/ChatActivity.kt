@@ -1,4 +1,4 @@
-package com.nemesis.droidcrypt
+package com.nemesis.pawscribe
 
 import android.animation.ObjectAnimator
 import android.content.Intent
@@ -321,102 +321,6 @@ class ChatActivity : AppCompatActivity() {
         val subqueryResponses = mutableListOf<String>()
         val processedSubqueries = mutableSetOf<String>()
 
-        // -----------------------
-        // NEW: Intent-based multi-topic handling
-        // If user asked something like "что такое aes gcm" — detect intent and fetch answers for each topic,
-        // then combine into single message: "AES — ... . GCM — ..."
-        // -----------------------
-        val questionIntents = listOf(
-            "что такое",
-            "кто такой",
-            "как работает",
-            "расскажи о",
-            "объясни",
-            "что это",
-            "что такое ли"
-        )
-
-        val matchedIntent = questionIntents.find { intent ->
-            // check on normalized original string (qOrig)
-            qOrig.startsWith(intent) || qOrig.contains(" $intent") || qOrig.contains("$intent ")
-        }
-
-        if (matchedIntent != null) {
-            // Build topic tokens: prefer already filtered/mapped tokens (qTokensFiltered).
-            // If empty, fall back to tokens from normalized original (and filter stopwords).
-            val topicTokens = if (qTokensFiltered.isNotEmpty()) {
-                qTokensFiltered.toMutableList()
-            } else {
-                tokenize(qOrig).map { normalizeText(it) }.filter { it.length > 1 && !stopwords.contains(it) }.toMutableList()
-            }
-
-            // remove intent words themselves from topicTokens (if present)
-            val intentWords = matchedIntent.split(Regex("\\s+")).map { normalizeText(it) }
-            topicTokens.removeAll(intentWords)
-
-            // if there are combined topics like "aes gcm", iterate all tokens and collect answers
-            for (t in topicTokens) {
-                if (subqueryResponses.size >= MAX_SUBQUERY_RESPONSES) break
-                if (t.isBlank() || t.length < 1) continue
-                if (processedSubqueries.contains(t)) continue
-
-                // try a direct template match (avoid using continue inside let — use plain check)
-                val directPossible = templatesMap[t]
-                if (!directPossible.isNullOrEmpty()) {
-                    subqueryResponses.add("${t.uppercase(Locale.getDefault())}: ${directPossible.random()}")
-                    processedSubqueries.add(t)
-                    continue
-                }
-
-                // try two-token key (maybe topic is two words)
-                // attempt to find any templates with t + next token in original sequence
-                val origTokens = tokenize(qOrig)
-                val idx = origTokens.indexOfFirst { normalizeText(it) == t }
-                if (idx >= 0 && idx < origTokens.size - 1) {
-                    val two = "${normalizeText(origTokens[idx])} ${normalizeText(origTokens[idx + 1])}"
-                    val twoPossible = templatesMap[two]
-                    if (!twoPossible.isNullOrEmpty()) {
-                        subqueryResponses.add("${two.uppercase(Locale.getDefault())}: ${twoPossible.random()}")
-                        processedSubqueries.add(two)
-                        continue
-                    }
-                }
-
-                // keywordResponses fallback
-                val kwPossible = keywordResponses[t]
-                if (!kwPossible.isNullOrEmpty()) {
-                    subqueryResponses.add("${t.uppercase(Locale.getDefault())}: ${kwPossible.random()}")
-                    processedSubqueries.add(t)
-                    continue
-                }
-
-                // If nothing found in current context, try fuzzy lookup via inverted index
-                // Look for candidate triggers containing this token
-                val candidates = invertedIndex[t] ?: emptyList()
-                if (candidates.isNotEmpty()) {
-                    val pick = candidates.firstOrNull()
-                    if (pick != null) {
-                        val pickPossible = templatesMap[pick]
-                        if (!pickPossible.isNullOrEmpty()) {
-                            subqueryResponses.add("${t.uppercase(Locale.getDefault())}: ${pickPossible.random()}")
-                            processedSubqueries.add(t)
-                            continue
-                        }
-                    }
-                }
-            }
-
-            if (subqueryResponses.isNotEmpty()) {
-                val combined = subqueryResponses.joinToString(". ")
-                dialogHandler.postDelayed({
-                    addChatMessage(currentMascotName, combined)
-                    startIdleTimer()
-                }, SUBQUERY_RESPONSE_DELAY)
-                answered = true
-            }
-            // if matchedIntent but nothing found - we continue to normal flow (so fallback can trigger)
-        }
-
         // 1. Check for an exact match in the current context (templatesMap keys are normalized)
         templatesMap[qFiltered]?.let { possible ->
             if (possible.isNotEmpty()) {
@@ -470,7 +374,7 @@ class ChatActivity : AppCompatActivity() {
         }
 
         // 3. Combine subquery responses into a single message
-        if (subqueryResponses.isNotEmpty() && !answered) {
+        if (subqueryResponses.isNotEmpty()) {
             val combinedResponse = subqueryResponses.joinToString(". ")
             dialogHandler.postDelayed({
                 addChatMessage(currentMascotName, combinedResponse)
@@ -497,14 +401,9 @@ class ChatActivity : AppCompatActivity() {
         if (!answered) {
             val qTokens = if (qTokensFiltered.isNotEmpty()) qTokensFiltered else tokenize(qFiltered)
             val candidateCounts = HashMap<String, Int>()
-
-            // <-- FIX: avoid inline lambda forEach here; use explicit for-loop
             for (tok in qTokens) {
-                val trigList = invertedIndex[tok]
-                if (trigList != null) {
-                    for (trig in trigList) {
-                        candidateCounts[trig] = candidateCounts.getOrDefault(trig, 0) + 1
-                    }
+                invertedIndex[tok]?.forEach { trig ->
+                    candidateCounts[trig] = candidateCounts.getOrDefault(trig, 0) + 1
                 }
             }
 
