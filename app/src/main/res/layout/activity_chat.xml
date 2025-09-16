@@ -1,129 +1,337 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<androidx.constraintlayout.widget.ConstraintLayout 
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
     android:id="@+id/chat_layout"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical"
     android:background="@color/background_black"
-    android:padding="8dp">
+    android:fitsSystemWindows="true">
 
-    <!-- Top bar: Mascot image + icons -->
+    <!-- Top bar: Icons with proper spacing -->
     <LinearLayout
         android:id="@+id/topBar"
-        android:layout_width="match_parent"
+        android:layout_width="0dp"
         android:layout_height="72dp"
         android:orientation="horizontal"
-        android:gravity="center_vertical"
-        android:paddingStart="8dp"
-        android:paddingEnd="8dp"
-        android:background="@color/card_dark">
+        android:gravity="center_vertical|end"
+        android:paddingStart="16dp"
+        android:paddingEnd="16dp"
+        android:background="@color/card_dark"
+        android:elevation="4dp"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent">
 
-        <!-- Mascot Image (hidden: actionbar avatar removed as requested) -->
+        <!-- Mascot Image (скрыт, но готов к использованию) -->
         <ImageView
             android:id="@+id/mascot_top_image"
-            android:layout_width="64dp"
-            android:layout_height="64dp"
-            android:layout_marginEnd="8dp"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:layout_marginEnd="16dp"
             android:scaleType="centerCrop"
-            android:contentDescription="Mascot Top"
-            android:visibility="gone" />
+            android:contentDescription="@string/mascot_description"
+            android:visibility="gone"
+            tools:src="@drawable/ic_mascot"
+            tools:visibility="visible" />
 
+        <!-- Spacer для выравнивания иконок по правому краю -->
         <View
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1" />
 
+        <!-- Connection Status Indicator (новый элемент) -->
+        <View
+            android:id="@+id/connection_indicator"
+            android:layout_width="8dp"
+            android:layout_height="8dp"
+            android:layout_marginEnd="8dp"
+            android:background="@drawable/connection_indicator_shape"
+            android:visibility="gone" />
+
+        <!-- Lock Button -->
         <ImageButton
             android:id="@+id/btn_lock"
-            android:layout_width="56dp"
-            android:layout_height="56dp"
-            android:background="?attr/selectableItemBackgroundBorderless"
-            android:contentDescription="Lock"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:layout_marginEnd="8dp"
+            android:background="@drawable/ripple_button_background"
+            android:contentDescription="@string/lock_description"
             android:scaleType="centerInside"
-            android:adjustViewBounds="true" />
+            android:src="@drawable/ic_lock"
+            android:padding="12dp"
+            tools:ignore="TouchTargetSizeCheck" />
 
+        <!-- Clear Chat Button -->
         <ImageButton
             android:id="@+id/btn_trash"
-            android:layout_width="56dp"
-            android:layout_height="56dp"
-            android:layout_marginStart="6dp"
-            android:background="?attr/selectableItemBackgroundBorderless"
-            android:contentDescription="Trash"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:layout_marginEnd="8dp"
+            android:background="@drawable/ripple_button_background"
+            android:contentDescription="@string/clear_chat_description"
             android:scaleType="centerInside"
-            android:adjustViewBounds="true" />
+            android:src="@drawable/ic_delete"
+            android:padding="12dp"
+            tools:ignore="TouchTargetSizeCheck" />
 
+        <!-- Export Button -->
         <ImageButton
             android:id="@+id/btn_envelope_top"
-            android:layout_width="56dp"
-            android:layout_height="56dp"
-            android:layout_marginStart="6dp"
-            android:background="?attr/selectableItemBackgroundBorderless"
-            android:contentDescription="Envelope"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:layout_marginEnd="8dp"
+            android:background="@drawable/ripple_button_background"
+            android:contentDescription="@string/export_description"
             android:scaleType="centerInside"
-            android:adjustViewBounds="true" />
+            android:src="@drawable/ic_export"
+            android:padding="12dp"
+            tools:ignore="TouchTargetSizeCheck" />
 
+        <!-- Settings Button -->
         <ImageButton
             android:id="@+id/btn_settings"
-            android:layout_width="56dp"
-            android:layout_height="56dp"
-            android:layout_marginStart="6dp"
-            android:background="?attr/selectableItemBackgroundBorderless"
-            android:contentDescription="Settings"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:background="@drawable/ripple_button_background"
+            android:contentDescription="@string/settings_description"
             android:scaleType="centerInside"
-            android:adjustViewBounds="true" />
+            android:src="@drawable/ic_settings"
+            android:padding="12dp"
+            tools:ignore="TouchTargetSizeCheck" />
     </LinearLayout>
 
-    <!-- Chat area background slightly lighter than page -->
+    <!-- Chat Messages Area -->
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/chatRecyclerView"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:background="@color/chat_area_bg"
+        android:padding="8dp"
+        android:clipToPadding="false"
+        android:scrollbars="vertical"
+        android:fadeScrollbars="true"
+        android:scrollbarThumbVertical="@drawable/scrollbar_thumb"
+        android:scrollbarTrackVertical="@drawable/scrollbar_track"
+        app:layout_constraintTop_toBottomOf="@id/topBar"
+        app:layout_constraintBottom_toTopOf="@id/inputContainer"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        tools:listitem="@layout/item_chat_message" />
+
+    <!-- Fallback ScrollView (скрытый, для совместимости с существующим кодом) -->
     <ScrollView
         android:id="@+id/scrollView"
-        android:layout_width="match_parent"
+        android:layout_width="0dp"
         android:layout_height="0dp"
-        android:layout_weight="1"
         android:fillViewport="true"
         android:background="@color/chat_area_bg"
-        android:padding="8dp">
+        android:padding="8dp"
+        android:visibility="gone"
+        app:layout_constraintTop_toBottomOf="@id/topBar"
+        app:layout_constraintBottom_toTopOf="@id/inputContainer"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent">
 
         <LinearLayout
             android:id="@+id/chatMessagesContainer"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="vertical" />
+            android:orientation="vertical"
+            android:paddingBottom="8dp" />
     </ScrollView>
 
-    <!-- Input row: text + envelope (send) -->
+    <!-- Typing Indicator -->
     <LinearLayout
-        android:layout_width="match_parent"
+        android:id="@+id/typingIndicator"
+        android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
         android:gravity="center_vertical"
+        android:paddingStart="16dp"
+        android:paddingEnd="16dp"
         android:paddingTop="8dp"
-        android:background="@color/input_bg"
-        android:padding="8dp">
+        android:paddingBottom="8dp"
+        android:background="@color/typing_indicator_bg"
+        android:visibility="gone"
+        app:layout_constraintBottom_toTopOf="@id/inputContainer"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent">
 
-        <AutoCompleteTextView
-            android:id="@+id/queryInput"
-            android:layout_width="0dp"
+        <com.nemesis.droidcrypt.ui.TypingDotsView
+            android:id="@+id/typingDots"
+            android:layout_width="32dp"
+            android:layout_height="16dp"
+            android:layout_marginEnd="8dp" />
+
+        <TextView
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:hint="Напиши сообщение..."
-            android:textColor="@color/mascot_racky_text"
-            android:textColorHint="@color/mascot_racky_text"
-            android:background="@android:color/transparent"
-            android:padding="8dp"
-            android:inputType="textMultiLine"
-            android:maxLines="3"
-            android:scrollbars="vertical"
-            android:popupBackground="@color/popup_bg" />
-
-        <ImageButton
-            android:id="@+id/envelope_button"
-            android:layout_width="56dp"
-            android:layout_height="56dp"
-            android:layout_marginStart="8dp"
-            android:background="?attr/selectableItemBackgroundBorderless"
-            android:contentDescription="Send"
-            android:scaleType="centerInside"
-            android:adjustViewBounds="true"  />
+            android:text="@string/typing_indicator_text"
+            android:textColor="@color/typing_indicator_text"
+            android:textSize="14sp"
+            android:alpha="0.7" />
     </LinearLayout>
 
-</LinearLayout>
+    <!-- Input Container -->
+    <LinearLayout
+        android:id="@+id/inputContainer"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:background="@color/input_bg"
+        android:elevation="8dp"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent">
+
+        <!-- Progress Bar for file operations -->
+        <ProgressBar
+            android:id="@+id/fileOperationProgress"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="match_parent"
+            android:layout_height="4dp"
+            android:visibility="gone"
+            android:progressTint="@color/accent_color" />
+
+        <!-- Input Row -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:padding="12dp"
+            android:minHeight="56dp">
+
+            <!-- Attachment Button -->
+            <ImageButton
+                android:id="@+id/btn_attachment"
+                android:layout_width="44dp"
+                android:layout_height="44dp"
+                android:layout_marginEnd="8dp"
+                android:background="@drawable/ripple_button_background"
+                android:contentDescription="@string/attachment_description"
+                android:scaleType="centerInside"
+                android:src="@drawable/ic_attach"
+                android:padding="10dp"
+                android:visibility="gone" />
+
+            <!-- Input Field Container -->
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical"
+                android:background="@drawable/input_field_background"
+                android:paddingStart="16dp"
+                android:paddingEnd="16dp"
+                android:paddingTop="12dp"
+                android:paddingBottom="12dp"
+                android:minHeight="44dp">
+
+                <!-- AutoComplete with better configuration -->
+                <AutoCompleteTextView
+                    android:id="@+id/queryInput"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:hint="@string/message_hint"
+                    android:textColor="@color/input_text_color"
+                    android:textColorHint="@color/input_hint_color"
+                    android:background="@android:color/transparent"
+                    android:inputType="textMultiLine|textCapSentences"
+                    android:imeOptions="actionSend"
+                    android:maxLines="4"
+                    android:scrollbars="vertical"
+                    android:scrollHorizontally="false"
+                    android:textSize="16sp"
+                    android:lineSpacingExtra="2dp"
+                    android:popupBackground="@drawable/popup_background"
+                    android:dropDownAnchor="@id/queryInput"
+                    android:completionThreshold="1"
+                    tools:text="Пример сообщения для предпросмотра..." />
+
+                <!-- Character Counter -->
+                <TextView
+                    android:id="@+id/characterCounter"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="end"
+                    android:layout_marginTop="4dp"
+                    android:textSize="12sp"
+                    android:textColor="@color/character_counter_color"
+                    android:visibility="gone"
+                    tools:text="150/500"
+                    tools:visibility="visible" />
+            </LinearLayout>
+
+            <!-- Send Button -->
+            <ImageButton
+                android:id="@+id/envelope_button"
+                android:layout_width="44dp"
+                android:layout_height="44dp"
+                android:layout_marginStart="12dp"
+                android:background="@drawable/send_button_background"
+                android:contentDescription="@string/send_description"
+                android:scaleType="centerInside"
+                android:src="@drawable/ic_send"
+                android:padding="10dp"
+                android:enabled="false" />
+        </LinearLayout>
+
+        <!-- Quick Actions (шаблоны) -->
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/quickActionsRecycler"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
+            android:paddingBottom="8dp"
+            android:clipToPadding="false"
+            android:visibility="gone"
+            tools:visibility="visible"
+            tools:listitem="@layout/item_quick_action" />
+    </LinearLayout>
+
+    <!-- Loading Overlay -->
+    <FrameLayout
+        android:id="@+id/loadingOverlay"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:background="@color/loading_overlay_bg"
+        android:visibility="gone"
+        android:clickable="true"
+        android:focusable="true"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent">
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:orientation="vertical"
+            android:gravity="center"
+            android:background="@drawable/loading_card_background"
+            android:padding="24dp">
+
+            <ProgressBar
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:layout_marginBottom="16dp"
+                android:indeterminateTint="@color/accent_color" />
+
+            <TextView
+                android:id="@+id/loadingText"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/loading_text"
+                android:textColor="@color/loading_text_color"
+                android:textSize="16sp" />
+        </LinearLayout>
+    </FrameLayout>
+
+</androidx.constraintlayout.widget.ConstraintLayout>
