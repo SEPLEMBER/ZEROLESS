@@ -23,6 +23,7 @@ import android.view.WindowManager
 import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.graphics.ColorUtils
+import androidx.core.view.children
 import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
@@ -38,7 +39,7 @@ import android.graphics.BitmapFactory
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.wifi.WifiManager
-import com.nemesis.droidcrypt
+import android.text.format.DateFormat
 import com.nemesis.droidcrypt.databinding.ActivityChatBinding
 
 data class DataSnapshots(
@@ -71,12 +72,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private var mascotTopImage: ImageView? = null
 
     private var tts: TextToSpeech? = null
-    private val fallback = arrayOf(
-        getString(R.string.suggestion_hello),
-        getString(R.string.suggestion_how_are_you),
-        getString(R.string.suggestion_tell_about),
-        getString(R.string.suggestion_exit)
-    )
+    private val fallback = mutableListOf<String>()
     private val templatesMap = HashMap<String, MutableList<String>>()
     private val contextMap = HashMap<String, String>()
     private val keywordResponses = HashMap<String, MutableList<String>>()
@@ -85,11 +81,11 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private val invertedIndex = HashMap<String, MutableList<String>>()
     private val synonymsMap = HashMap<String, String>()
     private val stopwords = HashSet<String>()
-    private var currentMascotName = getString(R.string.default_mascot_name)
-    private var currentMascotIcon = getString(R.string.raccoon_icon)
-    private var currentThemeColor = getString(R.string.default_theme_color)
-    private var currentThemeBackground = getString(R.string.default_theme_background)
-    private var currentContext = getString(R.string.base_context_file)
+    private var currentMascotName: String = ""
+    private var currentMascotIcon: String = ""
+    private var currentThemeColor: String = ""
+    private var currentThemeBackground: String = ""
+    private var currentContext: String = ""
     private var lastQuery = ""
     private var userActivityCount = 0
 
@@ -107,7 +103,29 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private val timeHandler = Handler(Looper.getMainLooper())
     private var timeUpdaterRunnable: Runnable? = null
 
-    init {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        binding = ActivityChatBinding.inflate(layoutInflater)
+        setContentView(binding.root)
+
+        // Инициализация строк/списков, которые требуют Context
+        currentMascotName = getString(R.string.default_mascot_name)
+        currentMascotIcon = getString(R.string.raccoon_icon)
+        currentThemeColor = getString(R.string.default_theme_color)
+        currentThemeBackground = getString(R.string.default_theme_background)
+        currentContext = getString(R.string.base_context_file)
+
+        fallback.clear()
+        fallback.addAll(
+            listOf(
+                getString(R.string.suggestion_hello),
+                getString(R.string.suggestion_how_are_you),
+                getString(R.string.suggestion_tell_about),
+                getString(R.string.suggestion_exit)
+            )
+        )
+
+        antiSpamResponses.clear()
         antiSpamResponses.addAll(
             listOf(
                 getString(R.string.anti_spam_1),
@@ -122,12 +140,6 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 getString(R.string.anti_spam_10)
             )
         )
-    }
-
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        binding = ActivityChatBinding.inflate(layoutInflater)
-        setContentView(binding.root)
 
         window.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
         supportActionBar?.setBackgroundDrawable(ColorDrawable(Color.argb(128, 0, 0, 0)))
@@ -203,6 +215,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         binding.topBar.leftLayout.addView(batteryImageView)
         binding.topBar.leftLayout.addView(batteryPercentView)
 
+        // В layout topBar.root ожидается уже минимум 2 view — удаляем второй и вставляем текст времени
         binding.topBar.root.removeViewAt(1)
         val timeTextView = TextView(this).apply {
             text = getString(R.string.time_placeholder)
@@ -263,7 +276,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             topBar.btnSettings.setOnClickListener { startActivity(Intent(this@ChatActivity, SettingsActivity::class.java)) }
             topBar.btnEnvelopeTop.setOnClickListener { startActivity(Intent(this@ChatActivity, PostsActivity::class.java)) }
 
-            val sendAction = {
+            val sendAction = sendAction@{
                 val now = System.currentTimeMillis()
                 if (now - lastSendTime < SEND_DEBOUNCE_MS) {
                     return@sendAction
@@ -506,7 +519,8 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         for (key in templates.keys) {
             val tokens = filterStopwordsAndMapSynonyms(key).first
             for (token in tokens) {
-                localInverted.getOrPut(token) { mutableListOf() }.add(key)
+                localInverted.getOrPut(token) { mutableListOf() }
+                    .takeIf { !it.contains(key) }?.add(key)
             }
         }
         return localInverted
@@ -1471,8 +1485,9 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private fun findBestLevenshteinMatch(qFiltered: String, candidates: List<String>): String? {
         if (candidates.isEmpty()) return null
-        return candidates.minByOrNull { cand -> levenshtein(qFiltered, cand, qFiltered) }
-            ?.takeIf { dist -> dist < Int.MAX_VALUE / 2 }
+        val bestCandidate = candidates.minByOrNull { cand -> levenshtein(qFiltered, cand, qFiltered) } ?: return null
+        val dist = levenshtein(qFiltered, bestCandidate, qFiltered)
+        return if (dist < Int.MAX_VALUE / 2) bestCandidate else null
     }
 
     private fun updateQuerySpamCount(qFiltered: String) {
