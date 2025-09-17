@@ -294,11 +294,16 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     }
 
     private fun setupListeners() {
+        val btnLock = findTopBarChildImageButton("btnLock") ?: (binding.root.findViewById(resources.getIdentifier("btnLock","id",packageName)) as? ImageButton)
+        val btnTrash = findTopBarChildImageButton("btnTrash") ?: (binding.root.findViewById(resources.getIdentifier("btnTrash","id",packageName)) as? ImageButton)
+        val btnEnvelopeTop = findTopBarChildImageButton("btnEnvelopeTop") ?: (binding.root.findViewById(resources.getIdentifier("btnEnvelopeTop","id",packageName)) as? ImageButton)
+        val btnSettings = findTopBarChildImageButton("btnSettings") ?: (binding.root.findViewById(resources.getIdentifier("btnSettings","id",packageName)) as? ImageButton)
+
         val buttons: List<ImageButton?> = listOf(
-            findTopBarChildImageButton("btnLock") ?: binding.root.findViewById(resources.getIdentifier("btnLock","id",packageName)),
-            findTopBarChildImageButton("btnTrash") ?: binding.root.findViewById(resources.getIdentifier("btnTrash","id",packageName)),
-            findTopBarChildImageButton("btnEnvelopeTop") ?: binding.root.findViewById(resources.getIdentifier("btnEnvelopeTop","id",packageName)),
-            findTopBarChildImageButton("btnSettings") ?: binding.root.findViewById(resources.getIdentifier("btnSettings","id",packageName)),
+            btnLock,
+            btnTrash,
+            btnEnvelopeTop,
+            btnSettings,
             binding.envelopeButton
         )
         for (btn in buttons) {
@@ -306,12 +311,12 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
 
         // если родные кнопки найдены — навешиваем действия
-        findTopBarChildImageButton("btnLock")?.setOnClickListener { finish() }
-        findTopBarChildImageButton("btnTrash")?.setOnClickListener { clearChat() }
-        findTopBarChildImageButton("btnSettings")?.setOnClickListener {
+        btnLock?.setOnClickListener { finish() }
+        btnTrash?.setOnClickListener { clearChat() }
+        btnSettings?.setOnClickListener {
             startActivity(Intent(this@ChatActivity, SettingsActivity::class.java))
         }
-        findTopBarChildImageButton("btnEnvelopeTop")?.setOnClickListener {
+        btnEnvelopeTop?.setOnClickListener {
             startActivity(Intent(this@ChatActivity, PostsActivity::class.java))
         }
 
@@ -367,10 +372,10 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             }
 
             // сначала пробуем найти кнопки внутри topBar, иначе ищем по корню binding.root
-            tryLoadToImageButton(getString(R.string.lock_icon), findTopBarChildImageButton("btnLock") ?: binding.root.findViewById(resources.getIdentifier("btnLock","id",packageName)))
-            tryLoadToImageButton(getString(R.string.trash_icon), findTopBarChildImageButton("btnTrash") ?: binding.root.findViewById(resources.getIdentifier("btnTrash","id",packageName)))
-            tryLoadToImageButton(getString(R.string.envelope_icon), findTopBarChildImageButton("btnEnvelopeTop") ?: binding.root.findViewById(resources.getIdentifier("btnEnvelopeTop","id",packageName)))
-            tryLoadToImageButton(getString(R.string.settings_icon), findTopBarChildImageButton("btnSettings") ?: binding.root.findViewById(resources.getIdentifier("btnSettings","id",packageName)))
+            tryLoadToImageButton(getString(R.string.lock_icon), findTopBarChildImageButton("btnLock") ?: (binding.root.findViewById(resources.getIdentifier("btnLock","id",packageName)) as? ImageButton))
+            tryLoadToImageButton(getString(R.string.trash_icon), findTopBarChildImageButton("btnTrash") ?: (binding.root.findViewById(resources.getIdentifier("btnTrash","id",packageName)) as? ImageButton))
+            tryLoadToImageButton(getString(R.string.envelope_icon), findTopBarChildImageButton("btnEnvelopeTop") ?: (binding.root.findViewById(resources.getIdentifier("btnEnvelopeTop","id",packageName)) as? ImageButton))
+            tryLoadToImageButton(getString(R.string.settings_icon), findTopBarChildImageButton("btnSettings") ?: (binding.root.findViewById(resources.getIdentifier("btnSettings","id",packageName)) as? ImageButton))
             tryLoadToImageButton(getString(R.string.send_icon), binding.envelopeButton)
 
             val topBarRoot = findTopBar()
@@ -911,41 +916,37 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     }
 
     private fun createMessageBubble(sender: String, text: String, isUser: Boolean): LinearLayout {
-    return LinearLayout(this@ChatActivity).apply {
-        orientation = LinearLayout.VERTICAL
-        if (!isUser) {
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply { marginStart = dpToPx(8) }
-        }
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            if (!isUser) {
+                layoutParams = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                ).apply { marginStart = dpToPx(8) }
+            }
 
             val senderTextView = TextView(this@ChatActivity).apply {
-            text = getString(R.string.sender_label, sender)
-            textSize = 12f
-            setTextColor(Color.parseColor("#AAAAAA"))
-        }
+                text = getString(R.string.sender_label, sender)
+                textSize = 12f
+                setTextColor(Color.parseColor("#AAAAAA"))
+            }
 
             val messageTextView = TextView(this@ChatActivity).apply {
-            this.text = text
-            textSize = 16f
-            setTextIsSelectable(true)
-            val pad = dpToPx(10)
-            setPadding(pad, pad, pad, pad)
-            val accent = if (isUser) Color.RED else safeParseColorOrDefault(currentThemeColor, Color.GREEN)
-            background = createBubbleDrawable(accent)
-            setTextColor(
-                if (isUser) Color.WHITE
-                else try { Color.parseColor(currentThemeColor) }
-                catch (_: Exception) { Color.WHITE }
-            )
-            setOnClickListener { speakText(text) }
-        }
-            
+                this.text = text
+                textSize = 16f
+                setTextIsSelectable(true)
+                val pad = dpToPx(10)
+                setPadding(pad, pad, pad, pad)
+                val accent = if (isUser) Color.RED else safeParseColorOrDefault(currentThemeColor, Color.GREEN)
+                background = createBubbleDrawable(accent)
+                setTextColor(if (isUser) Color.WHITE else try { Color.parseColor(currentThemeColor) } catch (_: Exception) { Color.WHITE })
+                setOnClickListener { speakText(text) }
+            }
+
             addView(senderTextView)
-        addView(messageTextView)
+            addView(messageTextView)
+        }
     }
-}
 
     private fun createAvatarView(sender: String): ImageView {
         return ImageView(this).apply {
@@ -1292,10 +1293,10 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private fun updateBatteryUI(percent: Int, plugged: Int) {
         runOnUiThread {
-            val leftLayout = binding.topBar.leftLayout
-            val batteryPercentView = leftLayout.getChildAt(3) as? TextView
-            val batteryImageView = leftLayout.getChildAt(2) as? ImageView
-            val btnCharging = binding.topBar.root.children.find { v -> v is ImageButton } as? ImageButton
+            val leftLayout = findTopBarChildViewGroup("leftLayout")
+            val batteryPercentView = leftLayout?.getChildAt(3) as? TextView
+            val batteryImageView = leftLayout?.getChildAt(2) as? ImageView
+            val btnCharging = findTopBar()?.children?.find { v -> v is ImageButton } as? ImageButton
 
             batteryPercentView?.text = getString(R.string.battery_percent, percent)
             val textColor = if (percent <= 25) Color.RED else Color.parseColor("#00BFFF")
@@ -1374,7 +1375,8 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     caps?.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) == true -> getString(R.string.mobile_icon)
                     else -> getString(R.string.airplane_icon)
                 }
-                (binding.topBar.leftLayout.getChildAt(1) as? ImageView)?.setImageBitmap(loadBitmapFromFolder(iconName))
+                val leftLayout = findTopBarChildViewGroup("leftLayout")
+                (leftLayout?.getChildAt(1) as? ImageView)?.setImageBitmap(loadBitmapFromFolder(iconName))
             } catch (_: Exception) {}
         }
     }
@@ -1382,7 +1384,8 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private fun updateBluetoothUI() {
         runOnUiThread {
             val isEnabled = BluetoothAdapter.getDefaultAdapter()?.isEnabled == true
-            val bluetoothImageView = binding.topBar.leftLayout.getChildAt(0) as? ImageView
+            val leftLayout = findTopBarChildViewGroup("leftLayout")
+            val bluetoothImageView = leftLayout?.getChildAt(0) as? ImageView
             if (isEnabled) {
                 bluetoothImageView?.setImageBitmap(loadBitmapFromFolder(getString(R.string.bluetooth_icon)))
                 bluetoothImageView?.visibility = View.VISIBLE
@@ -1457,7 +1460,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 val now = Date()
                 val format = if (DateFormat.is24HourFormat(this@ChatActivity)) "HH:mm" else "hh:mm a"
                 val timeString = SimpleDateFormat(format, Locale.getDefault()).format(now)
-                runOnUiThread { (binding.topBar.root.getChildAt(1) as? TextView)?.text = timeString }
+                (findTopBar()?.getChildAt(1) as? TextView)?.text = timeString
                 timeHandler.postDelayed(this, 60000L)
             }
         }
