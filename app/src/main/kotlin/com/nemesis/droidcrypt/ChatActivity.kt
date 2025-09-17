@@ -915,7 +915,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
     }
 
-    private fun createMessageBubble(sender: String, text: String, isUser: Boolean): LinearLayout {
+    private fun createMessageBubble(sender: String, message: String, isUser: Boolean): LinearLayout {
         return LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             if (!isUser) {
@@ -932,16 +932,17 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             }
 
             val messageTextView = TextView(this@ChatActivity).apply {
-                this.text = text
-                textSize = 16f
-                setTextIsSelectable(true)
-                val pad = dpToPx(10)
-                setPadding(pad, pad, pad, pad)
-                val accent = if (isUser) Color.RED else safeParseColorOrDefault(currentThemeColor, Color.GREEN)
-                background = createBubbleDrawable(accent)
-                setTextColor(if (isUser) Color.WHITE else try { Color.parseColor(currentThemeColor) } catch (_: Exception) { Color.WHITE })
-                setOnClickListener { speakText(text) }
-            }
+    val messageText = text  // создаём локальную переменную
+    this.text = messageText
+    textSize = 16f
+    setTextIsSelectable(true)
+    val pad = dpToPx(10)
+    setPadding(pad, pad, pad, pad)
+    val accent = if (isUser) Color.RED else safeParseColorOrDefault(currentThemeColor, Color.GREEN)
+    background = createBubbleDrawable(accent)
+    setTextColor(if (isUser) Color.WHITE else try { Color.parseColor(currentThemeColor) } catch (_: Exception) { Color.WHITE })
+    setOnClickListener { speakText(messageText) }  // используем локальную переменную
+}
 
             addView(senderTextView)
             addView(messageTextView)
