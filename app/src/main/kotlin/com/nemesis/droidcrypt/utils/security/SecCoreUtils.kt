@@ -1,4 +1,4 @@
-package com.nemesis.droidcrypt
+package com.nemesis.droidcrypt.utils.security
 
 import android.content.SharedPreferences
 import android.util.Base64
@@ -52,17 +52,20 @@ object SecCoreUtils {
     private fun base64(bytes: ByteArray): String = Base64.encodeToString(bytes, Base64.NO_WRAP)
     private fun base64Decode(s: String): ByteArray = Base64.decode(s, Base64.NO_WRAP)
 
-    private fun wipe(bytes: ByteArray?) {
+    // Изменено: сделано публичным
+    fun wipe(bytes: ByteArray?) {
         if (bytes == null) return
         for (i in bytes.indices) bytes[i] = 0
     }
 
-    private fun wipe(chars: CharArray?) {
+    // Изменено: сделано публичным
+    fun wipe(chars: CharArray?) {
         if (chars == null) return
-        for (i in chars.indices) chars[i] = '\u0000'
+        for (i in chars.indices) chars[i] = ''
     }
 
     // ----- PBKDF2 derivation -----
+
     /**
      * Derive a key of [keyLenBytes] bytes from a password (CharArray) and salt with given iterations.
      * Caller should wipe the returned key byte array when finished.
@@ -211,8 +214,6 @@ object SecCoreUtils {
     fun removeWrappedMasterFromPrefs(prefs: SharedPreferences, prefsKey: String) {
         prefs.edit().remove(prefsKey).apply()
     }
-
-    // ----- Convenience flows / examples -----
 
     /**
      * Convenience: create a new random master key, wrap with password and store to prefs.
