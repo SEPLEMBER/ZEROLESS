@@ -12,6 +12,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.preference.PreferenceManager
+import android.provider.Settings
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
@@ -32,7 +33,9 @@ import kotlin.math.min
 import kotlin.math.roundToInt
 import android.bluetooth.BluetoothAdapter
 import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.text.format.DateFormat
+import android.net.wifi.WifiManager
 
 class ChatActivity : AppCompatActivity() {
 
@@ -79,7 +82,7 @@ class ChatActivity : AppCompatActivity() {
     private var wifiImageView: ImageView? = null
     private var bluetoothImageView: ImageView? = null
     private var timeTextView: TextView? = null
-    private var infoIconButton: ImageButton? = null
+    private var infoIconButton: ImageButton? = null // оставляем поле, но не добавляем в тулбар
 
     // Data structures
     private val fallback = arrayOf("Привет", "Как дела?", "Расскажи о себе", "Выход")
@@ -178,14 +181,14 @@ class ChatActivity : AppCompatActivity() {
         setupIconTouchEffect(btnEnvelopeTop)
         setupIconTouchEffect(btnSettings)
         setupIconTouchEffect(envelopeInputButton)
-        setupIconTouchEffect(infoIconButton)
+        // убрал setupIconTouchEffect(infoIconButton) — кнопка info не добавляется в тулбар
         setupIconTouchEffect(btnCharging)
 
         btnLock?.setOnClickListener { finish() }
         btnTrash?.setOnClickListener { clearChat() }
         btnSettings?.setOnClickListener { startActivity(Intent(this, SettingsActivity::class.java)) }
         btnEnvelopeTop?.setOnClickListener { startActivity(Intent(this, PostsActivity::class.java)) }
-        infoIconButton?.setOnClickListener { startActivity(Intent(this, PostsActivity::class.java)) }
+        // infoIconButton не добавляем; btnCharging оставляем
         btnCharging?.setOnClickListener { startActivity(Intent(this, PostsActivity::class.java)) }
 
         envelopeInputButton?.setOnClickListener {
@@ -307,15 +310,8 @@ class ChatActivity : AppCompatActivity() {
         }
         topBar.addView(timeTextView, spacerIndex)
 
-        infoIconButton = ImageButton(this).apply {
-            background = null
-            val iconSize = dpToPx(56)
-            val lp = LinearLayout.LayoutParams(iconSize, iconSize)
-            layoutParams = lp
-            scaleType = ImageView.ScaleType.CENTER_CROP
-            adjustViewBounds = true
-        }
-        topBar.addView(infoIconButton, 2)
+        // убираем infoIconButton из тулбара — перенесём в настройки позже
+        // оставляем место для других кнопок, но info не добавляем
 
         btnCharging = ImageButton(this).apply {
             background = null
@@ -404,7 +400,7 @@ class ChatActivity : AppCompatActivity() {
                 } catch (_: Exception) {}
             }
 
-            tryLoadToImageButton("info.png", infoIconButton)
+            // infoIconButton — больше не заполняем
             tryLoadToImageButton("lock.png", btnLock)
             tryLoadToImageButton("trash.png", btnTrash)
             tryLoadToImageButton("envelope.png", btnEnvelopeTop)
@@ -414,6 +410,8 @@ class ChatActivity : AppCompatActivity() {
             tryLoadToImageView("battery_5.png", batteryImageView)
             tryLoadToImageView("wifi.png", wifiImageView)
             tryLoadToImageView("bluetooth.png", bluetoothImageView)
+            // mobile icon may be named mobile.png
+            tryLoadToImageView("mobile.png", null) // just ensure file exists if needed; loaded dynamically in updateNetworkUI
         } catch (e: Exception) {
             e.printStackTrace()
         }
@@ -469,7 +467,8 @@ class ChatActivity : AppCompatActivity() {
         val calendar = Calendar.getInstance()
         val hour = calendar.get(Calendar.HOUR_OF_DAY)
         val minute = calendar.get(Calendar.MINUTE)
-        if (hour >= 23 && minute >= 30 && userActivityCount == 2) {
+        // расширенная логика: если поздно (23:00-06:00), предложить лечь спать при втором вводе
+        if ((hour >= 23 || hour < 6) && userActivityCount == 2) {
             val sleepResponse = loadTimeToSleepResponse()
             if (sleepResponse != null) {
                 addChatMessage("Ты", userInput)
@@ -550,6 +549,49 @@ class ChatActivity : AppCompatActivity() {
                 return Pair(mapped, joined)
             }
 
+            // helper: parses a templates file into maps (без изменения UI) — используется для тематического поиска
+            fun parseTemplatesFromFile(filename: String): Pair<HashMap<String, MutableList<String>>, HashMap<String, MutableList<String>>> {
+                val localTemplates = HashMap<String, MutableList<String>>()
+                val localKeywords = HashMap<String, MutableList<String>>()
+                val uriLocal = folderUri ?: return Pair(localTemplates, localKeywords)
+                try {
+                    val dir = DocumentFile.fromTreeUri(this@ChatActivity, uriLocal) ?: return Pair(localTemplates, localKeywords)
+                    val file = dir.findFile(filename) ?: return Pair(localTemplates, localKeywords)
+                    if (!file.exists()) return Pair(localTemplates, localKeywords)
+                    contentResolver.openInputStream(file.uri)?.bufferedReader()?.use { reader ->
+                        reader.forEachLine { raw ->
+                            val l = raw.trim()
+                            if (l.isEmpty()) return@forEachLine
+                            if (l.startsWith("-")) {
+                                val keywordLine = l.substring(1)
+                                if (keywordLine.contains("=")) {
+                                    val parts = keywordLine.split("=", limit = 2)
+                                    if (parts.size == 2) {
+                                        val keyword = parts[0].trim().lowercase(Locale.ROOT)
+                                        val responses = parts[1].split("|")
+                                        val responseList = responses.mapNotNull { it.trim().takeIf { s -> s.isNotEmpty() } }.toMutableList()
+                                        if (keyword.isNotEmpty() && responseList.isNotEmpty()) localKeywords[keyword] = responseList
+                                    }
+                                }
+                                return@forEachLine
+                            }
+                            if (!l.contains("=")) return@forEachLine
+                            val parts = l.split("=", limit = 2)
+                            if (parts.size == 2) {
+                                val triggerRaw = parts[0].trim()
+                                val trigger = normalizeLocal(triggerRaw)
+                                // map synonyms/stopwords to produce filtered trigger key
+                                val triggerFiltered = filterStopwordsAndMapSynonymsLocal(trigger).second
+                                val responses = parts[1].split("|")
+                                val responseList = responses.mapNotNull { it.trim().takeIf { s -> s.isNotEmpty() } }.toMutableList()
+                                if (triggerFiltered.isNotEmpty() && responseList.isNotEmpty()) localTemplates[triggerFiltered] = responseList
+                            }
+                        }
+                    }
+                } catch (_: Exception) {}
+                return Pair(localTemplates, localKeywords)
+            }
+
             var answered = false
             val subqueryResponses = mutableListOf<String>()
             val processedSubqueries = mutableSetOf<String>()
@@ -614,6 +656,7 @@ class ChatActivity : AppCompatActivity() {
                 }
             }
 
+            // основной candidate поиск (используем snapshot)
             val qTokens = if (qTokensFiltered.isNotEmpty()) qTokensFiltered else tokenizeLocal(qFiltered)
             val candidateCounts = HashMap<String, Int>()
             for (tok in qTokens) {
@@ -634,6 +677,7 @@ class ChatActivity : AppCompatActivity() {
                     .take(MAX_CANDIDATES_FOR_LEV)
             }
 
+            // Jaccard на snapshot
             var bestByJaccard: String? = null
             var bestJaccard = 0.0
             val qSet = qTokens.toSet()
@@ -658,6 +702,7 @@ class ChatActivity : AppCompatActivity() {
                 }
             }
 
+            // Fuzzy / Levenshtein on snapshot
             var bestKey: String? = null
             var bestDist = Int.MAX_VALUE
             for (key in candidates) {
@@ -681,25 +726,109 @@ class ChatActivity : AppCompatActivity() {
                 }
             }
 
+            // Попытка контекстного перехода: если найден ключ в base => переход в тематический файл.
             val lower = normalizeLocal(qFiltered)
             for ((keyword, value) in contextMapSnapshot) {
                 if (lower.contains(keyword)) {
                     return@launch withContext(Dispatchers.Main) {
+                        // если надо — переключаем глобальный контекст (UI thread)
                         if (value != currentContext) {
                             currentContext = value
                             loadTemplatesFromFile(currentContext)
                             rebuildInvertedIndex()
                             updateAutoComplete()
-                            templatesMap[qFiltered]?.let { possible ->
-                                if (possible.isNotEmpty()) {
+                        }
+                    }.let {
+                        // после переключения — в background проверим тематический файл на совпадения
+                        val (localTemplates, localKeywords) = parseTemplatesFromFile(value)
+                        // сначала точное совпадение в тематическом файле
+                        localTemplates[ qFiltered ]?.let { possible ->
+                            if (possible.isNotEmpty()) {
+                                return@launch withContext(Dispatchers.Main) {
                                     addChatMessage(currentMascotName, possible.random())
                                     startIdleTimer()
-                                    return@withContext
                                 }
                             }
                         }
-                        addChatMessage(currentMascotName, getDummyResponse(qOrig))
-                        startIdleTimer()
+                        // построим локальный inverted index для тематического файла
+                        val localInverted = HashMap<String, MutableList<String>>()
+                        for ((k, v) in localTemplates) {
+                            val toks = filterStopwordsAndMapSynonymsLocal(k).first
+                            for (t in toks) {
+                                val list = localInverted.getOrPut(t) { mutableListOf() }
+                                if (!list.contains(k)) list.add(k)
+                            }
+                        }
+                        // кандидаты из локального inverted
+                        val localCandidateCounts = HashMap<String, Int>()
+                        val tokens = qTokens
+                        for (tok in tokens) {
+                            localInverted[tok]?.forEach { trig ->
+                                localCandidateCounts[trig] = localCandidateCounts.getOrDefault(trig, 0) + 1
+                            }
+                        }
+                        val localCandidates: List<String> = if (localCandidateCounts.isNotEmpty()) {
+                            localCandidateCounts.entries
+                                .filter { it.value >= CANDIDATE_TOKEN_THRESHOLD }
+                                .sortedByDescending { it.value }
+                                .map { it.key }
+                                .take(MAX_CANDIDATES_FOR_LEV)
+                        } else {
+                            val md = getFuzzyDistance(qFiltered)
+                            localTemplates.keys.filter { abs(it.length - qFiltered.length) <= md }
+                                .take(MAX_CANDIDATES_FOR_LEV)
+                        }
+                        // Jaccard local
+                        var bestLocal: String? = null
+                        var bestLocalJ = 0.0
+                        val qSetLocal = tokens.toSet()
+                        for (key in localCandidates) {
+                            val keyTokens = filterStopwordsAndMapSynonymsLocal(key).first.toSet()
+                            if (keyTokens.isEmpty()) continue
+                            val inter = qSetLocal.intersect(keyTokens).size.toDouble()
+                            val union = qSetLocal.union(keyTokens).size.toDouble()
+                            val j = if (union == 0.0) 0.0 else inter / union
+                            if (j > bestLocalJ) {
+                                bestLocalJ = j
+                                bestLocal = key
+                            }
+                        }
+                        if (bestLocal != null && bestLocalJ >= JACCARD_THRESHOLD) {
+                            val possible = localTemplates[bestLocal]
+                            if (!possible.isNullOrEmpty()) {
+                                return@launch withContext(Dispatchers.Main) {
+                                    addChatMessage(currentMascotName, possible.random())
+                                    startIdleTimer()
+                                }
+                            }
+                        }
+                        // Levenshtein local
+                        var bestLocalKey: String? = null
+                        var bestLocalDist = Int.MAX_VALUE
+                        for (key in localCandidates) {
+                            val maxD = getFuzzyDistance(qFiltered)
+                            if (abs(key.length - qFiltered.length) > maxD + 1) continue
+                            val d = levenshtein(qFiltered, key, qFiltered)
+                            if (d < bestLocalDist) {
+                                bestLocalDist = d
+                                bestLocalKey = key
+                            }
+                            if (bestLocalDist == 0) break
+                        }
+                        if (bestLocalKey != null && bestLocalDist <= getFuzzyDistance(qFiltered)) {
+                            val possible = localTemplates[bestLocalKey]
+                            if (!possible.isNullOrEmpty()) {
+                                return@launch withContext(Dispatchers.Main) {
+                                    addChatMessage(currentMascotName, possible.random())
+                                    startIdleTimer()
+                                }
+                            }
+                        }
+                        // если ничего не нашлось — вернём дефолтный ответ
+                        return@launch withContext(Dispatchers.Main) {
+                            addChatMessage(currentMascotName, getDummyResponse(qOrig))
+                            startIdleTimer()
+                        }
                     }
                 }
             }
@@ -918,7 +1047,20 @@ class ChatActivity : AppCompatActivity() {
                     scaleType = ImageView.ScaleType.CENTER_CROP
                     adjustViewBounds = true
                     loadAvatarInto(this, sender)
-                    setOnClickListener { loadAndSendOuchMessage() }
+                    // при клике — лёгкое свечение, затем ouch
+                    setOnClickListener { view ->
+                        view.isEnabled = false
+                        val scaleX = ObjectAnimator.ofFloat(view, "scaleX", 1f, 1.08f, 1f)
+                        val scaleY = ObjectAnimator.ofFloat(view, "scaleY", 1f, 1.08f, 1f)
+                        scaleX.duration = 250
+                        scaleY.duration = 250
+                        scaleX.start()
+                        scaleY.start()
+                        Handler(Looper.getMainLooper()).postDelayed({
+                            loadAndSendOuchMessage()
+                            view.isEnabled = true
+                        }, 260)
+                    }
                 }
                 val bubble = createMessageBubble(sender, text, isUser)
                 val bubbleLp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
@@ -1337,6 +1479,17 @@ class ChatActivity : AppCompatActivity() {
             } else {
                 tryLoadBitmapFromFolder("battery.png")?.let { batteryImageView?.setImageBitmap(it) }
             }
+            // клик по батарее — фиксированное сообщение из batterycare.txt (без рандома)
+            batteryImageView?.setOnClickListener {
+                lifecycleScope.launch(Dispatchers.IO) {
+                    val resp = loadBatteryCareResponse()
+                    if (!resp.isNullOrBlank()) {
+                        withContext(Dispatchers.Main) {
+                            addChatMessage(currentMascotName, resp)
+                        }
+                    }
+                }
+            }
             if (plugged > 0) {
                 btnCharging?.visibility = View.VISIBLE
             } else {
@@ -1354,6 +1507,25 @@ class ChatActivity : AppCompatActivity() {
             }
             lastBatteryWarningStage = percent
         }
+    }
+
+    private fun loadBatteryCareResponse(): String? {
+        val uri = folderUri ?: return null
+        try {
+            val dir = DocumentFile.fromTreeUri(this, uri) ?: return null
+            val file = dir.findFile("batterycare.txt")
+            if (file != null && file.exists()) {
+                contentResolver.openInputStream(file.uri)?.bufferedReader()?.use { reader ->
+                    val allText = reader.readText().trim()
+                    // не используем рандом — отправляем как единое сообщение
+                    if (allText.isNotEmpty()) return allText
+                }
+            }
+        } catch (e: Exception) {
+            // не крашить — покажем тост
+            showCustomToast("Ошибка загрузки batterycare.txt: ${e.message}")
+        }
+        return null
     }
 
     private fun tryLoadBitmapFromFolder(name: String): Bitmap? {
@@ -1380,6 +1552,7 @@ class ChatActivity : AppCompatActivity() {
         val filter = IntentFilter().apply {
             addAction(ConnectivityManager.CONNECTIVITY_ACTION)
             addAction("android.intent.action.AIRPLANE_MODE")
+            addAction(WifiManager.WIFI_STATE_CHANGED_ACTION)
         }
         registerReceiver(networkReceiver, filter)
         updateNetworkUI()
@@ -1412,15 +1585,31 @@ class ChatActivity : AppCompatActivity() {
 
     private fun updateNetworkUI() {
         runOnUi {
-            val connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-            val airplaneMode = android.provider.Settings.Global.getInt(contentResolver,
-                android.provider.Settings.Global.AIRPLANE_MODE_ON, 0) != 0
-            val networkInfo = connectivityManager.activeNetworkInfo
-            val isConnected = networkInfo?.isConnected == true
-            if (airplaneMode || !isConnected) {
-                tryLoadBitmapFromFolder("airplane.png")?.let { wifiImageView?.setImageBitmap(it) }
-            } else {
-                tryLoadBitmapFromFolder("wifi.png")?.let { wifiImageView?.setImageBitmap(it) }
+            try {
+                val connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+                val airplaneMode = Settings.Global.getInt(contentResolver,
+                    Settings.Global.AIRPLANE_MODE_ON, 0) != 0
+                val network = connectivityManager.activeNetwork
+                val caps = connectivityManager.getNetworkCapabilities(network)
+                val hasWifi = caps?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
+                val hasCell = caps?.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) == true
+                val isConnected = caps != null && (hasWifi || hasCell || caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET))
+
+                // Три состояния: WiFi, Mobile, "airplane" (нет подключений). AirplaneMode OR !isConnected => offline state.
+                if (airplaneMode || !isConnected) {
+                    // используем airplane.png для состояния "все соединения отключены"
+                    tryLoadBitmapFromFolder("airplane.png")?.let { wifiImageView?.setImageBitmap(it) }
+                } else if (hasWifi) {
+                    tryLoadBitmapFromFolder("wifi.png")?.let { wifiImageView?.setImageBitmap(it) }
+                } else if (hasCell) {
+                    // mobile network icon (mobile.png)
+                    tryLoadBitmapFromFolder("mobile.png")?.let { wifiImageView?.setImageBitmap(it) }
+                } else {
+                    // fallback — если нет ни wifi ни mobile, показываем airplane
+                    tryLoadBitmapFromFolder("airplane.png")?.let { wifiImageView?.setImageBitmap(it) }
+                }
+            } catch (_: Exception) {
+                // silently ignore
             }
         }
     }
