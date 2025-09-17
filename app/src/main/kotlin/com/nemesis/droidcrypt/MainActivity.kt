@@ -22,7 +22,7 @@ class MainActivity : AppCompatActivity() {
 
         startChat.setOnClickListener {
             // Просто стартуем ChatActivity — он сам попытается взять folderUri из SharedPreferences / persisted permissions
-            val i = Intent(this@MainActivity, ChatActivity::class.java)
+            val i = Intent(this@MainActivity, SplashActivity::class.java)
             startActivity(i)
         }
 
