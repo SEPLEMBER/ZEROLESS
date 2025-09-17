@@ -941,7 +941,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     val accent = if (isUser) Color.RED else safeParseColorOrDefault(currentThemeColor, Color.GREEN)
     background = createBubbleDrawable(accent)
     setTextColor(if (isUser) Color.WHITE else try { Color.parseColor(currentThemeColor) } catch (_: Exception) { Color.WHITE })
-    setOnClickListener { speakText(messageText) }  // используем локальную переменную
+    setOnClickListener { speakText(messageText.toString()) }
 }
 
             addView(senderTextView)
