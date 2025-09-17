@@ -32,7 +32,6 @@ import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.*
 import kotlin.math.abs
-import kotlin.math.min
 import kotlin.math.roundToInt
 import android.bluetooth.BluetoothAdapter
 import android.graphics.BitmapFactory
@@ -177,6 +176,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     }
 
     private fun setupToolbar() {
+        // Убираем всё слева, затем добавляем виджеты
         binding.topBar.leftLayout.removeAllViews()
         binding.topBar.leftLayout.orientation = LinearLayout.HORIZONTAL
         binding.topBar.leftLayout.gravity = Gravity.CENTER_VERTICAL
@@ -215,8 +215,10 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         binding.topBar.leftLayout.addView(batteryImageView)
         binding.topBar.leftLayout.addView(batteryPercentView)
 
-        // В layout topBar.root ожидается уже минимум 2 view — удаляем второй и вставляем текст времени
-        binding.topBar.root.removeViewAt(1)
+        // В layout topBar.root ожидается минимум 2 view — удаляем второй и вставляем текст времени
+        if (binding.topBar.root.childCount > 1) {
+            binding.topBar.root.removeViewAt(1)
+        }
         val timeTextView = TextView(this).apply {
             text = getString(R.string.time_placeholder)
             textSize = 20f
@@ -264,47 +266,59 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     }
 
     private fun setupListeners() {
-        with(binding) {
-            val buttons = listOf(
-                topBar.btnLock, topBar.btnTrash, topBar.btnEnvelopeTop,
-                topBar.btnSettings, envelopeButton
-            )
-            buttons.forEach { it?.let { btn -> setupIconTouchEffect(btn) } }
+        // избегаем вложенных ambiguous it — используем явные переменные
+        val buttons: List<ImageButton?> = listOf(
+            binding.topBar.btnLock,
+            binding.topBar.btnTrash,
+            binding.topBar.btnEnvelopeTop,
+            binding.topBar.btnSettings,
+            binding.envelopeButton
+        )
+        for (btn in buttons) {
+            btn?.let { setupIconTouchEffect(it) }
+        }
 
-            topBar.btnLock.setOnClickListener { finish() }
-            topBar.btnTrash.setOnClickListener { clearChat() }
-            topBar.btnSettings.setOnClickListener { startActivity(Intent(this@ChatActivity, SettingsActivity::class.java)) }
-            topBar.btnEnvelopeTop.setOnClickListener { startActivity(Intent(this@ChatActivity, PostsActivity::class.java)) }
+        binding.topBar.btnLock.setOnClickListener { finish() }
+        binding.topBar.btnTrash.setOnClickListener { clearChat() }
+        binding.topBar.btnSettings.setOnClickListener {
+            startActivity(Intent(this@ChatActivity, SettingsActivity::class.java))
+        }
+        binding.topBar.btnEnvelopeTop.setOnClickListener {
+            startActivity(Intent(this@ChatActivity, PostsActivity::class.java))
+        }
 
-            val sendAction = sendAction@{
-                val now = System.currentTimeMillis()
-                if (now - lastSendTime < SEND_DEBOUNCE_MS) {
-                    return@sendAction
-                } else {
-                    lastSendTime = now
-                    val input = queryInput.text.toString().trim()
-                    if (input.isNotEmpty()) {
-                        processUserQuery(input)
-                        queryInput.setText("")
-                    }
+        val sendAction = sendAction@{
+            val now = System.currentTimeMillis()
+            if (now - lastSendTime < SEND_DEBOUNCE_MS) {
+                return@sendAction
+            } else {
+                lastSendTime = now
+                val input = binding.queryInput.text.toString().trim()
+                if (input.isNotEmpty()) {
+                    processUserQuery(input)
+                    binding.queryInput.setText("")
                 }
             }
+        }
 
-            envelopeButton.setOnClickListener { sendAction() }
-            queryInput.setOnEditorActionListener { _, _, _ ->
-                sendAction()
-                true
-            }
-            queryInput.setOnItemClickListener { parent, _, position, _ ->
-                val selected = parent.getItemAtPosition(position) as String
-                queryInput.setText(selected)
-                processUserQuery(selected)
+        binding.envelopeButton.setOnClickListener { sendAction() }
+
+        binding.queryInput.setOnEditorActionListener { _, _, _ ->
+            sendAction()
+            true
+        }
+
+        binding.queryInput.setOnItemClickListener { parent, _, position, _ ->
+            val selected = parent.getItemAtPosition(position) as? String
+            selected?.let {
+                binding.queryInput.setText(it)
+                processUserQuery(it)
             }
         }
     }
 
-    private fun setupIconTouchEffect(btn: ImageButton?) {
-        btn?.setOnTouchListener { v, event ->
+    private fun setupIconTouchEffect(btn: ImageButton) {
+        btn.setOnTouchListener { v, event ->
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> v.alpha = 0.6f
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> v.alpha = 1.0f
@@ -326,25 +340,23 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 target?.setImageBitmap(loadBitmapFromFolder(name))
             }
 
-            with(binding) {
-                tryLoadToImageButton(getString(R.string.lock_icon), topBar.btnLock)
-                tryLoadToImageButton(getString(R.string.trash_icon), topBar.btnTrash)
-                tryLoadToImageButton(getString(R.string.envelope_icon), topBar.btnEnvelopeTop)
-                tryLoadToImageButton(getString(R.string.settings_icon), topBar.btnSettings)
-                tryLoadToImageButton(getString(R.string.send_icon), envelopeButton)
+            tryLoadToImageButton(getString(R.string.lock_icon), binding.topBar.btnLock)
+            tryLoadToImageButton(getString(R.string.trash_icon), binding.topBar.btnTrash)
+            tryLoadToImageButton(getString(R.string.envelope_icon), binding.topBar.btnEnvelopeTop)
+            tryLoadToImageButton(getString(R.string.settings_icon), binding.topBar.btnSettings)
+            tryLoadToImageButton(getString(R.string.send_icon), binding.envelopeButton)
 
-                val btnCharging = topBar.root.children.find { it is ImageButton && it.visibility == View.GONE } as? ImageButton
-                btnCharging?.let { tryLoadToImageButton(getString(R.string.charging_icon), it) }
+            val btnCharging = binding.topBar.root.children.find { v -> v is ImageButton && v.visibility == View.GONE } as? ImageButton
+            btnCharging?.let { tryLoadToImageButton(getString(R.string.charging_icon), it) }
 
-                val leftLayout = topBar.leftLayout
-                val bluetoothImageView = leftLayout.getChildAt(0) as? ImageView
-                val wifiImageView = leftLayout.getChildAt(1) as? ImageView
-                val batteryImageView = leftLayout.getChildAt(2) as? ImageView
+            val leftLayout = binding.topBar.leftLayout
+            val bluetoothImageView = leftLayout.getChildAt(0) as? ImageView
+            val wifiImageView = leftLayout.getChildAt(1) as? ImageView
+            val batteryImageView = leftLayout.getChildAt(2) as? ImageView
 
-                tryLoadToImageView(getString(R.string.bluetooth_icon), bluetoothImageView)
-                tryLoadToImageView(getString(R.string.wifi_icon), wifiImageView)
-                tryLoadToImageView(getString(R.string.battery_5_icon), batteryImageView)
-            }
+            tryLoadToImageView(getString(R.string.bluetooth_icon), bluetoothImageView)
+            tryLoadToImageView(getString(R.string.wifi_icon), wifiImageView)
+            tryLoadToImageView(getString(R.string.battery_5_icon), batteryImageView)
         } catch (e: Exception) {
             e.printStackTrace()
         }
@@ -519,8 +531,8 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         for (key in templates.keys) {
             val tokens = filterStopwordsAndMapSynonyms(key).first
             for (token in tokens) {
-                localInverted.getOrPut(token) { mutableListOf() }
-                    .takeIf { !it.contains(key) }?.add(key)
+                val list = localInverted.getOrPut(token) { mutableListOf() }
+                if (!list.contains(key)) list.add(key)
             }
         }
         return localInverted
@@ -549,10 +561,10 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         val metaFile = dir.findFile(getString(R.string.pictures_meta_file))?.takeIf { it.exists() } ?: return emptyMap()
 
         val imageMap = HashMap<String, String>()
-        contentResolver.openInputStream(metaFile.uri)?.bufferedReader()?.useLines { lines ->
-            lines.map { it.trim() }
-                .filter { it.startsWith(":") && it.endsWith(":") && it.contains("=") }
-                .forEach { line ->
+        contentResolver.openInputStream(metaFile.uri)?.bufferedReader()?.useLines { seq ->
+            for (raw in seq) {
+                val line = raw.trim()
+                if (line.startsWith(":") && line.endsWith(":") && line.contains("=")) {
                     val content = line.substring(1, line.length - 1)
                     val parts = content.split("=", limit = 2)
                     if (parts.size == 2) {
@@ -564,6 +576,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                         }
                     }
                 }
+            }
         }
         return imageMap
     }
@@ -700,13 +713,13 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             val dir = DocumentFile.fromTreeUri(this, uri) ?: return
 
             dir.findFile(getString(R.string.synonyms_file))?.let { synFile ->
-                contentResolver.openInputStream(synFile.uri)?.bufferedReader()?.useLines { lines ->
-                    lines.forEach { raw ->
+                contentResolver.openInputStream(synFile.uri)?.bufferedReader()?.useLines { seq ->
+                    for (raw in seq) {
                         val parts = raw.trim().removeSurrounding("*").split(";")
                             .map { normalizeText(it).trim() }.filter { it.isNotEmpty() }
                         if (parts.size > 1) {
                             val canonical = parts.last()
-                            parts.forEach { synonymsMap[it] = canonical }
+                            for (p in parts) synonymsMap[p] = canonical
                         }
                     }
                 }
@@ -714,10 +727,12 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
             dir.findFile(getString(R.string.stopwords_file))?.let { stopFile ->
                 contentResolver.openInputStream(stopFile.uri)?.bufferedReader()?.use { reader ->
-                    reader.readText().split("^")
-                        .map { normalizeText(it).trim() }
-                        .filter { it.isNotEmpty() }
-                        .forEach { stopwords.add(it) }
+                    val all = reader.readText()
+                    val pieces = all.split("^")
+                    for (piece in pieces) {
+                        val w = normalizeText(piece).trim()
+                        if (w.isNotEmpty()) stopwords.add(w)
+                    }
                 }
             }
         } catch (_: Exception) {}
@@ -732,11 +747,11 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private fun rebuildInvertedIndex() {
         invertedIndex.clear()
-        templatesMap.keys.forEach { key ->
+        for (key in templatesMap.keys) {
             val tokens = filterStopwordsAndMapSynonyms(key).first
-            tokens.forEach { token ->
-                invertedIndex.getOrPut(token) { mutableListOf() }
-                    .takeIf { !it.contains(key) }?.add(key)
+            for (token in tokens) {
+                val list = invertedIndex.getOrPut(token) { mutableListOf() }
+                if (!list.contains(key)) list.add(key)
             }
         }
     }
@@ -969,8 +984,8 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         val file = dir.findFile(filename)?.takeIf { it.exists() } ?: run { loadFallbackAndFinish(); return }
 
         try {
-            contentResolver.openInputStream(file.uri)?.bufferedReader()?.useLines { lines ->
-                lines.forEach { raw -> processTemplateLine(raw, filename) }
+            contentResolver.openInputStream(file.uri)?.bufferedReader()?.useLines { seq ->
+                for (raw in seq) processTemplateLine(raw, filename)
             }
             loadMetadataFor(filename, dir)
             if (filename == getString(R.string.base_context_file) && mascotList.isNotEmpty()) {
@@ -1025,21 +1040,23 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private fun loadMetadataFor(baseFilename: String, dir: DocumentFile) {
         val metadataFilename = baseFilename.replace(".txt", "_metadata.txt")
         dir.findFile(metadataFilename)?.takeIf { it.exists() }?.let { metaFile ->
-            contentResolver.openInputStream(metaFile.uri)?.bufferedReader()?.useLines { lines ->
-                lines.forEach { raw ->
+            contentResolver.openInputStream(metaFile.uri)?.bufferedReader()?.useLines { seq ->
+                for (raw in seq) {
                     val line = raw.trim()
                     val value = line.substringAfter('=', "").trim()
-                    if (value.isEmpty()) return@forEach
+                    if (value.isEmpty()) continue
 
                     when {
                         line.startsWith("mascot_list=") -> {
-                            mascotList.addAll(value.split("|").mapNotNull { mascotString ->
-                                val parts = mascotString.split(":")
-                                if (parts.size == 4) mapOf(
-                                    "name" to parts[0].trim(), "icon" to parts[1].trim(),
-                                    "color" to parts[2].trim(), "background" to parts[3].trim()
-                                ) else null
-                            })
+                            val parsed = value.split("|")
+                                .mapNotNull { mascotString ->
+                                    val parts = mascotString.split(":")
+                                    if (parts.size == 4) mapOf(
+                                        "name" to parts[0].trim(), "icon" to parts[1].trim(),
+                                        "color" to parts[2].trim(), "background" to parts[3].trim()
+                                    ) else null
+                                }
+                            mascotList.addAll(parsed)
                         }
                         line.startsWith("mascot_name=") -> currentMascotName = value
                         line.startsWith("mascot_icon=") -> currentMascotIcon = value
@@ -1052,12 +1069,12 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     }
 
     private fun selectRandomMascot() {
-        mascotList.random().let {
-            currentMascotName = it["name"] ?: currentMascotName
-            currentMascotIcon = it["icon"] ?: currentMascotIcon
-            currentThemeColor = it["color"] ?: currentThemeColor
-            currentThemeBackground = it["background"] ?: currentThemeBackground
-        }
+        if (mascotList.isEmpty()) return
+        val chosen = mascotList.random()
+        currentMascotName = chosen["name"] ?: currentMascotName
+        currentMascotIcon = chosen["icon"] ?: currentMascotIcon
+        currentThemeColor = chosen["color"] ?: currentThemeColor
+        currentThemeBackground = chosen["background"] ?: currentThemeBackground
     }
 
     private fun resetToDefaultMascot() {
@@ -1091,9 +1108,9 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private fun updateAutoComplete() {
         val suggestions = templatesMap.keys.toMutableSet()
-        fallback.forEach { suggestions.add(it.lowercase(Locale.ROOT)) }
+        for (s in fallback) suggestions.add(s.lowercase(Locale.ROOT))
 
-        val adapter = object : ArrayAdapter<String>(this, android.R.layout.simple_dropdown_item_1line, suggestions.toList()) {
+        val adapter = object : ArrayAdapter<String>(this@ChatActivity, android.R.layout.simple_dropdown_item_1line, suggestions.toList()) {
             override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
                 return (super.getView(position, convertView, parent) as TextView).apply {
                     setTextColor(Color.WHITE)
@@ -1101,6 +1118,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             }
         }
 
+        // Предполагаем, что queryInput это AutoCompleteTextView в layout
         binding.queryInput.apply {
             setAdapter(adapter)
             threshold = 1
@@ -1245,7 +1263,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             val leftLayout = binding.topBar.leftLayout
             val batteryPercentView = leftLayout.getChildAt(3) as? TextView
             val batteryImageView = leftLayout.getChildAt(2) as? ImageView
-            val btnCharging = binding.topBar.root.children.find { it is ImageButton } as? ImageButton
+            val btnCharging = binding.topBar.root.children.find { v -> v is ImageButton } as? ImageButton
 
             batteryPercentView?.text = getString(R.string.battery_percent, percent)
             val textColor = if (percent <= 25) Color.RED else Color.parseColor("#00BFFF")
@@ -1454,7 +1472,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private fun findCandidates(qTokens: List<String>, localInverted: Map<String, List<String>>): List<String> {
         val candidates = mutableSetOf<String>()
-        qTokens.forEach { token ->
+        for (token in qTokens) {
             localInverted[token]?.let { candidates.addAll(it) }
         }
         return candidates.distinct().take(MAX_CANDIDATES_FOR_LEV)
@@ -1501,10 +1519,8 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         val dir = DocumentFile.fromTreeUri(this, uri) ?: return Pair(emptyMap(), emptyMap())
         val file = dir.findFile(filename)?.takeIf { it.exists() } ?: return Pair(emptyMap(), emptyMap())
         try {
-            contentResolver.openInputStream(file.uri)?.bufferedReader()?.useLines { lines ->
-                lines.forEach { raw ->
-                    processTemplateLineForLocal(raw, filename, localTemplates, localKeywords)
-                }
+            contentResolver.openInputStream(file.uri)?.bufferedReader()?.useLines { seq ->
+                for (raw in seq) processTemplateLineForLocal(raw, filename, localTemplates, localKeywords)
             }
         } catch (e: Exception) {
             // Ignore for local parse
