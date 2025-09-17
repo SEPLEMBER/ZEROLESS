@@ -1,3 +1,5 @@
+package com.nemesis.droidcrypf
+
 import android.animation.ObjectAnimator
 import android.content.*
 import android.graphics.*
