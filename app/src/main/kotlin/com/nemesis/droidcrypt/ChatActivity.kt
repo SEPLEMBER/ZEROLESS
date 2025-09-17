@@ -13,6 +13,8 @@ import android.os.Handler
 import android.os.Looper
 import android.preference.PreferenceManager
 import android.provider.Settings
+import android.speech.tts.TextToSpeech
+import android.speech.tts.UtteranceProgressListener
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
@@ -37,7 +39,7 @@ import android.net.NetworkCapabilities
 import android.text.format.DateFormat
 import android.net.wifi.WifiManager
 
-class ChatActivity : AppCompatActivity() {
+class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     companion object {
         private const val PREF_KEY_FOLDER_URI = "pref_folder_uri"
@@ -83,6 +85,9 @@ class ChatActivity : AppCompatActivity() {
     private var bluetoothImageView: ImageView? = null
     private var timeTextView: TextView? = null
     private var infoIconButton: ImageButton? = null // оставляем поле, но не добавляем в тулбар
+
+    // TTS
+    private var tts: TextToSpeech? = null
 
     // Data structures
     private val fallback = arrayOf("Привет", "Как дела?", "Расскажи о себе", "Выход")
@@ -214,6 +219,9 @@ class ChatActivity : AppCompatActivity() {
             true
         }
 
+        // Инициализация TTS
+        tts = TextToSpeech(this, this)
+
         if (folderUri == null) {
             showCustomToast("Папка не выбрана! Открой настройки и выбери папку.")
             loadFallbackTemplates()
@@ -242,6 +250,14 @@ class ChatActivity : AppCompatActivity() {
 
         loadMascotTopImage()
         mascotTopImage?.visibility = View.GONE
+    }
+
+    override fun onInit(status: Int) {
+        if (status == TextToSpeech.SUCCESS) {
+            tts?.language = Locale("ru", "RU")
+            tts?.setPitch(1.0f)
+            tts?.setSpeechRate(1.0f)
+        }
     }
 
     private fun setupToolbar() {
@@ -357,6 +373,8 @@ class ChatActivity : AppCompatActivity() {
         unregisterNetworkReceiver()
         unregisterBluetoothReceiver()
         stopTimeUpdater()
+        tts?.shutdown()
+        tts = null
     }
 
     private fun setupIconTouchEffect(btn: ImageButton?) {
@@ -730,104 +748,119 @@ class ChatActivity : AppCompatActivity() {
             val lower = normalizeLocal(qFiltered)
             for ((keyword, value) in contextMapSnapshot) {
                 if (lower.contains(keyword)) {
-                    return@launch withContext(Dispatchers.Main) {
-                        // если надо — переключаем глобальный контекст (UI thread)
-                        if (value != currentContext) {
-                            currentContext = value
-                            loadTemplatesFromFile(currentContext)
-                            rebuildInvertedIndex()
-                            updateAutoComplete()
-                        }
-                    }.let {
-                        // после переключения — в background проверим тематический файл на совпадения
-                        val (localTemplates, localKeywords) = parseTemplatesFromFile(value)
-                        // сначала точное совпадение в тематическом файле
-                        localTemplates[ qFiltered ]?.let { possible ->
-                            if (possible.isNotEmpty()) {
-                                return@launch withContext(Dispatchers.Main) {
-                                    addChatMessage(currentMascotName, possible.random())
-                                    startIdleTimer()
+                    // Специальная обработка для pictures_meta.txt
+                    if (value == "pictures_meta.txt") {
+                        return@launch withContext(Dispatchers.IO) {
+                            val imageResult = loadImageFromMeta(qFiltered, qTokens)
+                            withContext(Dispatchers.Main) {
+                                if (imageResult != null) {
+                                    addImageMessage(currentMascotName, imageResult)
+                                } else {
+                                    addChatMessage(currentMascotName, getDummyResponse(qOrig))
                                 }
+                                startIdleTimer()
                             }
                         }
-                        // построим локальный inverted index для тематического файла
-                        val localInverted = HashMap<String, MutableList<String>>()
-                        for ((k, v) in localTemplates) {
-                            val toks = filterStopwordsAndMapSynonymsLocal(k).first
-                            for (t in toks) {
-                                val list = localInverted.getOrPut(t) { mutableListOf() }
-                                if (!list.contains(k)) list.add(k)
-                            }
-                        }
-                        // кандидаты из локального inverted
-                        val localCandidateCounts = HashMap<String, Int>()
-                        val tokens = qTokens
-                        for (tok in tokens) {
-                            localInverted[tok]?.forEach { trig ->
-                                localCandidateCounts[trig] = localCandidateCounts.getOrDefault(trig, 0) + 1
-                            }
-                        }
-                        val localCandidates: List<String> = if (localCandidateCounts.isNotEmpty()) {
-                            localCandidateCounts.entries
-                                .filter { it.value >= CANDIDATE_TOKEN_THRESHOLD }
-                                .sortedByDescending { it.value }
-                                .map { it.key }
-                                .take(MAX_CANDIDATES_FOR_LEV)
-                        } else {
-                            val md = getFuzzyDistance(qFiltered)
-                            localTemplates.keys.filter { abs(it.length - qFiltered.length) <= md }
-                                .take(MAX_CANDIDATES_FOR_LEV)
-                        }
-                        // Jaccard local
-                        var bestLocal: String? = null
-                        var bestLocalJ = 0.0
-                        val qSetLocal = tokens.toSet()
-                        for (key in localCandidates) {
-                            val keyTokens = filterStopwordsAndMapSynonymsLocal(key).first.toSet()
-                            if (keyTokens.isEmpty()) continue
-                            val inter = qSetLocal.intersect(keyTokens).size.toDouble()
-                            val union = qSetLocal.union(keyTokens).size.toDouble()
-                            val j = if (union == 0.0) 0.0 else inter / union
-                            if (j > bestLocalJ) {
-                                bestLocalJ = j
-                                bestLocal = key
-                            }
-                        }
-                        if (bestLocal != null && bestLocalJ >= JACCARD_THRESHOLD) {
-                            val possible = localTemplates[bestLocal]
-                            if (!possible.isNullOrEmpty()) {
-                                return@launch withContext(Dispatchers.Main) {
-                                    addChatMessage(currentMascotName, possible.random())
-                                    startIdleTimer()
-                                }
-                            }
-                        }
-                        // Levenshtein local
-                        var bestLocalKey: String? = null
-                        var bestLocalDist = Int.MAX_VALUE
-                        for (key in localCandidates) {
-                            val maxD = getFuzzyDistance(qFiltered)
-                            if (abs(key.length - qFiltered.length) > maxD + 1) continue
-                            val d = levenshtein(qFiltered, key, qFiltered)
-                            if (d < bestLocalDist) {
-                                bestLocalDist = d
-                                bestLocalKey = key
-                            }
-                            if (bestLocalDist == 0) break
-                        }
-                        if (bestLocalKey != null && bestLocalDist <= getFuzzyDistance(qFiltered)) {
-                            val possible = localTemplates[bestLocalKey]
-                            if (!possible.isNullOrEmpty()) {
-                                return@launch withContext(Dispatchers.Main) {
-                                    addChatMessage(currentMascotName, possible.random())
-                                    startIdleTimer()
-                                }
-                            }
-                        }
-                        // если ничего не нашлось — вернём дефолтный ответ
+                    } else {
                         return@launch withContext(Dispatchers.Main) {
-                            addChatMessage(currentMascotName, getDummyResponse(qOrig))
-                            startIdleTimer()
+                            // если надо — переключаем глобальный контекст (UI thread)
+                            if (value != currentContext) {
+                                currentContext = value
+                                loadTemplatesFromFile(currentContext)
+                                rebuildInvertedIndex()
+                                updateAutoComplete()
+                            }
+                        }.let {
+                            // после переключения — в background проверим тематический файл на совпадения
+                            val (localTemplates, localKeywords) = parseTemplatesFromFile(value)
+                            // сначала точное совпадение в тематическом файле
+                            localTemplates[ qFiltered ]?.let { possible ->
+                                if (possible.isNotEmpty()) {
+                                    return@launch withContext(Dispatchers.Main) {
+                                        addChatMessage(currentMascotName, possible.random())
+                                        startIdleTimer()
+                                    }
+                                }
+                            }
+                            // построим локальный inverted index для тематического файла
+                            val localInverted = HashMap<String, MutableList<String>>()
+                            for ((k, v) in localTemplates) {
+                                val toks = filterStopwordsAndMapSynonymsLocal(k).first
+                                for (t in toks) {
+                                    val list = localInverted.getOrPut(t) { mutableListOf() }
+                                    if (!list.contains(k)) list.add(k)
+                                }
+                            }
+                            // кандидаты из локального inverted
+                            val localCandidateCounts = HashMap<String, Int>()
+                            val tokens = qTokens
+                            for (tok in tokens) {
+                                localInverted[tok]?.forEach { trig ->
+                                    localCandidateCounts[trig] = localCandidateCounts.getOrDefault(trig, 0) + 1
+                                }
+                            }
+                            val localCandidates: List<String> = if (localCandidateCounts.isNotEmpty()) {
+                                localCandidateCounts.entries
+                                    .filter { it.value >= CANDIDATE_TOKEN_THRESHOLD }
+                                    .sortedByDescending { it.value }
+                                    .map { it.key }
+                                    .take(MAX_CANDIDATES_FOR_LEV)
+                            } else {
+                                val md = getFuzzyDistance(qFiltered)
+                                localTemplates.keys.filter { abs(it.length - qFiltered.length) <= md }
+                                    .take(MAX_CANDIDATES_FOR_LEV)
+                            }
+                            // Jaccard local
+                            var bestLocal: String? = null
+                            var bestLocalJ = 0.0
+                            val qSetLocal = tokens.toSet()
+                            for (key in localCandidates) {
+                                val keyTokens = filterStopwordsAndMapSynonymsLocal(key).first.toSet()
+                                if (keyTokens.isEmpty()) continue
+                                val inter = qSetLocal.intersect(keyTokens).size.toDouble()
+                                val union = qSetLocal.union(keyTokens).size.toDouble()
+                                val j = if (union == 0.0) 0.0 else inter / union
+                                if (j > bestLocalJ) {
+                                    bestLocalJ = j
+                                    bestLocal = key
+                                }
+                            }
+                            if (bestLocal != null && bestLocalJ >= JACCARD_THRESHOLD) {
+                                val possible = localTemplates[bestLocal]
+                                if (!possible.isNullOrEmpty()) {
+                                    return@launch withContext(Dispatchers.Main) {
+                                        addChatMessage(currentMascotName, possible.random())
+                                        startIdleTimer()
+                                    }
+                                }
+                            }
+                            // Levenshtein local
+                            var bestLocalKey: String? = null
+                            var bestLocalDist = Int.MAX_VALUE
+                            for (key in localCandidates) {
+                                val maxD = getFuzzyDistance(qFiltered)
+                                if (abs(key.length - qFiltered.length) > maxD + 1) continue
+                                val d = levenshtein(qFiltered, key, qFiltered)
+                                if (d < bestLocalDist) {
+                                    bestLocalDist = d
+                                    bestLocalKey = key
+                                }
+                                if (bestLocalDist == 0) break
+                            }
+                            if (bestLocalKey != null && bestLocalDist <= getFuzzyDistance(qFiltered)) {
+                                val possible = localTemplates[bestLocalKey]
+                                if (!possible.isNullOrEmpty()) {
+                                    return@launch withContext(Dispatchers.Main) {
+                                        addChatMessage(currentMascotName, possible.random())
+                                        startIdleTimer()
+                                    }
+                                }
+                            }
+                            // если ничего не нашлось — вернём дефолтный ответ
+                            return@launch withContext(Dispatchers.Main) {
+                                addChatMessage(currentMascotName, getDummyResponse(qOrig))
+                                startIdleTimer()
+                            }
                         }
                     }
                 }
@@ -836,6 +869,168 @@ class ChatActivity : AppCompatActivity() {
             return@launch withContext(Dispatchers.Main) {
                 addChatMessage(currentMascotName, getDummyResponse(qOrig))
                 startIdleTimer()
+            }
+        }
+    }
+
+    private suspend fun loadImageFromMeta(qFiltered: String, qTokens: List<String>): Bitmap? {
+        val uriLocal = folderUri ?: return null
+        val dir = DocumentFile.fromTreeUri(this, uriLocal) ?: return null
+        val metaFile = dir.findFile("pictures_meta.txt") ?: return null
+        if (!metaFile.exists()) return null
+
+        val imageMap = HashMap<String, String>() // trigger -> imagefile
+        contentResolver.openInputStream(metaFile.uri)?.bufferedReader()?.use { reader ->
+            reader.forEachLine { raw ->
+                val l = raw.trim()
+                if (l.startsWith(":") && l.endsWith(":") && l.contains("=")) {
+                    val content = l.substring(1, l.length - 1)
+                    val parts = content.split("=", limit = 2)
+                    if (parts.size == 2) {
+                        val trigger = normalizeText(parts[0].trim())
+                        val imgFile = parts[1].trim()
+                        val triggerFiltered = filterStopwordsAndMapSynonyms(trigger).second
+                        if (triggerFiltered.isNotEmpty() && imgFile.isNotEmpty()) {
+                            imageMap[triggerFiltered] = imgFile
+                        }
+                    }
+                }
+            }
+        }
+
+        if (imageMap.isEmpty()) return null
+
+        // Поиск по Jaccard
+        var bestByJaccard: String? = null
+        var bestJaccard = 0.0
+        val qSet = qTokens.toSet()
+        for ((key, _) in imageMap) {
+            val keyTokens = filterStopwordsAndMapSynonyms(key).first.toSet()
+            if (keyTokens.isEmpty()) continue
+            val inter = qSet.intersect(keyTokens).size.toDouble()
+            val union = qSet.union(keyTokens).size.toDouble()
+            val j = if (union == 0.0) 0.0 else inter / union
+            if (j > bestJaccard) {
+                bestJaccard = j
+                bestByJaccard = key
+            }
+        }
+        if (bestByJaccard != null && bestJaccard >= JACCARD_THRESHOLD) {
+            val imgFile = imageMap[bestByJaccard] ?: return null
+            return loadBitmapFromFolder(imgFile)
+        }
+
+        // Fuzzy / Levenshtein
+        var bestKey: String? = null
+        var bestDist = Int.MAX_VALUE
+        val candidates = imageMap.keys.take(MAX_CANDIDATES_FOR_LEV)
+        for (key in candidates) {
+            val maxDistLocal = getFuzzyDistance(qFiltered)
+            if (abs(key.length - qFiltered.length) > maxDistLocal + 1) continue
+            val d = levenshtein(qFiltered, key, qFiltered)
+            if (d < bestDist) {
+                bestDist = d
+                bestKey = key
+            }
+            if (bestDist == 0) break
+        }
+        if (bestKey != null && bestDist <= getFuzzyDistance(qFiltered)) {
+            val imgFile = imageMap[bestKey] ?: return null
+            return loadBitmapFromFolder(imgFile)
+        }
+
+        return null
+    }
+
+    private fun loadBitmapFromFolder(name: String): Bitmap? {
+        val uri = folderUri ?: return null
+        return try {
+            val dir = DocumentFile.fromTreeUri(this, uri) ?: return null
+            val f = dir.findFile(name) ?: return null
+            if (!f.exists()) return null
+            contentResolver.openInputStream(f.uri)?.use { ins ->
+                BitmapFactory.decodeStream(ins)
+            }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    private fun addImageMessage(sender: String, bitmap: Bitmap) {
+        runOnUi {
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                val pad = dpToPx(6)
+                setPadding(pad, pad / 2, pad, pad / 2)
+                layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+            }
+            val isUser = sender.equals("Ты", ignoreCase = true)
+            if (isUser) {
+                val imageView = ImageView(this).apply {
+                    setImageBitmap(bitmap)
+                    scaleType = ImageView.ScaleType.CENTER_CROP
+                    adjustViewBounds = true
+                    val accent = Color.parseColor("#FF0000") // фиксированный красный для пользователя
+                    background = createBubbleDrawable(accent)
+                    layoutParams = LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.WRAP_CONTENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT
+                    ).apply {
+                        marginStart = dpToPx(8)
+                    }
+                }
+                val lp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+                lp.gravity = Gravity.END
+                lp.marginStart = dpToPx(48)
+                row.addView(spaceView(), LinearLayout.LayoutParams(0, 0, 1f))
+                row.addView(imageView, lp)
+            } else {
+                val avatarView = ImageView(this).apply {
+                    val size = dpToPx(64)
+                    layoutParams = LinearLayout.LayoutParams(size, size)
+                    scaleType = ImageView.ScaleType.CENTER_CROP
+                    adjustViewBounds = true
+                    loadAvatarInto(this, sender)
+                    // при клике — лёгкое свечение, затем ouch
+                    setOnClickListener { view ->
+                        view.isEnabled = false
+                        val scaleX = ObjectAnimator.ofFloat(view, "scaleX", 1f, 1.08f, 1f)
+                        val scaleY = ObjectAnimator.ofFloat(view, "scaleY", 1f, 1.08f, 1f)
+                        scaleX.duration = 250
+                        scaleY.duration = 250
+                        scaleX.start()
+                        scaleY.start()
+                        Handler(Looper.getMainLooper()).postDelayed({
+                            loadAndSendOuchMessage(sender)
+                            view.isEnabled = true
+                        }, 260)
+                    }
+                }
+                val imageView = ImageView(this).apply {
+                    setImageBitmap(bitmap)
+                    scaleType = ImageView.ScaleType.CENTER_CROP
+                    adjustViewBounds = true
+                    val accent = safeParseColorOrDefault(currentThemeColor, Color.parseColor("#00FF00"))
+                    background = createBubbleDrawable(accent)
+                    layoutParams = LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.WRAP_CONTENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT
+                    ).apply {
+                        marginStart = dpToPx(8)
+                    }
+                }
+                row.addView(avatarView)
+                row.addView(imageView)
+            }
+            messagesContainer.addView(row)
+            messagesContainer.findViewWithTag<View>("typingView")?.let { messagesContainer.removeView(it) }
+            if (messagesContainer.childCount > MAX_MESSAGES) {
+                val removeCount = messagesContainer.childCount - MAX_MESSAGES
+                repeat(removeCount) { messagesContainer.removeViewAt(0) }
+            }
+            scrollView.post { scrollView.smoothScrollTo(0, messagesContainer.bottom) }
+            if (!isUser) {
+                playNotificationSound()
             }
         }
     }
@@ -1057,7 +1252,7 @@ class ChatActivity : AppCompatActivity() {
                         scaleX.start()
                         scaleY.start()
                         Handler(Looper.getMainLooper()).postDelayed({
-                            loadAndSendOuchMessage()
+                            loadAndSendOuchMessage(sender)
                             view.isEnabled = true
                         }, 260)
                     }
@@ -1081,24 +1276,28 @@ class ChatActivity : AppCompatActivity() {
         }
     }
 
-    private fun loadAndSendOuchMessage() {
+    private fun loadAndSendOuchMessage(mascot: String) {
         val uri = folderUri ?: return
         try {
             val dir = DocumentFile.fromTreeUri(this, uri) ?: return
-            val ouchFile = dir.findFile("ouch.txt")
-            if (ouchFile != null && ouchFile.exists()) {
-                contentResolver.openInputStream(ouchFile.uri)?.bufferedReader()?.use { reader ->
+            val mascotOuch = dir.findFile("${mascot.lowercase(Locale.getDefault())}.txt") ?: dir.findFile("ouch.txt")
+            if (mascotOuch != null && mascotOuch.exists()) {
+                contentResolver.openInputStream(mascotOuch.uri)?.bufferedReader()?.use { reader ->
                     val allText = reader.readText()
                     val responses = allText.split("|").map { it.trim() }.filter { it.isNotEmpty() }
                     if (responses.isNotEmpty()) {
                         val randomResponse = responses.random()
-                        addChatMessage(currentMascotName, randomResponse)
+                        addChatMessage(mascot, randomResponse)
                     }
                 }
             }
         } catch (e: Exception) {
             showCustomToast("Ошибка загрузки ouch.txt: ${e.message}")
         }
+    }
+
+    private fun speakText(text: String) {
+        tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "message_${System.currentTimeMillis()}")
     }
 
     private fun playNotificationSound() {
@@ -1140,13 +1339,18 @@ class ChatActivity : AppCompatActivity() {
             setTextIsSelectable(true)
             val pad = dpToPx(10)
             setPadding(pad, pad, pad, pad)
-            val accent = safeParseColorOrDefault(currentThemeColor, Color.parseColor("#00FF00"))
+            val accent = if (isUser) {
+                Color.parseColor("#FF0000") // фиксированный красный для пользователя
+            } else {
+                safeParseColorOrDefault(currentThemeColor, Color.parseColor("#00FF00"))
+            }
             background = createBubbleDrawable(accent)
             try {
-                setTextColor(Color.parseColor(currentThemeColor))
+                setTextColor(if (isUser) Color.WHITE else Color.parseColor(currentThemeColor))
             } catch (_: Exception) {
                 setTextColor(Color.WHITE)
             }
+            setOnClickListener { speakText(text) }
         }
         container.addView(tvSender)
         container.addView(tv)
