@@ -40,50 +40,7 @@
             android:textColor="@color/text_green"
             android:textColorHint="#809F809F"
             android:background="@color/card_dark"
-            android:padding="8dp"
-            android:layout_marginBottom="12dp" />
-
-        <EditText
-            android:id="@+id/masterKeyInput"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:hint="Мастер-ключ"
-            android:inputType="textPassword"
-            android:textColor="@color/text_green"
-            android:textColorHint="#809F809F"
-            android:background="@color/card_dark"
-            android:padding="8dp"
-            android:layout_marginBottom="12dp" />
-
-        <EditText
-            android:id="@+id/passwordInput"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:hint="Пароль"
-            android:inputType="textPassword"
-            android:textColor="@color/text_green"
-            android:textColorHint="#809F809F"
-            android:background="@color/card_dark"
-            android:padding="8dp"
-            android:layout_marginBottom="12dp" />
-
-        <Button
-            android:id="@+id/protectButton"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Protect"
-            android:textColor="@color/text_green"
-            android:background="@color/button_transparent"
-            android:layout_marginTop="8dp" />
-
-        <Button
-            android:id="@+id/unprotectButton"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Unprotect"
-            android:textColor="@color/text_green"
-            android:background="@color/button_transparent"
-            android:layout_marginTop="8dp" />
+            android:padding="8dp" />
 
         <Button
             android:id="@+id/saveTemplatesButton"
@@ -103,6 +60,7 @@
             android:background="@color/button_transparent"
             android:layout_marginTop="8dp" />
 
+        <!-- Переключатель для запрета/разрешения скриншотов -->
         <Switch
             android:id="@+id/disableScreenshotsSwitch"
             android:layout_width="match_parent"
