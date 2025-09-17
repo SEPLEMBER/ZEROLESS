@@ -52,16 +52,16 @@ object SecCoreUtils {
     private fun base64(bytes: ByteArray): String = Base64.encodeToString(bytes, Base64.NO_WRAP)
     private fun base64Decode(s: String): ByteArray = Base64.decode(s, Base64.NO_WRAP)
 
-    // Изменено: сделано публичным
+    // Публичный метод для очистки ByteArray
     fun wipe(bytes: ByteArray?) {
         if (bytes == null) return
         for (i in bytes.indices) bytes[i] = 0
     }
 
-    // Изменено: сделано публичным
+    // Публичный метод для очистки CharArray
     fun wipe(chars: CharArray?) {
         if (chars == null) return
-        for (i in chars.indices) chars[i] = ''
+        for (i in chars.indices) chars[i] = '\0' // Исправлено: используем нулевой символ
     }
 
     // ----- PBKDF2 derivation -----
