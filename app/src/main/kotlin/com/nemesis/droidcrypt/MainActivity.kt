@@ -3,9 +3,14 @@ package com.nemesis.droidcrypt
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
-import android.view.View
 import android.widget.Button
+import android.widget.EditText
+import android.widget.LinearLayout
+import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.preference.PreferenceManager
+import com.nemesis.droidcrypt.utils.security.SecCoreUtils
 
 class MainActivity : AppCompatActivity() {
 
@@ -21,14 +26,11 @@ class MainActivity : AppCompatActivity() {
         val openSettings = findViewById<Button>(R.id.openSettingsButton)
 
         startChat.setOnClickListener {
-            // Просто стартуем ChatActivity — он сам попытается взять folderUri из SharedPreferences / persisted permissions
-            val i = Intent(this@MainActivity, ChatActivity::class.java)
-            startActivity(i)
+            // NEW: перед запуском ChatActivity — запрос пароля
+            showPasswordDialog()
         }
 
         openSettings.setOnClickListener {
-            // Запускаем SettingsActivity для выбора папки и редактирования шаблонов.
-            // Ожидаем результат — при возвращении можем сразу открыть чат с переданным folderUri.
             val i = Intent(this@MainActivity, SettingsActivity::class.java)
             startActivityForResult(i, REQUEST_CODE_SETTINGS)
         }
@@ -38,7 +40,6 @@ class MainActivity : AppCompatActivity() {
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == REQUEST_CODE_SETTINGS && resultCode == RESULT_OK && data != null) {
-            // Если Settings вернул folderUri — передаём его в ChatActivity и открываем чат
             val folderUri = data.getParcelableExtra<Uri>("folderUri")
             val i = Intent(this@MainActivity, ChatActivity::class.java)
             if (folderUri != null) {
@@ -47,4 +48,57 @@ class MainActivity : AppCompatActivity() {
             startActivity(i)
         }
     }
+
+    // NEW: функция запроса пароля и расшифровки masterKey
+    private fun showPasswordDialog() {
+        val editText = EditText(this)
+        editText.hint = "Введите пароль"
+
+        val container = LinearLayout(this).apply {
+            setPadding(50, 40, 50, 10)
+            orientation = LinearLayout.VERTICAL
+            addView(editText)
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle("Авторизация")
+            .setView(container)
+            .setPositiveButton("OK") { dialog, _ ->
+                val password = editText.text.toString().toCharArray()
+                val prefs = PreferenceManager.getDefaultSharedPreferences(this)
+
+                try {
+                    val masterKey =
+                        SecCoreUtils.loadMasterFromPrefs(prefs, "wrapped_master_key", password)
+
+                    SecCoreUtils.wipe(password) // сразу очищаем пароль из памяти
+
+                    if (masterKey != null) {
+                        // Сохраняем ключ в оперативной памяти (SessionKeys — простой object)
+                        SessionKeys.masterKey = masterKey
+
+                        // Успех — запускаем чат
+                        val i = Intent(this@MainActivity, ChatActivity::class.java)
+                        startActivity(i)
+                    } else {
+                        Toast.makeText(this, "Не найден сохранённый ключ", Toast.LENGTH_SHORT).show()
+                    }
+                } catch (e: Exception) {
+                    Toast.makeText(this, "Неверный пароль", Toast.LENGTH_SHORT).show()
+                    SecCoreUtils.wipe(password)
+                }
+
+                dialog.dismiss()
+            }
+            .setNegativeButton("Отмена") { dialog, _ ->
+                dialog.dismiss()
+            }
+            .show()
+    }
+}
+
+// NEW: простое хранилище ключа в ОЗУ
+object SessionKeys {
+    @Volatile
+    var masterKey: ByteArray? = null
 }
