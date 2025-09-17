@@ -81,6 +81,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private var btnCharging: ImageButton? = null
     private var messagesAdapter: MessagesAdapter? = null
     private val messagesList = mutableListOf<MessageData>()
+    private var adapter: ArrayAdapter<String>? = null
 
     // Added UI elements (status bar overlay)
     private var batteryImageView: ImageView? = null
@@ -124,6 +125,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private var bluetoothReceiver: BroadcastReceiver? = null
     private val timeHandler = Handler(Looper.getMainLooper())
     private var timeUpdaterRunnable: Runnable? = null
+    private var isTypingIndicatorShown = false // Флаг для предотвращения дублирования индикатора
 
     init {
         antiSpamResponses.addAll(
@@ -184,18 +186,18 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 }
                 messageText.setOnClickListener { speakText(data.text) }
 
+                val layoutParams = itemView.layoutParams as RecyclerView.LayoutParams
                 if (isUser) {
-                    itemView.layoutParams = (itemView.layoutParams as RecyclerView.LayoutParams).apply {
-                        itemView.gravity = Gravity.END
-                        marginStart = dpToPx(48)
-                    }
+                    layoutParams.gravity = Gravity.END
+                    layoutParams.marginStart = dpToPx(48)
+                    layoutParams.marginEnd = 0
                     avatar.visibility = View.GONE
                 } else {
-                    loadAvatarInto(avatar, data.sender)
+                    layoutParams.gravity = Gravity.START
+                    layoutParams.marginStart = 0
+                    layoutParams.marginEnd = dpToPx(48)
                     avatar.visibility = View.VISIBLE
-                    itemView.layoutParams = (itemView.layoutParams as RecyclerView.LayoutParams).apply {
-                        marginEnd = dpToPx(48)
-                    }
+                    loadAvatarInto(avatar, data.sender)
                     avatar.setOnClickListener {
                         it.isEnabled = false
                         val scaleX = ObjectAnimator.ofFloat(it, "scaleX", 1f, 1.08f, 1f)
@@ -210,6 +212,8 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                         }, 260)
                     }
                 }
+                itemView.layoutParams = layoutParams
+                itemView.requestLayout()
             }
         }
     }
@@ -220,15 +224,21 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         window.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
         supportActionBar?.setBackgroundDrawable(ColorDrawable(Color.argb(128, 0, 0, 0)))
         window.setBackgroundDrawable(ColorDrawable(Color.BLACK))
-        setupToolbar()
 
-        recyclerView = findViewById(R.id.chatMessagesContainer) // assuming you change layout to RecyclerView
+        recyclerView = findViewById(R.id.chatMessagesContainer)
         queryInput = findViewById(R.id.queryInput)
         envelopeInputButton = findViewById(R.id.envelope_button)
         btnLock = findViewById(R.id.btn_lock)
         btnTrash = findViewById(R.id.btn_trash)
         btnEnvelopeTop = findViewById(R.id.btn_envelope_top)
         btnSettings = findViewById(R.id.btn_settings)
+        btnCharging = findViewById(R.id.btn_charging)
+        batteryImageView = findViewById(R.id.battery_image)
+        batteryPercentView = findViewById(R.id.battery_percent)
+        wifiImageView = findViewById(R.id.wifi_image)
+        bluetoothImageView = findViewById(R.id.bluetooth_image)
+        timeTextView = findViewById(R.id.time_text)
+        infoIconButton = findViewById(R.id.info_icon_button)
 
         // Setup RecyclerView
         recyclerView.layoutManager = LinearLayoutManager(this)
@@ -339,87 +349,6 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
     }
     
-    private fun setupToolbar() {
-        val topBar = findViewById<LinearLayout>(R.id.topBar)
-        val leftLayout = topBar.getChildAt(0) as LinearLayout
-        leftLayout.removeAllViews()
-        leftLayout.orientation = LinearLayout.HORIZONTAL
-        leftLayout.gravity = Gravity.CENTER_VERTICAL
-
-        bluetoothImageView = ImageView(this).apply {
-            val iconSize = dpToPx(56)
-            layoutParams = LinearLayout.LayoutParams(iconSize, iconSize)
-            scaleType = ImageView.ScaleType.CENTER_CROP
-            adjustViewBounds = true
-            visibility = View.GONE
-        }
-        leftLayout.addView(bluetoothImageView)
-
-        wifiImageView = ImageView(this).apply {
-            val iconSize = dpToPx(56)
-            layoutParams = LinearLayout.LayoutParams(iconSize, iconSize).apply {
-                marginStart = dpToPx(6)
-            }
-            scaleType = ImageView.ScaleType.CENTER_CROP
-            adjustViewBounds = true
-        }
-        leftLayout.addView(wifiImageView)
-
-        batteryImageView = ImageView(this).apply {
-            val iconSize = dpToPx(56)
-            layoutParams = LinearLayout.LayoutParams(iconSize, iconSize).apply {
-                marginStart = dpToPx(6)
-            }
-            scaleType = ImageView.ScaleType.CENTER_CROP
-            adjustViewBounds = true
-        }
-        batteryPercentView = TextView(this).apply {
-            text = "--%"
-            textSize = 16f
-            setTextColor(Color.parseColor("#00BFFF"))
-            val lp = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply {
-                marginStart = dpToPx(8)
-            }
-            layoutParams = lp
-        }
-        leftLayout.addView(batteryImageView)
-        leftLayout.addView(batteryPercentView)
-
-        val spacerIndex = 1
-        val spacer = topBar.getChildAt(spacerIndex)
-        topBar.removeViewAt(spacerIndex)
-        timeTextView = TextView(this).apply {
-            text = "--:--"
-            textSize = 20f
-            setTextColor(Color.parseColor("#FFA500"))
-            gravity = Gravity.CENTER
-            val lp = LinearLayout.LayoutParams(
-                0,
-                dpToPx(56),
-                1f
-            )
-            layoutParams = lp
-        }
-        topBar.addView(timeTextView, spacerIndex)
-
-        // убираем infoIconButton из тулбара — перенесём в настройки позже
-        // оставляем место для других кнопок, но info не добавляем
-
-        btnCharging = ImageButton(this).apply {
-            background = null
-            val iconSize = dpToPx(56)
-            val lp = LinearLayout.LayoutParams(iconSize, iconSize)
-            layoutParams = lp
-            scaleType = ImageView.ScaleType.CENTER_CROP
-            adjustViewBounds = true
-            visibility = View.GONE
-        }
-        topBar.addView(btnCharging)
-    }
-
     override fun onResume() {
         super.onResume()
         lifecycleScope.launch {
@@ -977,18 +906,21 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private fun showTypingIndicator() {
         runOnUi {
+            if (isTypingIndicatorShown) return@runOnUi
+            isTypingIndicatorShown = true
             val typingPosition = messagesList.size
             messagesList.add(MessageData("", "печатает..."))
             messagesAdapter?.notifyItemInserted(typingPosition)
             recyclerView.smoothScrollToPosition(typingPosition)
             Handler(Looper.getMainLooper()).postDelayed({
                 runOnUi {
-                    if (messagesList.last().text == "печатает...") {
+                    if (isTypingIndicatorShown && messagesList.lastOrNull()?.text == "печатает...") {
                         messagesList.removeLast()
                         messagesAdapter?.notifyItemRemoved(messagesList.size)
+                        isTypingIndicatorShown = false
                     }
                 }
-            }, (1000..3000).random().toLong())
+            }, SUBQUERY_RESPONSE_DELAY)
         }
     }
 
@@ -1136,9 +1068,10 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             if (messagesList.size > MAX_MESSAGES) {
                 messagesList.removeAt(0)
                 messagesAdapter?.notifyItemRemoved(0)
+                messagesAdapter?.notifyItemRangeChanged(0, messagesList.size)
             }
             messagesAdapter?.notifyItemInserted(position)
-            recyclerView.smoothScrollToPosition(position)
+            recyclerView.postDelayed({ recyclerView.smoothScrollToPosition(position) }, 50)
             if (!sender.equals("You", ignoreCase = true)) {
                 playNotificationSoundAsync()
             }
@@ -1213,6 +1146,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private fun loadAvatarInto(target: ImageView, sender: String) {
         val uri = folderUri ?: run { target.setImageResource(android.R.color.transparent); return }
         lifecycleScope.launch(Dispatchers.IO) {
+            var bitmap: Bitmap? = null
             try {
                 val dir = DocumentFile.fromTreeUri(this@ChatActivity, uri) ?: return@launch
                 val s = sender.lowercase(Locale.getDefault())
@@ -1221,9 +1155,9 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     val f = dir.findFile(name) ?: continue
                     if (f.exists()) {
                         contentResolver.openInputStream(f.uri)?.use { ins ->
-                            val bmp = BitmapFactory.decodeStream(ins)
+                            bitmap = BitmapFactory.decodeStream(ins)
                             withContext(Dispatchers.Main) {
-                                target.setImageBitmap(bmp)
+                                target.setImageBitmap(bitmap)
                             }
                             return@launch
                         }
@@ -1236,6 +1170,8 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 withContext(Dispatchers.Main) {
                     target.setImageResource(android.R.color.transparent)
                 }
+            } finally {
+                bitmap?.recycle()
             }
         }
     }
@@ -1534,12 +1470,14 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 else -> 1
             }
             lifecycleScope.launch(Dispatchers.IO) {
-                val loaded = tryLoadBitmapFromFolder("battery_$iconIndex.png")
-                withContext(Dispatchers.Main) {
-                    loaded?.let { batteryImageView?.setImageBitmap(it) } ?: run {
-                        tryLoadBitmapFromFolder("battery.png")?.let { batteryImageView?.setImageBitmap(it) }
-                    }
+                var bitmap: Bitmap? = tryLoadBitmapFromFolder("battery_$iconIndex.png")
+                if (bitmap == null) {
+                    bitmap = tryLoadBitmapFromFolder("battery.png")
                 }
+                withContext(Dispatchers.Main) {
+                    bitmap?.let { batteryImageView?.setImageBitmap(it) }
+                }
+                bitmap?.recycle()
             }
             // клик по батарее — фиксированное сообщение из batterycare.txt (без рандома)
             batteryImageView?.setOnClickListener {
@@ -1659,7 +1597,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                 // Три состояния: WiFi, Mobile, "airplane" (нет подключений). AirplaneMode OR !isConnected => offline state.
                 lifecycleScope.launch(Dispatchers.IO) {
-                    val bmp = if (airplaneMode || !isConnected) {
+                    var bmp: Bitmap? = if (airplaneMode || !isConnected) {
                         tryLoadBitmapFromFolder("airplane.png")
                     } else if (hasWifi) {
                         tryLoadBitmapFromFolder("wifi.png")
@@ -1671,6 +1609,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     withContext(Dispatchers.Main) {
                         bmp?.let { wifiImageView?.setImageBitmap(it) }
                     }
+                    bmp?.recycle()
                 }
             } catch (_: Exception) {
                 // silently ignore
@@ -1684,13 +1623,14 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             val isBluetoothEnabled = bluetoothAdapter?.isEnabled == true
             if (isBluetoothEnabled) {
                 lifecycleScope.launch(Dispatchers.IO) {
-                    val bmp = tryLoadBitmapFromFolder("bluetooth.png")
+                    var bmp: Bitmap? = tryLoadBitmapFromFolder("bluetooth.png")
                     withContext(Dispatchers.Main) {
                         bmp?.let {
                             bluetoothImageView?.setImageBitmap(it)
                             bluetoothImageView?.visibility = View.VISIBLE
                         }
                     }
+                    bmp?.recycle()
                 }
             } else {
                 bluetoothImageView?.visibility = View.GONE
