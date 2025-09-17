@@ -1,3 +1,5 @@
+package com.nemesis.droidcrypt
+
 import android.content.Intent
 import android.content.SharedPreferences
 import android.graphics.BitmapFactory
