@@ -16,12 +16,9 @@ import java.io.FileInputStream
 import java.io.InputStreamReader
 
 class SplashActivity : AppCompatActivity() {
-
     private lateinit var prefs: SharedPreferences
     private var folderUri: Uri? = null
-
     private lateinit var splashImage: ImageView
-    private lateinit var logoMini: ImageView
     private lateinit var statusText: TextView
     private lateinit var metadataText: TextView
 
@@ -30,7 +27,6 @@ class SplashActivity : AppCompatActivity() {
         setContentView(R.layout.activity_splash)
 
         splashImage = findViewById(R.id.splashImage)
-        logoMini = findViewById(R.id.logoMini)
         statusText = findViewById(R.id.statusText)
         metadataText = findViewById(R.id.metadataText)
 
@@ -39,20 +35,20 @@ class SplashActivity : AppCompatActivity() {
             folderUri = Uri.parse(saved)
         }
 
-        // Загружаем сплэш и метаданные
-        loadImageFromSAF("splash_engine.png", splashImage)
-        loadImageFromSAF("logo_mini_.png", logoMini)
+        // Устанавливаем статус "подключение"
+        statusText.text = "подключение"
 
+        // Загружаем только сплэш и метаданные
+        loadImageFromSAF("splash_engine.png", splashImage)
         val engineMeta = loadTextFromSAF("engine_metadata.txt")
         val uiMeta = loadTextFromSAF("UI_metadata.txt")
         metadataText.text = (engineMeta + "\n" + uiMeta).trim()
 
-        // Через 5 секунд меняем статус и переходим в чат
+        // Сразу переходим в чат после загрузки
         Handler(Looper.getMainLooper()).postDelayed({
-            statusText.text = "с подключением."
             startActivity(Intent(this, ChatActivity::class.java))
             finish()
-        }, 5000)
+        }, 2000) // Уменьшил время до 2 секунд для быстрого перехода
     }
 
     private fun loadImageFromSAF(filename: String, target: ImageView) {
