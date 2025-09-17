@@ -64,5 +64,12 @@
             android:parentActivityName=".MainActivity"
             android:configChanges="orientation|screenSize" />
 
+        <!-- SplashActivity -->
+        <activity
+            android:name=".SplashActivity"
+            android:exported="false"
+            android:parentActivityName=".MainActivity"
+            android:configChanges="orientation|screenSize" />
+
     </application>
 </manifest>
