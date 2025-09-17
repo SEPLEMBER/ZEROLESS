@@ -28,7 +28,6 @@ import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.nio.charset.StandardCharsets
 import java.text.SimpleDateFormat
 import java.util.*
 import kotlin.math.abs
@@ -39,8 +38,6 @@ import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.text.format.DateFormat
 import android.net.wifi.WifiManager
-import com.nemesis.droidcrypt.utils.security.SecCoreUtils
-import com.nemesis.droidcrypt.SessionKeys // NEW: импорт для доступа к мастер-ключу
 
 class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
@@ -113,33 +110,6 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private val timeHandler = Handler(Looper.getMainLooper())
     private var timeUpdaterRunnable: Runnable? = null
 
-    // NEW: Хелпер для загрузки и расшифровки текстовых файлов с использованием мастер-ключа
-    private fun loadDecryptedTextFile(filename: String): String? {
-        val masterKey = SessionKeys.masterKey ?: return null
-        val uri = folderUri ?: return null
-        try {
-            val dir = DocumentFile.fromTreeUri(this, uri) ?: return null
-            val file = dir.findFile(filename) ?: return null
-            if (!file.exists()) return null
-            contentResolver.openInputStream(file.uri)?.use { ins ->
-                val encryptedBytes = ins.readBytes()
-                val salt = filename.toByteArray(StandardCharsets.UTF_8)
-                val derivedKey = SecCoreUtils.deriveDbKey(masterKey, salt)
-                return try {
-                    val decryptedBytes = SecCoreUtils.decryptAesGcm(encryptedBytes, derivedKey)
-                    SecCoreUtils.wipe(derivedKey)
-                    String(decryptedBytes, StandardCharsets.UTF_8)
-                } catch (e: Exception) {
-                    SecCoreUtils.wipe(derivedKey)
-                    null
-                }
-            }
-        } catch (e: Exception) {
-            null
-        }
-        return null
-    }
-
     init {
         antiSpamResponses.addAll(
             listOf(
@@ -189,13 +159,6 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 if (saved != null) folderUri = Uri.parse(saved)
             }
         } catch (_: Exception) {}
-
-        // NEW: Проверка наличия мастер-ключа перед загрузкой
-        if (folderUri != null && SessionKeys.masterKey == null) {
-            showCustomToast("Ключ не загружен. Введите пароль в главном меню.")
-            finish()
-            return
-        }
 
         loadSynonymsAndStopwords()
         try {
@@ -363,12 +326,6 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     override fun onResume() {
         super.onResume()
-        // NEW: Проверка ключа при возобновлении
-        if (folderUri != null && SessionKeys.masterKey == null) {
-            showCustomToast("Ключ не загружен. Введите пароль в главном меню.")
-            finish()
-            return
-        }
         folderUri?.let { loadTemplatesFromFile(currentContext) }
         rebuildInvertedIndex()
         updateAutoComplete()
@@ -590,38 +547,44 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 return Pair(mapped, joined)
             }
 
-            // MODIFIED: parseTemplatesFromFile теперь использует расшифровку
             fun parseTemplatesFromFile(filename: String): Pair<HashMap<String, MutableList<String>>, HashMap<String, MutableList<String>>> {
                 val localTemplates = HashMap<String, MutableList<String>>()
                 val localKeywords = HashMap<String, MutableList<String>>()
-                val content = loadDecryptedTextFile(filename) ?: return Pair(localTemplates, localKeywords)
-                content.lines().forEach { raw ->
-                    val l = raw.trim()
-                    if (l.isEmpty()) return@forEach
-                    if (l.startsWith("-")) {
-                        val keywordLine = l.substring(1)
-                        if (keywordLine.contains("=")) {
-                            val parts = keywordLine.split("=", limit = 2)
+                val uriLocal = folderUri ?: return Pair(localTemplates, localKeywords)
+                try {
+                    val dir = DocumentFile.fromTreeUri(this@ChatActivity, uriLocal) ?: return Pair(localTemplates, localKeywords)
+                    val file = dir.findFile(filename) ?: return Pair(localTemplates, localKeywords)
+                    if (!file.exists()) return Pair(localTemplates, localKeywords)
+                    contentResolver.openInputStream(file.uri)?.bufferedReader()?.use { reader ->
+                        reader.forEachLine { raw ->
+                            val l = raw.trim()
+                            if (l.isEmpty()) return@forEachLine
+                            if (l.startsWith("-")) {
+                                val keywordLine = l.substring(1)
+                                if (keywordLine.contains("=")) {
+                                    val parts = keywordLine.split("=", limit = 2)
+                                    if (parts.size == 2) {
+                                        val keyword = parts[0].trim().lowercase(Locale.ROOT)
+                                        val responses = parts[1].split("|")
+                                        val responseList = responses.mapNotNull { it.trim().takeIf { s -> s.isNotEmpty() } }.toMutableList()
+                                        if (keyword.isNotEmpty() && responseList.isNotEmpty()) localKeywords[keyword] = responseList
+                                    }
+                                }
+                                return@forEachLine
+                            }
+                            if (!l.contains("=")) return@forEachLine
+                            val parts = l.split("=", limit = 2)
                             if (parts.size == 2) {
-                                val keyword = parts[0].trim().lowercase(Locale.ROOT)
+                                val triggerRaw = parts[0].trim()
+                                val trigger = normalizeLocal(triggerRaw)
+                                val triggerFiltered = filterStopwordsAndMapSynonymsLocal(trigger).second
                                 val responses = parts[1].split("|")
                                 val responseList = responses.mapNotNull { it.trim().takeIf { s -> s.isNotEmpty() } }.toMutableList()
-                                if (keyword.isNotEmpty() && responseList.isNotEmpty()) localKeywords[keyword] = responseList
+                                if (triggerFiltered.isNotEmpty() && responseList.isNotEmpty()) localTemplates[triggerFiltered] = responseList
                             }
                         }
-                        return@forEach
                     }
-                    if (!l.contains("=")) return@forEach
-                    val parts = l.split("=", limit = 2)
-                    if (parts.size == 2) {
-                        val triggerRaw = parts[0].trim()
-                        val trigger = normalizeLocal(triggerRaw)
-                        val triggerFiltered = filterStopwordsAndMapSynonymsLocal(trigger).second
-                        val responses = parts[1].split("|")
-                        val responseList = responses.mapNotNull { it.trim().takeIf { s -> s.isNotEmpty() } }.toMutableList()
-                        if (triggerFiltered.isNotEmpty() && responseList.isNotEmpty()) localTemplates[triggerFiltered] = responseList
-                    }
-                }
+                } catch (_: Exception) {}
                 return Pair(localTemplates, localKeywords)
             }
 
@@ -875,21 +838,26 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
     }
 
-    // MODIFIED: loadImageFromMeta теперь расшифровывает pictures_meta.txt
     private suspend fun loadImageFromMeta(qFiltered: String, qTokens: List<String>): Bitmap? {
-        val content = withContext(Dispatchers.IO) { loadDecryptedTextFile("pictures_meta.txt") } ?: return null
+        val uriLocal = folderUri ?: return null
+        val dir = DocumentFile.fromTreeUri(this, uriLocal) ?: return null
+        val metaFile = dir.findFile("pictures_meta.txt") ?: return null
+        if (!metaFile.exists()) return null
+
         val imageMap = HashMap<String, String>()
-        content.lines().forEach { raw ->
-            val l = raw.trim()
-            if (l.startsWith(":") && l.endsWith(":") && l.contains("=")) {
-                val contentLine = l.substring(1, l.length - 1)
-                val parts = contentLine.split("=", limit = 2)
-                if (parts.size == 2) {
-                    val trigger = normalizeText(parts[0].trim())
-                    val imgFile = parts[1].trim()
-                    val triggerFiltered = filterStopwordsAndMapSynonyms(trigger).second
-                    if (triggerFiltered.isNotEmpty() && imgFile.isNotEmpty()) {
-                        imageMap[triggerFiltered] = imgFile
+        contentResolver.openInputStream(metaFile.uri)?.bufferedReader()?.use { reader ->
+            reader.forEachLine { raw ->
+                val l = raw.trim()
+                if (l.startsWith(":") && l.endsWith(":") && l.contains("=")) {
+                    val content = l.substring(1, l.length - 1)
+                    val parts = content.split("=", limit = 2)
+                    if (parts.size == 2) {
+                        val trigger = normalizeText(parts[0].trim())
+                        val imgFile = parts[1].trim()
+                        val triggerFiltered = filterStopwordsAndMapSynonyms(trigger).second
+                        if (triggerFiltered.isNotEmpty() && imgFile.isNotEmpty()) {
+                            imageMap[triggerFiltered] = imgFile
+                        }
                     }
                 }
             }
@@ -1125,33 +1093,39 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         return s.split(Regex("\\s+")).map { it.trim() }.filter { it.isNotEmpty() }
     }
 
-    // MODIFIED: loadSynonymsAndStopwords теперь расшифровывает synonims.txt и stopwords.txt
     private fun loadSynonymsAndStopwords() {
         synonymsMap.clear()
         stopwords.clear()
         val uri = folderUri ?: return
         try {
             val dir = DocumentFile.fromTreeUri(this, uri) ?: return
-            val synContent = loadDecryptedTextFile("synonims.txt")
-            if (synContent != null) {
-                synContent.lines().forEach { raw ->
-                    var l = raw.trim()
-                    if (l.isEmpty()) return@forEach
-                    if (l.startsWith("*") && l.endsWith("*") && l.length > 1) {
-                        l = l.substring(1, l.length - 1)
-                    }
-                    val parts = l.split(";").map { normalizeText(it).trim() }.filter { it.isNotEmpty() }
-                    if (parts.isEmpty()) return@forEach
-                    val canonical = parts.last()
-                    for (p in parts) {
-                        synonymsMap[p] = canonical
+            val synFile = dir.findFile("synonims.txt")
+            if (synFile != null && synFile.exists()) {
+                contentResolver.openInputStream(synFile.uri)?.bufferedReader()?.use { reader ->
+                    reader.forEachLine { raw ->
+                        var l = raw.trim()
+                        if (l.isEmpty()) return@forEachLine
+                        if (l.startsWith("*") && l.endsWith("*") && l.length > 1) {
+                            l = l.substring(1, l.length - 1)
+                        }
+                        val parts = l.split(";").map { normalizeText(it).trim() }.filter { it.isNotEmpty() }
+                        if (parts.isEmpty()) return@forEachLine
+                        val canonical = parts.last()
+                        for (p in parts) {
+                            synonymsMap[p] = canonical
+                        }
                     }
                 }
             }
-            val stopContent = loadDecryptedTextFile("stopwords.txt")
-            if (stopContent != null) {
-                val parts = stopContent.split("^").map { normalizeText(it).trim() }.filter { it.isNotEmpty() }
-                for (p in parts) stopwords.add(p)
+            val stopFile = dir.findFile("stopwords.txt")
+            if (stopFile != null && stopFile.exists()) {
+                contentResolver.openInputStream(stopFile.uri)?.bufferedReader()?.use { reader ->
+                    val all = reader.readText()
+                    if (all.isNotEmpty()) {
+                        val parts = all.split("^").map { normalizeText(it).trim() }.filter { it.isNotEmpty() }
+                        for (p in parts) stopwords.add(p)
+                    }
+                }
             }
         } catch (e: Exception) {}
     }
@@ -1263,18 +1237,19 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
     }
 
-    // MODIFIED: loadAndSendOuchMessage теперь расшифровывает ouch.txt или mascot.txt
     private fun loadAndSendOuchMessage(mascot: String) {
         val uri = folderUri ?: return
         try {
             val dir = DocumentFile.fromTreeUri(this, uri) ?: return
-            val ouchFilename = "${mascot.lowercase(Locale.getDefault())}.txt"
-            val ouchContent = loadDecryptedTextFile(ouchFilename) ?: loadDecryptedTextFile("ouch.txt")
-            if (ouchContent != null) {
-                val responses = ouchContent.split("|").map { it.trim() }.filter { it.isNotEmpty() }
-                if (responses.isNotEmpty()) {
-                    val randomResponse = responses.random()
-                    addChatMessage(mascot, randomResponse)
+            val mascotOuch = dir.findFile("${mascot.lowercase(Locale.getDefault())}.txt") ?: dir.findFile("ouch.txt")
+            if (mascotOuch != null && mascotOuch.exists()) {
+                contentResolver.openInputStream(mascotOuch.uri)?.bufferedReader()?.use { reader ->
+                    val allText = reader.readText()
+                    val responses = allText.split("|").map { it.trim() }.filter { it.isNotEmpty() }
+                    if (responses.isNotEmpty()) {
+                        val randomResponse = responses.random()
+                        addChatMessage(mascot, randomResponse)
+                    }
                 }
             }
         } catch (e: Exception) {
@@ -1392,7 +1367,6 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         return (dp * density).roundToInt()
     }
 
-    // MODIFIED: loadTemplatesFromFile теперь расшифровывает .txt и _metadata.txt
     private fun loadTemplatesFromFile(filename: String) {
         templatesMap.clear()
         keywordResponses.clear()
@@ -1411,89 +1385,107 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
             return
         }
-        val content = loadDecryptedTextFile(filename)
-        if (content == null) {
+        try {
+            val dir = DocumentFile.fromTreeUri(this, folderUri!!) ?: run {
+                loadFallbackTemplates()
+                rebuildInvertedIndex()
+                updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
+                return
+            }
+            val file = dir.findFile(filename)
+            if (file == null || !file.exists()) {
+                loadFallbackTemplates()
+                rebuildInvertedIndex()
+                updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
+                return
+            }
+            contentResolver.openInputStream(file.uri)?.bufferedReader()?.use { reader ->
+                reader.forEachLine { raw ->
+                    val l = raw.trim()
+                    if (l.isEmpty()) return@forEachLine
+                    if (filename == "base.txt" && l.startsWith(":") && l.endsWith(":")) {
+                        val contextLine = l.substring(1, l.length - 1)
+                        if (contextLine.contains("=")) {
+                            val parts = contextLine.split("=", limit = 2)
+                            if (parts.size == 2) {
+                                val keyword = parts[0].trim().lowercase(Locale.ROOT)
+                                val contextFile = parts[1].trim()
+                                if (keyword.isNotEmpty() && contextFile.isNotEmpty()) contextMap[keyword] = contextFile
+                            }
+                        }
+                        return@forEachLine
+                    }
+                    if (l.startsWith("-")) {
+                        val keywordLine = l.substring(1)
+                        if (keywordLine.contains("=")) {
+                            val parts = keywordLine.split("=", limit = 2)
+                            if (parts.size == 2) {
+                                val keyword = parts[0].trim().lowercase(Locale.ROOT)
+                                val responses = parts[1].split("|")
+                                val responseList = responses.mapNotNull { it.trim().takeIf { s -> s.isNotEmpty() } }.toMutableList()
+                                if (keyword.isNotEmpty() && responseList.isNotEmpty()) keywordResponses[keyword] = responseList
+                            }
+                        }
+                        return@forEachLine
+                    }
+                    if (!l.contains("=")) return@forEachLine
+                    val parts = l.split("=", limit = 2)
+                    if (parts.size == 2) {
+                        val triggerRaw = parts[0].trim()
+                        val trigger = normalizeText(triggerRaw)
+                        val triggerFiltered = filterStopwordsAndMapSynonyms(trigger).second
+                        val responses = parts[1].split("|")
+                        val responseList = responses.mapNotNull { it.trim().takeIf { s -> s.isNotEmpty() } }.toMutableList()
+                        if (triggerFiltered.isNotEmpty() && responseList.isNotEmpty()) templatesMap[triggerFiltered] = responseList
+                    }
+                }
+            }
+            val metadataFilename = filename.replace(".txt", "_metadata.txt")
+            val metadataFile = dir.findFile(metadataFilename)
+            if (metadataFile != null && metadataFile.exists()) {
+                contentResolver.openInputStream(metadataFile.uri)?.bufferedReader()?.use { reader ->
+                    reader.forEachLine { raw ->
+                        val line = raw.trim()
+                        when {
+                            line.startsWith("mascot_list=") -> {
+                                val mascots = line.substring("mascot_list=".length).split("|")
+                                for (mascot in mascots) {
+                                    val parts = mascot.split(":")
+                                    if (parts.size == 4) {
+                                        val mascotData = mapOf(
+                                            "name" to parts[0].trim(),
+                                            "icon" to parts[1].trim(),
+                                            "color" to parts[2].trim(),
+                                            "background" to parts[3].trim()
+                                        )
+                                        mascotList.add(mascotData)
+                                    }
+                                }
+                            }
+                            line.startsWith("mascot_name=") -> currentMascotName = line.substring("mascot_name=".length).trim()
+                            line.startsWith("mascot_icon=") -> currentMascotIcon = line.substring("mascot_icon=".length).trim()
+                            line.startsWith("theme_color=") -> currentThemeColor = line.substring("theme_color=".length).trim()
+                            line.startsWith("theme_background=") -> currentThemeBackground = line.substring("theme_background=".length).trim()
+                        }
+                    }
+                }
+            }
+            if (filename == "base.txt" && mascotList.isNotEmpty()) {
+                val selected = mascotList.random()
+                selected["name"]?.let { currentMascotName = it }
+                selected["icon"]?.let { currentMascotIcon = it }
+                selected["color"]?.let { currentThemeColor = it }
+                selected["background"]?.let { currentThemeBackground = it }
+            }
+            rebuildInvertedIndex()
+            updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
+        } catch (e: Exception) {
+            e.printStackTrace()
+            showCustomToast("Ошибка чтения файла: ${e.message}")
             loadFallbackTemplates()
             rebuildInvertedIndex()
             updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
-            return
         }
-        content.lines().forEach { raw ->
-            val l = raw.trim()
-            if (l.isEmpty()) return@forEach
-            if (filename == "base.txt" && l.startsWith(":") && l.endsWith(":")) {
-                val contextLine = l.substring(1, l.length - 1)
-                if (contextLine.contains("=")) {
-                    val parts = contextLine.split("=", limit = 2)
-                    if (parts.size == 2) {
-                        val keyword = parts[0].trim().lowercase(Locale.ROOT)
-                        val contextFile = parts[1].trim()
-                        if (keyword.isNotEmpty() && contextFile.isNotEmpty()) contextMap[keyword] = contextFile
-                    }
-                }
-                return@forEach
-            }
-            if (l.startsWith("-")) {
-                val keywordLine = l.substring(1)
-                if (keywordLine.contains("=")) {
-                    val parts = keywordLine.split("=", limit = 2)
-                    if (parts.size == 2) {
-                        val keyword = parts[0].trim().lowercase(Locale.ROOT)
-                        val responses = parts[1].split("|")
-                        val responseList = responses.mapNotNull { it.trim().takeIf { s -> s.isNotEmpty() } }.toMutableList()
-                        if (keyword.isNotEmpty() && responseList.isNotEmpty()) keywordResponses[keyword] = responseList
-                    }
-                }
-                return@forEach
-            }
-            if (!l.contains("=")) return@forEach
-            val parts = l.split("=", limit = 2)
-            if (parts.size == 2) {
-                val triggerRaw = parts[0].trim()
-                val trigger = normalizeText(triggerRaw)
-                val triggerFiltered = filterStopwordsAndMapSynonyms(trigger).second
-                val responses = parts[1].split("|")
-                val responseList = responses.mapNotNull { it.trim().takeIf { s -> s.isNotEmpty() } }.toMutableList()
-                if (triggerFiltered.isNotEmpty() && responseList.isNotEmpty()) templatesMap[triggerFiltered] = responseList
-            }
-        }
-        val metadataFilename = filename.replace(".txt", "_metadata.txt")
-        val metadataContent = loadDecryptedTextFile(metadataFilename)
-        if (metadataContent != null) {
-            metadataContent.lines().forEach { raw ->
-                val line = raw.trim()
-                when {
-                    line.startsWith("mascot_list=") -> {
-                        val mascots = line.substring("mascot_list=".length).split("|")
-                        for (mascot in mascots) {
-                            val parts = mascot.split(":")
-                            if (parts.size == 4) {
-                                val mascotData = mapOf(
-                                    "name" to parts[0].trim(),
-                                    "icon" to parts[1].trim(),
-                                    "color" to parts[2].trim(),
-                                    "background" to parts[3].trim()
-                                )
-                                mascotList.add(mascotData)
-                            }
-                        }
-                    }
-                    line.startsWith("mascot_name=") -> currentMascotName = line.substring("mascot_name=".length).trim()
-                    line.startsWith("mascot_icon=") -> currentMascotIcon = line.substring("mascot_icon=".length).trim()
-                    line.startsWith("theme_color=") -> currentThemeColor = line.substring("theme_color=".length).trim()
-                    line.startsWith("theme_background=") -> currentThemeBackground = line.substring("theme_background=".length).trim()
-                }
-            }
-        }
-        if (filename == "base.txt" && mascotList.isNotEmpty()) {
-            val selected = mascotList.random()
-            selected["name"]?.let { currentMascotName = it }
-            selected["icon"]?.let { currentMascotIcon = it }
-            selected["color"]?.let { currentThemeColor = it }
-            selected["background"]?.let { currentThemeBackground = it }
-        }
-        rebuildInvertedIndex()
-        updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
     }
 
     private fun loadFallbackTemplates() {
@@ -1539,10 +1531,9 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         val dir = DocumentFile.fromTreeUri(this, folderUri!!) ?: return
         val metadataFile = dir.findFile(metadataFilename)
         if (metadataFile != null && metadataFile.exists()) {
-            val metadataContent = loadDecryptedTextFile(metadataFilename)
-            if (metadataContent != null) {
-                try {
-                    metadataContent.lines().forEach { raw ->
+            try {
+                contentResolver.openInputStream(metadataFile.uri)?.bufferedReader()?.use { reader ->
+                    reader.forEachLine { raw ->
                         val line = raw.trim()
                         when {
                             line.startsWith("mascot_name=") -> currentMascotName = line.substring("mascot_name=".length).trim()
@@ -1552,9 +1543,9 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                         }
                     }
                     updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
-                } catch (e: Exception) {
-                    showCustomToast("Ошибка загрузки метаданных маскота: ${e.message}")
                 }
+            } catch (e: Exception) {
+                showCustomToast("Ошибка загрузки метаданных маскота: ${e.message}")
             }
         }
     }
@@ -1682,10 +1673,21 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
     }
 
-    // MODIFIED: loadBatteryCareResponse теперь расшифровывает batterycare.txt
     private fun loadBatteryCareResponse(): String? {
-        val content = loadDecryptedTextFile("batterycare.txt") ?: return null
-        return content.trim().takeIf { it.isNotEmpty() }
+        val uri = folderUri ?: return null
+        try {
+            val dir = DocumentFile.fromTreeUri(this, uri) ?: return null
+            val file = dir.findFile("batterycare.txt")
+            if (file != null && file.exists()) {
+                contentResolver.openInputStream(file.uri)?.bufferedReader()?.use { reader ->
+                    val allText = reader.readText().trim()
+                    if (allText.isNotEmpty()) return allText
+                }
+            }
+        } catch (e: Exception) {
+            showCustomToast("Ошибка загрузки batterycare.txt: ${e.message}")
+        }
+        return null
     }
 
     private fun tryLoadBitmapFromFolder(name: String): Bitmap? {
@@ -1782,14 +1784,26 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
     }
 
-    // MODIFIED: loadTimeToSleepResponse теперь расшифровывает timetosleep.txt
     private fun loadTimeToSleepResponse(): String? {
-        val content = loadDecryptedTextFile("timetosleep.txt") ?: return null
-        val responses = content.split("|").map { it.trim() }.filter { it.isNotEmpty() }
-        return responses.random().takeIf { it.isNotEmpty() }
+        val uri = folderUri ?: return null
+        try {
+            val dir = DocumentFile.fromTreeUri(this, uri) ?: return null
+            val sleepFile = dir.findFile("timetosleep.txt")
+            if (sleepFile != null && sleepFile.exists()) {
+                contentResolver.openInputStream(sleepFile.uri)?.bufferedReader()?.use { reader ->
+                    val allText = reader.readText()
+                    val responses = allText.split("|").map { it.trim() }.filter { it.isNotEmpty() }
+                    if (responses.isNotEmpty()) {
+                        return responses.random()
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            showCustomToast(getString(R.string.error_loading_timetosleep, e.message))
+        }
+        return null
     }
 
-    // MODIFIED: processDateTimeQuery теперь расшифровывает cldsys.txt
     private fun processDateTimeQuery(query: String): String? {
         val calendar = Calendar.getInstance()
         val dateFormat = SimpleDateFormat("dd MMMM yyyy", Locale("ru"))
@@ -1799,16 +1813,26 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         val currentDay = dayFormat.format(calendar.time)
         val currentYear = yearFormat.format(calendar.time)
         val uri = folderUri ?: return getDefaultDateTimeResponse(query, currentDate, currentDay, currentYear)
-        val cldsysContent = loadDecryptedTextFile("cldsys.txt") ?: return getDefaultDateTimeResponse(query, currentDate, currentDay, currentYear)
-        val responses = cldsysContent.split("|").map { it.trim() }.filter { it.isNotEmpty() }
-        if (responses.isNotEmpty()) {
-            val response = responses.random()
-            return when {
-                query.contains("число") -> response.replace("{date}", currentDate)
-                query.contains("день") -> response.replace("{day}", currentDay)
-                query.contains("год") -> response.replace("{year}", currentYear)
-                else -> response.replace("{date}", currentDate)
+        try {
+            val dir = DocumentFile.fromTreeUri(this, uri) ?: return getDefaultDateTimeResponse(query, currentDate, currentDay, currentYear)
+            val cldsysFile = dir.findFile("cldsys.txt")
+            if (cldsysFile != null && cldsysFile.exists()) {
+                contentResolver.openInputStream(cldsysFile.uri)?.bufferedReader()?.use { reader ->
+                    val allText = reader.readText()
+                    val responses = allText.split("|").map { it.trim() }.filter { it.isNotEmpty() }
+                    if (responses.isNotEmpty()) {
+                        val response = responses.random()
+                        return when {
+                            query.contains("число") -> response.replace("{date}", currentDate)
+                            query.contains("день") -> response.replace("{day}", currentDay)
+                            query.contains("год") -> response.replace("{year}", currentYear)
+                            else -> response.replace("{date}", currentDate)
+                        }
+                    }
+                }
             }
+        } catch (e: Exception) {
+            showCustomToast(getString(R.string.error_loading_cldsys, e.message))
         }
         return getDefaultDateTimeResponse(query, currentDate, currentDay, currentYear)
     }
