@@ -1,5 +1,3 @@
-package com.nemesis.droidcrypt
-
 import android.animation.ObjectAnimator
 import android.content.*
 import android.graphics.*
@@ -103,7 +101,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private var currentMascotIcon = "raccoon_icon.png"
     private var currentThemeColor = "#00FF00"
     private var currentThemeBackground = "#000000"
-    private var currentContext = "base.txt"
+    private var currentContext = "startup.txt"
     private var lastQuery = ""
     private var userActivityCount = 0
 
@@ -514,6 +512,13 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         addChatMessage("You", userInput)
         showTypingIndicator()
+
+        if (currentContext != "base.txt") {
+            currentContext = "base.txt"
+            loadTemplatesFromFile(currentContext)
+            rebuildInvertedIndex()
+            updateAutoComplete()
+        }
 
         if (qKeyForCount == lastQuery) {
             val cnt = queryCountMap.getOrDefault(qKeyForCount, 0)
