@@ -13,6 +13,8 @@ import android.os.Handler
 import android.os.Looper
 import android.preference.PreferenceManager
 import android.provider.Settings
+import android.speech.tts.TextToSpeech
+import android.speech.tts.UtteranceProgressListener
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
@@ -37,7 +39,7 @@ import android.net.NetworkCapabilities
 import android.text.format.DateFormat
 import android.net.wifi.WifiManager
 
-class ChatActivity : AppCompatActivity() {
+class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     companion object {
         private const val PREF_KEY_FOLDER_URI = "pref_folder_uri"
@@ -84,6 +86,9 @@ class ChatActivity : AppCompatActivity() {
     private var timeTextView: TextView? = null
     private var infoIconButton: ImageButton? = null // оставляем поле, но не добавляем в тулбар
 
+     // TTS
+    private var tts: TextToSpeech? = null
+    
     // Data structures
     private val fallback = arrayOf("Привет", "Как дела?", "Расскажи о себе", "Выход")
     private val templatesMap = HashMap<String, MutableList<String>>()
@@ -214,6 +219,9 @@ class ChatActivity : AppCompatActivity() {
             true
         }
 
+        // Инициализация TTS
+        tts = TextToSpeech(this, this)
+        
         if (folderUri == null) {
             showCustomToast("Папка не выбрана! Открой настройки и выбери папку.")
             loadFallbackTemplates()
@@ -244,6 +252,14 @@ class ChatActivity : AppCompatActivity() {
         mascotTopImage?.visibility = View.GONE
     }
 
+    override fun onInit(status: Int) {
+        if (status == TextToSpeech.SUCCESS) {
+            tts?.language = Locale("ru", "RU")
+            tts?.setPitch(1.0f)
+            tts?.setSpeechRate(1.0f)
+        }
+    }
+    
     private fun setupToolbar() {
         val topBar = findViewById<LinearLayout>(R.id.topBar)
         val leftLayout = topBar.getChildAt(0) as LinearLayout
@@ -357,6 +373,8 @@ class ChatActivity : AppCompatActivity() {
         unregisterNetworkReceiver()
         unregisterBluetoothReceiver()
         stopTimeUpdater()
+        tts?.shutdown()
+        tts = null
     }
 
     private fun setupIconTouchEffect(btn: ImageButton?) {
@@ -471,7 +489,7 @@ class ChatActivity : AppCompatActivity() {
         if ((hour >= 23 || hour < 6) && userActivityCount == 2) {
             val sleepResponse = loadTimeToSleepResponse()
             if (sleepResponse != null) {
-                addChatMessage("Ты", userInput)
+                addChatMessage("You", userInput)
                 showTypingIndicator()
                 addChatMessage(currentMascotName, sleepResponse)
                 startIdleTimer()
@@ -487,14 +505,14 @@ class ChatActivity : AppCompatActivity() {
         }
 
         if (dateResponse != null) {
-            addChatMessage("Ты", userInput)
+            addChatMessage("You", userInput)
             showTypingIndicator()
             addChatMessage(currentMascotName, dateResponse)
             startIdleTimer()
             return
         }
 
-        addChatMessage("Ты", userInput)
+        addChatMessage("You", userInput)
         showTypingIndicator()
 
         if (qKeyForCount == lastQuery) {
@@ -1032,7 +1050,7 @@ class ChatActivity : AppCompatActivity() {
                 setPadding(pad, pad / 2, pad, pad / 2)
                 layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
             }
-            val isUser = sender.equals("Ты", ignoreCase = true)
+            val isUser = sender.equals("You", ignoreCase = true)
             if (isUser) {
                 val bubble = createMessageBubble(sender, text, isUser)
                 val lp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
@@ -1057,7 +1075,7 @@ class ChatActivity : AppCompatActivity() {
                         scaleX.start()
                         scaleY.start()
                         Handler(Looper.getMainLooper()).postDelayed({
-                            loadAndSendOuchMessage()
+                            loadAndSendOuchMessage(sender)
                             view.isEnabled = true
                         }, 260)
                     }
@@ -1081,18 +1099,22 @@ class ChatActivity : AppCompatActivity() {
         }
     }
 
-    private fun loadAndSendOuchMessage() {
+    private fun speakText(text: String) {
+        tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "message_${System.currentTimeMillis()}")
+  }
+
+    private fun loadAndSendOuchMessage(mascot: String) {
         val uri = folderUri ?: return
         try {
             val dir = DocumentFile.fromTreeUri(this, uri) ?: return
-            val ouchFile = dir.findFile("ouch.txt")
-            if (ouchFile != null && ouchFile.exists()) {
-                contentResolver.openInputStream(ouchFile.uri)?.bufferedReader()?.use { reader ->
+            val mascotOuch = dir.findFile("${mascot.lowercase(Locale.getDefault())}.txt") ?:                     dir.findFile("ouch.txt")
+            if (mascotOuch != null && mascotOuch.exists()) {
+                contentResolver.openInputStream(mascotOuch.uri)?.bufferedReader()?.use { reader ->
                     val allText = reader.readText()
                     val responses = allText.split("|").map { it.trim() }.filter { it.isNotEmpty() }
                     if (responses.isNotEmpty()) {
                         val randomResponse = responses.random()
-                        addChatMessage(currentMascotName, randomResponse)
+                        addChatMessage(mascot, randomResponse)
                     }
                 }
             }
@@ -1140,13 +1162,18 @@ class ChatActivity : AppCompatActivity() {
             setTextIsSelectable(true)
             val pad = dpToPx(10)
             setPadding(pad, pad, pad, pad)
-            val accent = safeParseColorOrDefault(currentThemeColor, Color.parseColor("#00FF00"))
+            val accent = if (isUser) {
+                Color.parseColor("#00FF00") // фиксированный красный для пользователя
+            } else {
+                safeParseColorOrDefault(currentThemeColor, Color.parseColor("#00FF00"))
+            }
             background = createBubbleDrawable(accent)
             try {
-                setTextColor(Color.parseColor(currentThemeColor))
+                setTextColor(if (isUser) Color.WHITE else Color.parseColor(currentThemeColor))
             } catch (_: Exception) {
                 setTextColor(Color.WHITE)
             }
+                setOnClickListener { speakText(text) }
         }
         container.addView(tvSender)
         container.addView(tv)
