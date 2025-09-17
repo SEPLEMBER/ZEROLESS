@@ -58,6 +58,31 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         private const val SEND_DEBOUNCE_MS = 400L
     }
 
+    // --- утилиты для безопасного доступа к topBar/include-элементам ---
+    private fun findTopBar(): ViewGroup? {
+        val id = resources.getIdentifier("topBar", "id", packageName)
+        val v = if (id != 0) {
+            binding.root.findViewById<View>(id) ?: run { try { findViewById(id) } catch (_: Exception) { null } }
+        } else null
+        return v as? ViewGroup
+    }
+
+    private fun findTopBarChildView(idName: String): View? {
+        val top = findTopBar() ?: return null
+        val childId = resources.getIdentifier(idName, "id", packageName)
+        if (childId == 0) return null
+        return top.findViewById(childId)
+    }
+
+    private fun findTopBarChildViewGroup(idName: String): ViewGroup? {
+        return findTopBarChildView(idName) as? ViewGroup
+    }
+
+    private fun findTopBarChildImageButton(idName: String): ImageButton? {
+        return findTopBarChildView(idName) as? ImageButton
+    }
+    // --- конец утилит ---
+
     private fun getFuzzyDistance(word: String): Int {
         return when {
             word.length <= 4 -> 2
@@ -176,10 +201,11 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     }
 
     private fun setupToolbar() {
-        // Убираем всё слева, затем добавляем виджеты
-        binding.topBar.leftLayout.removeAllViews()
-        binding.topBar.leftLayout.orientation = LinearLayout.HORIZONTAL
-        binding.topBar.leftLayout.gravity = Gravity.CENTER_VERTICAL
+        // Безопасный доступ к topBar/leftLayout
+        val leftLayout = findTopBarChildViewGroup("leftLayout") ?: return
+        leftLayout.removeAllViews()
+        leftLayout.orientation = LinearLayout.HORIZONTAL
+        leftLayout.gravity = Gravity.CENTER_VERTICAL
 
         val iconSize = dpToPx(56)
 
@@ -189,14 +215,14 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             adjustViewBounds = true
             visibility = View.GONE
         }
-        binding.topBar.leftLayout.addView(bluetoothImageView)
+        leftLayout.addView(bluetoothImageView)
 
         val wifiImageView = ImageView(this).apply {
             layoutParams = LinearLayout.LayoutParams(iconSize, iconSize).apply { marginStart = dpToPx(6) }
             scaleType = ImageView.ScaleType.CENTER_CROP
             adjustViewBounds = true
         }
-        binding.topBar.leftLayout.addView(wifiImageView)
+        leftLayout.addView(wifiImageView)
 
         val batteryImageView = ImageView(this).apply {
             layoutParams = LinearLayout.LayoutParams(iconSize, iconSize).apply { marginStart = dpToPx(6) }
@@ -212,12 +238,14 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 LinearLayout.LayoutParams.WRAP_CONTENT
             ).apply { marginStart = dpToPx(8) }
         }
-        binding.topBar.leftLayout.addView(batteryImageView)
-        binding.topBar.leftLayout.addView(batteryPercentView)
+        leftLayout.addView(batteryImageView)
+        leftLayout.addView(batteryPercentView)
 
-        // В layout topBar.root ожидается минимум 2 view — удаляем второй и вставляем текст времени
-        if (binding.topBar.root.childCount > 1) {
-            binding.topBar.root.removeViewAt(1)
+        // Работаем с корнем topBar
+        val topBarRoot = findTopBar() ?: return
+        if (topBarRoot.childCount > 1) {
+            // защищённо удаляем второй элемент, если он есть
+            try { topBarRoot.removeViewAt(1) } catch (_: Exception) {}
         }
         val timeTextView = TextView(this).apply {
             text = getString(R.string.time_placeholder)
@@ -226,7 +254,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             gravity = Gravity.CENTER
             layoutParams = LinearLayout.LayoutParams(0, dpToPx(56), 1f)
         }
-        binding.topBar.root.addView(timeTextView, 1)
+        topBarRoot.addView(timeTextView, 1)
 
         val btnCharging = ImageButton(this).apply {
             background = null
@@ -235,7 +263,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             adjustViewBounds = true
             visibility = View.GONE
         }
-        binding.topBar.root.addView(btnCharging)
+        topBarRoot.addView(btnCharging)
     }
 
     override fun onResume() {
@@ -266,24 +294,24 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     }
 
     private fun setupListeners() {
-        // избегаем вложенных ambiguous it — используем явные переменные
         val buttons: List<ImageButton?> = listOf(
-            binding.topBar.btnLock,
-            binding.topBar.btnTrash,
-            binding.topBar.btnEnvelopeTop,
-            binding.topBar.btnSettings,
+            findTopBarChildImageButton("btnLock") ?: binding.root.findViewById(resources.getIdentifier("btnLock","id",packageName)),
+            findTopBarChildImageButton("btnTrash") ?: binding.root.findViewById(resources.getIdentifier("btnTrash","id",packageName)),
+            findTopBarChildImageButton("btnEnvelopeTop") ?: binding.root.findViewById(resources.getIdentifier("btnEnvelopeTop","id",packageName)),
+            findTopBarChildImageButton("btnSettings") ?: binding.root.findViewById(resources.getIdentifier("btnSettings","id",packageName)),
             binding.envelopeButton
         )
         for (btn in buttons) {
             btn?.let { setupIconTouchEffect(it) }
         }
 
-        binding.topBar.btnLock.setOnClickListener { finish() }
-        binding.topBar.btnTrash.setOnClickListener { clearChat() }
-        binding.topBar.btnSettings.setOnClickListener {
+        // если родные кнопки найдены — навешиваем действия
+        findTopBarChildImageButton("btnLock")?.setOnClickListener { finish() }
+        findTopBarChildImageButton("btnTrash")?.setOnClickListener { clearChat() }
+        findTopBarChildImageButton("btnSettings")?.setOnClickListener {
             startActivity(Intent(this@ChatActivity, SettingsActivity::class.java))
         }
-        binding.topBar.btnEnvelopeTop.setOnClickListener {
+        findTopBarChildImageButton("btnEnvelopeTop")?.setOnClickListener {
             startActivity(Intent(this@ChatActivity, PostsActivity::class.java))
         }
 
@@ -302,12 +330,10 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
 
         binding.envelopeButton.setOnClickListener { sendAction() }
-
         binding.queryInput.setOnEditorActionListener { _, _, _ ->
             sendAction()
             true
         }
-
         binding.queryInput.setOnItemClickListener { parent, _, position, _ ->
             val selected = parent.getItemAtPosition(position) as? String
             selected?.let {
@@ -340,19 +366,21 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 target?.setImageBitmap(loadBitmapFromFolder(name))
             }
 
-            tryLoadToImageButton(getString(R.string.lock_icon), binding.topBar.btnLock)
-            tryLoadToImageButton(getString(R.string.trash_icon), binding.topBar.btnTrash)
-            tryLoadToImageButton(getString(R.string.envelope_icon), binding.topBar.btnEnvelopeTop)
-            tryLoadToImageButton(getString(R.string.settings_icon), binding.topBar.btnSettings)
+            // сначала пробуем найти кнопки внутри topBar, иначе ищем по корню binding.root
+            tryLoadToImageButton(getString(R.string.lock_icon), findTopBarChildImageButton("btnLock") ?: binding.root.findViewById(resources.getIdentifier("btnLock","id",packageName)))
+            tryLoadToImageButton(getString(R.string.trash_icon), findTopBarChildImageButton("btnTrash") ?: binding.root.findViewById(resources.getIdentifier("btnTrash","id",packageName)))
+            tryLoadToImageButton(getString(R.string.envelope_icon), findTopBarChildImageButton("btnEnvelopeTop") ?: binding.root.findViewById(resources.getIdentifier("btnEnvelopeTop","id",packageName)))
+            tryLoadToImageButton(getString(R.string.settings_icon), findTopBarChildImageButton("btnSettings") ?: binding.root.findViewById(resources.getIdentifier("btnSettings","id",packageName)))
             tryLoadToImageButton(getString(R.string.send_icon), binding.envelopeButton)
 
-            val btnCharging = binding.topBar.root.children.find { v -> v is ImageButton && v.visibility == View.GONE } as? ImageButton
+            val topBarRoot = findTopBar()
+            val btnCharging = topBarRoot?.children?.find { v -> v is ImageButton && v.visibility == View.GONE } as? ImageButton
             btnCharging?.let { tryLoadToImageButton(getString(R.string.charging_icon), it) }
 
-            val leftLayout = binding.topBar.leftLayout
-            val bluetoothImageView = leftLayout.getChildAt(0) as? ImageView
-            val wifiImageView = leftLayout.getChildAt(1) as? ImageView
-            val batteryImageView = leftLayout.getChildAt(2) as? ImageView
+            val leftLayout = findTopBarChildViewGroup("leftLayout")
+            val bluetoothImageView = leftLayout?.getChildAt(0) as? ImageView
+            val wifiImageView = leftLayout?.getChildAt(1) as? ImageView
+            val batteryImageView = leftLayout?.getChildAt(2) as? ImageView
 
             tryLoadToImageView(getString(R.string.bluetooth_icon), bluetoothImageView)
             tryLoadToImageView(getString(R.string.wifi_icon), wifiImageView)
