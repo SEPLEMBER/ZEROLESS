@@ -36,7 +36,7 @@ class SplashActivity : AppCompatActivity() {
         }
 
         // Устанавливаем статус "подключение"
-        statusText.text = "подключение"
+        statusText.text = "Подключение..."
 
         // Загружаем только сплэш и метаданные
         loadImageFromSAF("splash_engine.png", splashImage)
@@ -48,7 +48,7 @@ class SplashActivity : AppCompatActivity() {
         Handler(Looper.getMainLooper()).postDelayed({
             startActivity(Intent(this, ChatActivity::class.java))
             finish()
-        }, 2000) // Уменьшил время до 2 секунд для быстрого перехода
+        }, 500)
     }
 
     private fun loadImageFromSAF(filename: String, target: ImageView) {
