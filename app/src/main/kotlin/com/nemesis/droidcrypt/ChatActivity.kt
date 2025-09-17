@@ -140,26 +140,80 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_chat)
+
+        // Create and show splash screen
+        val splashView = createSplashScreen()
+        setContentView(splashView)
+
+        // Perform initialization in a coroutine to avoid blocking UI thread
+        lifecycleScope.launch(Dispatchers.Default) {
+            // Sample call to getFuzzyDistance to ensure it's executed during splash
+            val sampleWord = "example"
+            val fuzzyDistance = getFuzzyDistance(sampleWord)
+            // Log or use the result if needed (for demonstration)
+            android.util.Log.d("ChatActivity", "Fuzzy distance for '$sampleWord': $fuzzyDistance")
+
+            // Perform existing initialization
+            initializeUI()
+
+            // Switch to main UI after delay on main thread
+            withContext(Dispatchers.Main) {
+                // Delay to ensure smooth transition (adjust as needed)
+                Handler(Looper.getMainLooper()).postDelayed({
+                    // Set the main layout
+                    setContentView(R.layout.activity_chat)
+                    // Complete remaining UI setup
+                    completeUISetup()
+                    // Ensure mascot image is hidden as per original logic
+                    mascotTopImage?.visibility = View.GONE
+                    // Show welcome message
+                    if (folderUri == null) {
+                        showCustomToast("Папка не выбрана! Открой настройки и выбери папку.")
+                    }
+                    addChatMessage(currentMascotName, "Добро пожаловать!")
+                }, 3000L) // 3-second delay
+            }
+        }
+    }
+
+    private fun createSplashScreen(): View {
+        val splashLayout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(Color.BLACK)
+            gravity = Gravity.CENTER
+            layoutParams = ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+            )
+        }
+
+        val splashText = TextView(this).apply {
+            text = "с подключением."
+            textSize = 24f
+            setTextColor(Color.WHITE)
+            gravity = Gravity.CENTER
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            )
+        }
+
+        splashLayout.addView(splashText)
+        return splashLayout
+    }
+
+    private fun initializeUI() {
+        // Original initialization logic moved here
         window.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
         supportActionBar?.setBackgroundDrawable(ColorDrawable(Color.argb(128, 0, 0, 0)))
         window.setBackgroundDrawable(ColorDrawable(Color.BLACK))
-        setupToolbar()
-
-        scrollView = findViewById(R.id.scrollView)
-        queryInput = findViewById(R.id.queryInput)
-        envelopeInputButton = findViewById(R.id.envelope_button)
-        btnLock = findViewById(R.id.btn_lock)
-        btnTrash = findViewById(R.id.btn_trash)
-        btnEnvelopeTop = findViewById(R.id.btn_envelope_top)
-        btnSettings = findViewById(R.id.btn_settings)
-        messagesContainer = findViewById(R.id.chatMessagesContainer)
 
         folderUri = intent?.getParcelableExtra("folderUri")
         if (folderUri == null) {
             for (perm in contentResolver.persistedUriPermissions) {
                 if (perm.isReadPermission) {
-                    folderUri = perm.uri; break
+                    folderUri = perm.uri
+                    break
                 }
             }
         }
@@ -180,20 +234,44 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             )
         } catch (_: Exception) {}
 
+        // Initialize TTS
+        tts = TextToSpeech(this, this)
+
+        if (folderUri == null) {
+            loadFallbackTemplates()
+            rebuildInvertedIndex()
+            updateAutoComplete()
+        } else {
+            loadTemplatesFromFile(currentContext)
+            rebuildInvertedIndex()
+            updateAutoComplete()
+        }
+    }
+
+    private fun completeUISetup() {
+        // Setup UI elements after setting the main layout
+        scrollView = findViewById(R.id.scrollView)
+        queryInput = findViewById(R.id.queryInput)
+        envelopeInputButton = findViewById(R.id.envelope_button)
+        btnLock = findViewById(R.id.btn_lock)
+        btnTrash = findViewById(R.id.btn_trash)
+        btnEnvelopeTop = findViewById(R.id.btn_envelope_top)
+        btnSettings = findViewById(R.id.btn_settings)
+        messagesContainer = findViewById(R.id.chatMessagesContainer)
+
+        setupToolbar()
         loadToolbarIcons()
         setupIconTouchEffect(btnLock)
         setupIconTouchEffect(btnTrash)
         setupIconTouchEffect(btnEnvelopeTop)
         setupIconTouchEffect(btnSettings)
         setupIconTouchEffect(envelopeInputButton)
-        // убрал setupIconTouchEffect(infoIconButton) — кнопка info не добавляется в тулбар
         setupIconTouchEffect(btnCharging)
 
         btnLock?.setOnClickListener { finish() }
         btnTrash?.setOnClickListener { clearChat() }
         btnSettings?.setOnClickListener { startActivity(Intent(this, SettingsActivity::class.java)) }
         btnEnvelopeTop?.setOnClickListener { startActivity(Intent(this, PostsActivity::class.java)) }
-        // infoIconButton не добавляем; btnCharging оставляем
         btnCharging?.setOnClickListener { startActivity(Intent(this, PostsActivity::class.java)) }
 
         envelopeInputButton?.setOnClickListener {
@@ -219,22 +297,6 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             true
         }
 
-        // Инициализация TTS
-        tts = TextToSpeech(this, this)
-        
-        if (folderUri == null) {
-            showCustomToast("Папка не выбрана! Открой настройки и выбери папку.")
-            loadFallbackTemplates()
-            rebuildInvertedIndex()
-            updateAutoComplete()
-            addChatMessage(currentMascotName, "Добро пожаловать!")
-        } else {
-            loadTemplatesFromFile(currentContext)
-            rebuildInvertedIndex()
-            updateAutoComplete()
-            addChatMessage(currentMascotName, "Добро пожаловать!")
-        }
-
         queryInput.setOnItemClickListener { parent, _, position, _ ->
             val selected = parent.getItemAtPosition(position) as String
             queryInput.setText(selected)
@@ -249,7 +311,6 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         idleCheckRunnable?.let { dialogHandler.postDelayed(it, 5000) }
 
         loadMascotTopImage()
-        mascotTopImage?.visibility = View.GONE
     }
 
     override fun onInit(status: Int) {
@@ -1098,6 +1159,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             }
         }
     }
+}
 
     private fun speakText(text: String) {
         tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "message_${System.currentTimeMillis()}")
