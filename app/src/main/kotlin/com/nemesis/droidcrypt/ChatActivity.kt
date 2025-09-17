@@ -25,6 +25,8 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.graphics.ColorUtils
 import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.lifecycleScope
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -38,6 +40,8 @@ import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.text.format.DateFormat
 import android.net.wifi.WifiManager
+import android.widget.TextView
+import androidx.core.view.isVisible
 
 class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
@@ -66,7 +70,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     // UI
     private var folderUri: Uri? = null
-    private lateinit var scrollView: ScrollView
+    private lateinit var recyclerView: RecyclerView
     private lateinit var queryInput: AutoCompleteTextView
     private var envelopeInputButton: ImageButton? = null
     private var mascotTopImage: ImageView? = null
@@ -75,8 +79,8 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private var btnEnvelopeTop: ImageButton? = null
     private var btnSettings: ImageButton? = null
     private var btnCharging: ImageButton? = null
-    private lateinit var messagesContainer: LinearLayout
-    private var adapter: ArrayAdapter<String>? = null
+    private var messagesAdapter: MessagesAdapter? = null
+    private val messagesList = mutableListOf<MessageData>()
 
     // Added UI elements (status bar overlay)
     private var batteryImageView: ImageView? = null
@@ -138,6 +142,78 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         )
     }
 
+    data class MessageData(val sender: String, val text: String)
+
+    inner class MessagesAdapter(private val messages: MutableList<MessageData>) :
+        RecyclerView.Adapter<MessagesAdapter.MessageViewHolder>() {
+
+        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): MessageViewHolder {
+            val view = LayoutInflater.from(parent.context).inflate(R.layout.item_message, parent, false)
+            return MessageViewHolder(view)
+        }
+
+        override fun onBindViewHolder(holder: MessageViewHolder, position: Int) {
+            holder.bind(messages[position])
+        }
+
+        override fun getItemCount(): Int = messages.size
+
+        inner class MessageViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
+            private val senderText: TextView = itemView.findViewById(R.id.senderText)
+            private val messageText: TextView = itemView.findViewById(R.id.messageText)
+            private val avatar: ImageView = itemView.findViewById(R.id.avatar)
+
+            fun bind(data: MessageData) {
+                val isUser = data.sender.equals("You", ignoreCase = true)
+                senderText.text = "${data.sender}:"
+                senderText.setTextColor(Color.parseColor("#AAAAAA"))
+                messageText.text = data.text
+                messageText.textSize = 16f
+                messageText.setTextIsSelectable(true)
+                messageText.setPadding(dpToPx(10), dpToPx(10), dpToPx(10), dpToPx(10))
+                val accent = if (isUser) {
+                    Color.parseColor("#00FF00")
+                } else {
+                    safeParseColorOrDefault(currentThemeColor, Color.parseColor("#00FF00"))
+                }
+                messageText.background = createBubbleDrawable(accent)
+                try {
+                    messageText.setTextColor(if (isUser) Color.WHITE else Color.parseColor(currentThemeColor))
+                } catch (_: Exception) {
+                    messageText.setTextColor(Color.WHITE)
+                }
+                messageText.setOnClickListener { speakText(data.text) }
+
+                if (isUser) {
+                    itemView.layoutParams = (itemView.layoutParams as RecyclerView.LayoutParams).apply {
+                        itemView.gravity = Gravity.END
+                        marginStart = dpToPx(48)
+                    }
+                    avatar.visibility = View.GONE
+                } else {
+                    loadAvatarInto(avatar, data.sender)
+                    avatar.visibility = View.VISIBLE
+                    itemView.layoutParams = (itemView.layoutParams as RecyclerView.LayoutParams).apply {
+                        marginEnd = dpToPx(48)
+                    }
+                    avatar.setOnClickListener {
+                        it.isEnabled = false
+                        val scaleX = ObjectAnimator.ofFloat(it, "scaleX", 1f, 1.08f, 1f)
+                        val scaleY = ObjectAnimator.ofFloat(it, "scaleY", 1f, 1.08f, 1f)
+                        scaleX.duration = 250
+                        scaleY.duration = 250
+                        scaleX.start()
+                        scaleY.start()
+                        Handler(Looper.getMainLooper()).postDelayed({
+                            loadAndSendOuchMessage(data.sender)
+                            it.isEnabled = true
+                        }, 260)
+                    }
+                }
+            }
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_chat)
@@ -146,14 +222,18 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         window.setBackgroundDrawable(ColorDrawable(Color.BLACK))
         setupToolbar()
 
-        scrollView = findViewById(R.id.scrollView)
+        recyclerView = findViewById(R.id.chatMessagesContainer) // assuming you change layout to RecyclerView
         queryInput = findViewById(R.id.queryInput)
         envelopeInputButton = findViewById(R.id.envelope_button)
         btnLock = findViewById(R.id.btn_lock)
         btnTrash = findViewById(R.id.btn_trash)
         btnEnvelopeTop = findViewById(R.id.btn_envelope_top)
         btnSettings = findViewById(R.id.btn_settings)
-        messagesContainer = findViewById(R.id.chatMessagesContainer)
+
+        // Setup RecyclerView
+        recyclerView.layoutManager = LinearLayoutManager(this)
+        messagesAdapter = MessagesAdapter(messagesList)
+        recyclerView.adapter = messagesAdapter
 
         folderUri = intent?.getParcelableExtra("folderUri")
         if (folderUri == null) {
@@ -171,7 +251,6 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             }
         } catch (_: Exception) {}
 
-        loadSynonymsAndStopwords()
         try {
             val prefs = PreferenceManager.getDefaultSharedPreferences(this)
             val disable = prefs.getBoolean(PREF_KEY_DISABLE_SCREENSHOTS, false)
@@ -180,20 +259,17 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             )
         } catch (_: Exception) {}
 
-        loadToolbarIcons()
         setupIconTouchEffect(btnLock)
         setupIconTouchEffect(btnTrash)
         setupIconTouchEffect(btnEnvelopeTop)
         setupIconTouchEffect(btnSettings)
         setupIconTouchEffect(envelopeInputButton)
-        // убрал setupIconTouchEffect(infoIconButton) — кнопка info не добавляется в тулбар
         setupIconTouchEffect(btnCharging)
 
         btnLock?.setOnClickListener { finish() }
         btnTrash?.setOnClickListener { clearChat() }
         btnSettings?.setOnClickListener { startActivity(Intent(this, SettingsActivity::class.java)) }
         btnEnvelopeTop?.setOnClickListener { startActivity(Intent(this, PostsActivity::class.java)) }
-        // infoIconButton не добавляем; btnCharging оставляем
         btnCharging?.setOnClickListener { startActivity(Intent(this, PostsActivity::class.java)) }
 
         envelopeInputButton?.setOnClickListener {
@@ -222,17 +298,20 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         // Инициализация TTS
         tts = TextToSpeech(this, this)
         
-        if (folderUri == null) {
-            showCustomToast("Папка не выбрана! Открой настройки и выбери папку.")
-            loadFallbackTemplates()
+        // Async init data
+        lifecycleScope.launch {
+            loadSynonymsAndStopwords()
+            if (folderUri == null) {
+                showCustomToast("Папка не выбрана! Открой настройки и выбери папку.")
+                loadFallbackTemplates()
+            } else {
+                loadTemplatesFromFile(currentContext)
+            }
             rebuildInvertedIndex()
-            updateAutoComplete()
-            addChatMessage(currentMascotName, "Добро пожаловать!")
-        } else {
-            loadTemplatesFromFile(currentContext)
-            rebuildInvertedIndex()
-            updateAutoComplete()
-            addChatMessage(currentMascotName, "Добро пожаловать!")
+            withContext(Dispatchers.Main) {
+                updateAutoComplete()
+                addChatMessage(currentMascotName, "Добро пожаловать!")
+            }
         }
 
         queryInput.setOnItemClickListener { parent, _, position, _ ->
@@ -343,14 +422,18 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     override fun onResume() {
         super.onResume()
-        folderUri?.let { loadTemplatesFromFile(currentContext) }
-        rebuildInvertedIndex()
-        updateAutoComplete()
+        lifecycleScope.launch {
+            folderUri?.let { loadTemplatesFromFile(currentContext) }
+            rebuildInvertedIndex()
+            withContext(Dispatchers.Main) {
+                updateAutoComplete()
+                loadToolbarIconsAsync()
+            }
+        }
         idleCheckRunnable?.let {
             dialogHandler.removeCallbacks(it)
             dialogHandler.postDelayed(it, 5000)
         }
-        loadToolbarIcons()
         registerBatteryReceiver()
         registerNetworkReceiver()
         registerBluetoothReceiver()
@@ -387,83 +470,78 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
     }
 
-    private fun loadToolbarIcons() {
-        val uri = folderUri ?: return
-        try {
-            val dir = DocumentFile.fromTreeUri(this, uri) ?: return
+    private fun loadToolbarIconsAsync() {
+        lifecycleScope.launch(Dispatchers.IO) {
+            val uri = folderUri ?: return@launch
+            try {
+                val dir = DocumentFile.fromTreeUri(this@ChatActivity, uri) ?: return@launch
 
-            fun tryLoadToImageButton(name: String, target: ImageButton?) {
-                if (target == null) return
-                try {
-                    val file = dir.findFile(name)
-                    if (file != null && file.exists()) {
-                        contentResolver.openInputStream(file.uri)?.use { ins ->
-                            val bmp = BitmapFactory.decodeStream(ins)
-                            target.setImageBitmap(bmp)
+                fun loadBitmapAsync(name: String, target: ImageView?, buttonTarget: ImageButton? = null) {
+                    try {
+                        val file = dir.findFile(name)
+                        if (file != null && file.exists()) {
+                            contentResolver.openInputStream(file.uri)?.use { ins ->
+                                val bmp = BitmapFactory.decodeStream(ins)
+                                withContext(Dispatchers.Main) {
+                                    bmp?.let {
+                                        if (target != null) target.setImageBitmap(it)
+                                        if (buttonTarget != null) buttonTarget.setImageBitmap(it)
+                                    }
+                                }
+                            }
                         }
-                    }
-                } catch (_: Exception) {}
-            }
+                    } catch (_: Exception) {}
+                }
 
-            fun tryLoadToImageView(name: String, target: ImageView?) {
-                if (target == null) return
-                try {
-                    val file = dir.findFile(name)
-                    if (file != null && file.exists()) {
-                        contentResolver.openInputStream(file.uri)?.use { ins ->
-                            val bmp = BitmapFactory.decodeStream(ins)
-                            target.setImageBitmap(bmp)
-                        }
-                    }
-                } catch (_: Exception) {}
+                loadBitmapAsync("lock.png", null, btnLock)
+                loadBitmapAsync("trash.png", null, btnTrash)
+                loadBitmapAsync("envelope.png", null, btnEnvelopeTop)
+                loadBitmapAsync("settings.png", null, btnSettings)
+                loadBitmapAsync("charging.png", null, btnCharging)
+                loadBitmapAsync("send.png", null, envelopeInputButton)
+                loadBitmapAsync("battery_5.png", batteryImageView)
+                loadBitmapAsync("wifi.png", wifiImageView)
+                loadBitmapAsync("bluetooth.png", bluetoothImageView)
+                loadBitmapAsync("mobile.png", null) // preload if needed
+            } catch (e: Exception) {
+                e.printStackTrace()
             }
-
-            // infoIconButton — больше не заполняем
-            tryLoadToImageButton("lock.png", btnLock)
-            tryLoadToImageButton("trash.png", btnTrash)
-            tryLoadToImageButton("envelope.png", btnEnvelopeTop)
-            tryLoadToImageButton("settings.png", btnSettings)
-            tryLoadToImageButton("charging.png", btnCharging)
-            tryLoadToImageButton("send.png", envelopeInputButton)
-            tryLoadToImageView("battery_5.png", batteryImageView)
-            tryLoadToImageView("wifi.png", wifiImageView)
-            tryLoadToImageView("bluetooth.png", bluetoothImageView)
-            // mobile icon may be named mobile.png
-            tryLoadToImageView("mobile.png", null) // just ensure file exists if needed; loaded dynamically in updateNetworkUI
-        } catch (e: Exception) {
-            e.printStackTrace()
         }
     }
 
     private fun loadMascotTopImage() {
         val uri = folderUri ?: return
-        try {
-            val dir = DocumentFile.fromTreeUri(this, uri) ?: return
-            val candidates = listOf("${currentMascotName.lowercase(Locale.getDefault())}.png", "mascot_top.png", currentMascotIcon)
-            for (name in candidates) {
-                val file = dir.findFile(name)
-                if (file != null && file.exists()) {
-                    contentResolver.openInputStream(file.uri)?.use { ins ->
-                        val bmp = BitmapFactory.decodeStream(ins)
-                        if (mascotTopImage == null) {
-                            mascotTopImage = ImageView(this).apply {
-                                val size = dpToPx(120)
-                                layoutParams = LinearLayout.LayoutParams(size, size).apply {
-                                    gravity = Gravity.CENTER_HORIZONTAL
-                                    topMargin = dpToPx(8)
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                val dir = DocumentFile.fromTreeUri(this@ChatActivity, uri) ?: return@launch
+                val candidates = listOf("${currentMascotName.lowercase(Locale.getDefault())}.png", "mascot_top.png", currentMascotIcon)
+                for (name in candidates) {
+                    val file = dir.findFile(name)
+                    if (file != null && file.exists()) {
+                        contentResolver.openInputStream(file.uri)?.use { ins ->
+                            val bmp = BitmapFactory.decodeStream(ins)
+                            withContext(Dispatchers.Main) {
+                                if (mascotTopImage == null) {
+                                    mascotTopImage = ImageView(this@ChatActivity).apply {
+                                        val size = dpToPx(120)
+                                        layoutParams = LinearLayout.LayoutParams(size, size).apply {
+                                            gravity = Gravity.CENTER_HORIZONTAL
+                                            topMargin = dpToPx(8)
+                                        }
+                                        scaleType = ImageView.ScaleType.CENTER_CROP
+                                        adjustViewBounds = true
+                                    }
+                                    val root = findViewById<ViewGroup>(android.R.id.content)
+                                    root.addView(mascotTopImage, 0)
                                 }
-                                scaleType = ImageView.ScaleType.CENTER_CROP
-                                adjustViewBounds = true
+                                mascotTopImage?.setImageBitmap(bmp)
                             }
-                            val root = findViewById<ViewGroup>(android.R.id.content)
-                            root.addView(mascotTopImage, 0)
+                            return@launch
                         }
-                        mascotTopImage?.setImageBitmap(bmp)
-                        return
                     }
                 }
-            }
-        } catch (_: Exception) {}
+            } catch (_: Exception) {}
+        }
     }
 
     private fun processUserQuery(userInput: String) {
@@ -532,6 +610,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             return
         }
 
+        // Snapshot on Main, then process in background
         val templatesSnapshot = HashMap(templatesMap)
         val invertedIndexSnapshot = HashMap<String, MutableList<String>>()
         for ((k, v) in invertedIndex) invertedIndexSnapshot[k] = ArrayList(v)
@@ -568,7 +647,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             }
 
             // helper: parses a templates file into maps (без изменения UI) — используется для тематического поиска
-            fun parseTemplatesFromFile(filename: String): Pair<HashMap<String, MutableList<String>>, HashMap<String, MutableList<String>>> {
+            suspend fun parseTemplatesFromFile(filename: String): Pair<HashMap<String, MutableList<String>>, HashMap<String, MutableList<String>>> {
                 val localTemplates = HashMap<String, MutableList<String>>()
                 val localKeywords = HashMap<String, MutableList<String>>()
                 val uriLocal = folderUri ?: return Pair(localTemplates, localKeywords)
@@ -659,18 +738,20 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
             if (subqueryResponses.isNotEmpty()) {
                 val combined = subqueryResponses.joinToString(". ")
-                return@launch withContext(Dispatchers.Main) {
+                withContext(Dispatchers.Main) {
                     addChatMessage(currentMascotName, combined)
                     startIdleTimer()
                 }
+                return@launch
             }
 
             for ((keyword, responses) in keywordResponsesSnapshot) {
                 if (qFiltered.contains(keyword) && responses.isNotEmpty()) {
-                    return@launch withContext(Dispatchers.Main) {
+                    withContext(Dispatchers.Main) {
                         addChatMessage(currentMascotName, responses.random())
                         startIdleTimer()
                     }
+                    return@launch
                 }
             }
 
@@ -713,10 +794,11 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             if (bestByJaccard != null && bestJaccard >= JACCARD_THRESHOLD) {
                 val possible = templatesSnapshot[bestByJaccard]
                 if (!possible.isNullOrEmpty()) {
-                    return@launch withContext(Dispatchers.Main) {
+                    withContext(Dispatchers.Main) {
                         addChatMessage(currentMascotName, possible.random())
                         startIdleTimer()
                     }
+                    return@launch
                 }
             }
 
@@ -737,10 +819,11 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             if (bestKey != null && bestDist <= maxDist) {
                 val possible = templatesSnapshot[bestKey]
                 if (!possible.isNullOrEmpty()) {
-                    return@launch withContext(Dispatchers.Main) {
+                    withContext(Dispatchers.Main) {
                         addChatMessage(currentMascotName, possible.random())
                         startIdleTimer()
                     }
+                    return@launch
                 }
             }
 
@@ -748,110 +831,115 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             val lower = normalizeLocal(qFiltered)
             for ((keyword, value) in contextMapSnapshot) {
                 if (lower.contains(keyword)) {
-                    return@launch withContext(Dispatchers.Main) {
+                    withContext(Dispatchers.Main) {
                         // если надо — переключаем глобальный контекст (UI thread)
                         if (value != currentContext) {
                             currentContext = value
-                            loadTemplatesFromFile(currentContext)
-                            rebuildInvertedIndex()
-                            updateAutoComplete()
-                        }
-                    }.let {
-                        // после переключения — в background проверим тематический файл на совпадения
-                        val (localTemplates, localKeywords) = parseTemplatesFromFile(value)
-                        // сначала точное совпадение в тематическом файле
-                        localTemplates[ qFiltered ]?.let { possible ->
-                            if (possible.isNotEmpty()) {
-                                return@launch withContext(Dispatchers.Main) {
-                                    addChatMessage(currentMascotName, possible.random())
-                                    startIdleTimer()
-                                }
+                            lifecycleScope.launch {
+                                loadTemplatesFromFile(currentContext)
+                                rebuildInvertedIndex()
+                                withContext(Dispatchers.Main) { updateAutoComplete() }
                             }
-                        }
-                        // построим локальный inverted index для тематического файла
-                        val localInverted = HashMap<String, MutableList<String>>()
-                        for ((k, v) in localTemplates) {
-                            val toks = filterStopwordsAndMapSynonymsLocal(k).first
-                            for (t in toks) {
-                                val list = localInverted.getOrPut(t) { mutableListOf() }
-                                if (!list.contains(k)) list.add(k)
-                            }
-                        }
-                        // кандидаты из локального inverted
-                        val localCandidateCounts = HashMap<String, Int>()
-                        val tokens = qTokens
-                        for (tok in tokens) {
-                            localInverted[tok]?.forEach { trig ->
-                                localCandidateCounts[trig] = localCandidateCounts.getOrDefault(trig, 0) + 1
-                            }
-                        }
-                        val localCandidates: List<String> = if (localCandidateCounts.isNotEmpty()) {
-                            localCandidateCounts.entries
-                                .filter { it.value >= CANDIDATE_TOKEN_THRESHOLD }
-                                .sortedByDescending { it.value }
-                                .map { it.key }
-                                .take(MAX_CANDIDATES_FOR_LEV)
-                        } else {
-                            val md = getFuzzyDistance(qFiltered)
-                            localTemplates.keys.filter { abs(it.length - qFiltered.length) <= md }
-                                .take(MAX_CANDIDATES_FOR_LEV)
-                        }
-                        // Jaccard local
-                        var bestLocal: String? = null
-                        var bestLocalJ = 0.0
-                        val qSetLocal = tokens.toSet()
-                        for (key in localCandidates) {
-                            val keyTokens = filterStopwordsAndMapSynonymsLocal(key).first.toSet()
-                            if (keyTokens.isEmpty()) continue
-                            val inter = qSetLocal.intersect(keyTokens).size.toDouble()
-                            val union = qSetLocal.union(keyTokens).size.toDouble()
-                            val j = if (union == 0.0) 0.0 else inter / union
-                            if (j > bestLocalJ) {
-                                bestLocalJ = j
-                                bestLocal = key
-                            }
-                        }
-                        if (bestLocal != null && bestLocalJ >= JACCARD_THRESHOLD) {
-                            val possible = localTemplates[bestLocal]
-                            if (!possible.isNullOrEmpty()) {
-                                return@launch withContext(Dispatchers.Main) {
-                                    addChatMessage(currentMascotName, possible.random())
-                                    startIdleTimer()
-                                }
-                            }
-                        }
-                        // Levenshtein local
-                        var bestLocalKey: String? = null
-                        var bestLocalDist = Int.MAX_VALUE
-                        for (key in localCandidates) {
-                            val maxD = getFuzzyDistance(qFiltered)
-                            if (abs(key.length - qFiltered.length) > maxD + 1) continue
-                            val d = levenshtein(qFiltered, key, qFiltered)
-                            if (d < bestLocalDist) {
-                                bestLocalDist = d
-                                bestLocalKey = key
-                            }
-                            if (bestLocalDist == 0) break
-                        }
-                        if (bestLocalKey != null && bestLocalDist <= getFuzzyDistance(qFiltered)) {
-                            val possible = localTemplates[bestLocalKey]
-                            if (!possible.isNullOrEmpty()) {
-                                return@launch withContext(Dispatchers.Main) {
-                                    addChatMessage(currentMascotName, possible.random())
-                                    startIdleTimer()
-                                }
-                            }
-                        }
-                        // если ничего не нашлось — вернём дефолтный ответ
-                        return@launch withContext(Dispatchers.Main) {
-                            addChatMessage(currentMascotName, getDummyResponse(qOrig))
-                            startIdleTimer()
                         }
                     }
+                    // после переключения — в background проверим тематический файл на совпадения
+                    val (localTemplates, localKeywords) = parseTemplatesFromFile(value)
+                    // сначала точное совпадение в тематическом файле
+                    localTemplates[ qFiltered ]?.let { possible ->
+                        if (possible.isNotEmpty()) {
+                            withContext(Dispatchers.Main) {
+                                addChatMessage(currentMascotName, possible.random())
+                                startIdleTimer()
+                            }
+                            return@launch
+                        }
+                    }
+                    // построим локальный inverted index для тематического файла
+                    val localInverted = HashMap<String, MutableList<String>>()
+                    for ((k, v) in localTemplates) {
+                        val toks = filterStopwordsAndMapSynonymsLocal(k).first
+                        for (t in toks) {
+                            val list = localInverted.getOrPut(t) { mutableListOf() }
+                            if (!list.contains(k)) list.add(k)
+                        }
+                    }
+                    // кандидаты из локального inverted
+                    val localCandidateCounts = HashMap<String, Int>()
+                    val tokens = qTokens
+                    for (tok in tokens) {
+                        localInverted[tok]?.forEach { trig ->
+                            localCandidateCounts[trig] = localCandidateCounts.getOrDefault(trig, 0) + 1
+                        }
+                    }
+                    val localCandidates: List<String> = if (localCandidateCounts.isNotEmpty()) {
+                        localCandidateCounts.entries
+                            .filter { it.value >= CANDIDATE_TOKEN_THRESHOLD }
+                            .sortedByDescending { it.value }
+                            .map { it.key }
+                            .take(MAX_CANDIDATES_FOR_LEV)
+                    } else {
+                        val md = getFuzzyDistance(qFiltered)
+                        localTemplates.keys.filter { abs(it.length - qFiltered.length) <= md }
+                            .take(MAX_CANDIDATES_FOR_LEV)
+                    }
+                    // Jaccard local
+                    var bestLocal: String? = null
+                    var bestLocalJ = 0.0
+                    val qSetLocal = tokens.toSet()
+                    for (key in localCandidates) {
+                        val keyTokens = filterStopwordsAndMapSynonymsLocal(key).first.toSet()
+                        if (keyTokens.isEmpty()) continue
+                        val inter = qSetLocal.intersect(keyTokens).size.toDouble()
+                        val union = qSetLocal.union(keyTokens).size.toDouble()
+                        val j = if (union == 0.0) 0.0 else inter / union
+                        if (j > bestLocalJ) {
+                            bestLocalJ = j
+                            bestLocal = key
+                        }
+                    }
+                    if (bestLocal != null && bestLocalJ >= JACCARD_THRESHOLD) {
+                        val possible = localTemplates[bestLocal]
+                        if (!possible.isNullOrEmpty()) {
+                            withContext(Dispatchers.Main) {
+                                addChatMessage(currentMascotName, possible.random())
+                                startIdleTimer()
+                            }
+                            return@launch
+                        }
+                    }
+                    // Levenshtein local
+                    var bestLocalKey: String? = null
+                    var bestLocalDist = Int.MAX_VALUE
+                    for (key in localCandidates) {
+                        val maxD = getFuzzyDistance(qFiltered)
+                        if (abs(key.length - qFiltered.length) > maxD + 1) continue
+                        val d = levenshtein(qFiltered, key, qFiltered)
+                        if (d < bestLocalDist) {
+                            bestLocalDist = d
+                            bestLocalKey = key
+                        }
+                        if (bestLocalDist == 0) break
+                    }
+                    if (bestLocalKey != null && bestLocalDist <= getFuzzyDistance(qFiltered)) {
+                        val possible = localTemplates[bestLocalKey]
+                        if (!possible.isNullOrEmpty()) {
+                            withContext(Dispatchers.Main) {
+                                addChatMessage(currentMascotName, possible.random())
+                                startIdleTimer()
+                            }
+                            return@launch
+                        }
+                    }
+                    // если ничего не нашлось — вернём дефолтный ответ
+                    withContext(Dispatchers.Main) {
+                        addChatMessage(currentMascotName, getDummyResponse(qOrig))
+                        startIdleTimer()
+                    }
+                    return@launch
                 }
             }
 
-            return@launch withContext(Dispatchers.Main) {
+            withContext(Dispatchers.Main) {
                 addChatMessage(currentMascotName, getDummyResponse(qOrig))
                 startIdleTimer()
             }
@@ -863,10 +951,14 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         when {
             cmd == "/reload" -> {
                 addChatMessage(currentMascotName, "Перезагружаю шаблоны...")
-                loadTemplatesFromFile(currentContext)
-                rebuildInvertedIndex()
-                updateAutoComplete()
-                addChatMessage(currentMascotName, "Шаблоны перезагружены.")
+                lifecycleScope.launch {
+                    loadTemplatesFromFile(currentContext)
+                    rebuildInvertedIndex()
+                    withContext(Dispatchers.Main) {
+                        updateAutoComplete()
+                        addChatMessage(currentMascotName, "Шаблоны перезагружены.")
+                    }
+                }
             }
             cmd == "/stats" -> {
                 val templatesCount = templatesMap.size
@@ -885,28 +977,16 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private fun showTypingIndicator() {
         runOnUi {
-            val existing = messagesContainer.findViewWithTag<View>("typingView")
-            if (existing != null) return@runOnUi
-            val typingView = TextView(this).apply {
-                text = "печатает..."
-                textSize = 14f
-                setTextColor(getColor(android.R.color.white))
-                setBackgroundColor(0x80000000.toInt())
-                alpha = 0.7f
-                setPadding(16, 8, 16, 8)
-                tag = "typingView"
-                layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT
-                ).apply {
-                    setMargins(0, 16, 0, 0)
-                }
-            }
-            messagesContainer.addView(typingView)
-            scrollView.post { scrollView.smoothScrollTo(0, messagesContainer.bottom) }
+            val typingPosition = messagesList.size
+            messagesList.add(MessageData("", "печатает..."))
+            messagesAdapter?.notifyItemInserted(typingPosition)
+            recyclerView.smoothScrollToPosition(typingPosition)
             Handler(Looper.getMainLooper()).postDelayed({
                 runOnUi {
-                    messagesContainer.findViewWithTag<View>("typingView")?.let { messagesContainer.removeView(it) }
+                    if (messagesList.last().text == "печатает...") {
+                        messagesList.removeLast()
+                        messagesAdapter?.notifyItemRemoved(messagesList.size)
+                    }
                 }
             }, (1000..3000).random().toLong())
         }
@@ -914,14 +994,17 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private fun clearChat() {
         runOnUi {
-            messagesContainer.removeAllViews()
+            messagesList.clear()
+            messagesAdapter?.notifyDataSetChanged()
             queryCountMap.clear()
             lastQuery = ""
             currentContext = "base.txt"
-            loadTemplatesFromFile(currentContext)
-            rebuildInvertedIndex()
-            updateAutoComplete()
-            addChatMessage(currentMascotName, "Чат очищен. Возвращаюсь к началу.")
+            lifecycleScope.launch {
+                loadTemplatesFromFile(currentContext)
+                rebuildInvertedIndex()
+                withContext(Dispatchers.Main) { updateAutoComplete() }
+                addChatMessage(currentMascotName, "Чат очищен. Возвращаюсь к началу.")
+            }
         }
     }
 
@@ -954,41 +1037,43 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         return s.split(Regex("\\s+")).map { it.trim() }.filter { it.isNotEmpty() }
     }
 
-    private fun loadSynonymsAndStopwords() {
+    private suspend fun loadSynonymsAndStopwords() {
         synonymsMap.clear()
         stopwords.clear()
         val uri = folderUri ?: return
-        try {
-            val dir = DocumentFile.fromTreeUri(this, uri) ?: return
-            val synFile = dir.findFile("synonims.txt")
-            if (synFile != null && synFile.exists()) {
-                contentResolver.openInputStream(synFile.uri)?.bufferedReader()?.use { reader ->
-                    reader.forEachLine { raw ->
-                        var l = raw.trim()
-                        if (l.isEmpty()) return@forEachLine
-                        if (l.startsWith("*") && l.endsWith("*") && l.length > 1) {
-                            l = l.substring(1, l.length - 1)
-                        }
-                        val parts = l.split(";").map { normalizeText(it).trim() }.filter { it.isNotEmpty() }
-                        if (parts.isEmpty()) return@forEachLine
-                        val canonical = parts.last()
-                        for (p in parts) {
-                            synonymsMap[p] = canonical
+        withContext(Dispatchers.IO) {
+            try {
+                val dir = DocumentFile.fromTreeUri(this@ChatActivity, uri) ?: return@withContext
+                val synFile = dir.findFile("synonims.txt")
+                if (synFile != null && synFile.exists()) {
+                    contentResolver.openInputStream(synFile.uri)?.bufferedReader()?.use { reader ->
+                        reader.forEachLine { raw ->
+                            var l = raw.trim()
+                            if (l.isEmpty()) return@forEachLine
+                            if (l.startsWith("*") && l.endsWith("*") && l.length > 1) {
+                                l = l.substring(1, l.length - 1)
+                            }
+                            val parts = l.split(";").map { normalizeText(it).trim() }.filter { it.isNotEmpty() }
+                            if (parts.isEmpty()) return@forEachLine
+                            val canonical = parts.last()
+                            for (p in parts) {
+                                synonymsMap[p] = canonical
+                            }
                         }
                     }
                 }
-            }
-            val stopFile = dir.findFile("stopwords.txt")
-            if (stopFile != null && stopFile.exists()) {
-                contentResolver.openInputStream(stopFile.uri)?.bufferedReader()?.use { reader ->
-                    val all = reader.readText()
-                    if (all.isNotEmpty()) {
-                        val parts = all.split("^").map { normalizeText(it).trim() }.filter { it.isNotEmpty() }
-                        for (p in parts) stopwords.add(p)
+                val stopFile = dir.findFile("stopwords.txt")
+                if (stopFile != null && stopFile.exists()) {
+                    contentResolver.openInputStream(stopFile.uri)?.bufferedReader()?.use { reader ->
+                        val all = reader.readText()
+                        if (all.isNotEmpty()) {
+                            val parts = all.split("^").map { normalizeText(it).trim() }.filter { it.isNotEmpty() }
+                            for (p in parts) stopwords.add(p)
+                        }
                     }
                 }
-            }
-        } catch (e: Exception) {}
+            } catch (e: Exception) {}
+        }
     }
 
     private fun filterStopwordsAndMapSynonyms(input: String): Pair<List<String>, String> {
@@ -1002,13 +1087,15 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         return Pair(mapped, joined)
     }
 
-    private fun rebuildInvertedIndex() {
-        invertedIndex.clear()
-        for (key in templatesMap.keys) {
-            val toks = filterStopwordsAndMapSynonyms(key).first
-            for (t in toks) {
-                val list = invertedIndex.getOrPut(t) { mutableListOf() }
-                if (!list.contains(key)) list.add(key)
+    private suspend fun rebuildInvertedIndex() {
+        withContext(Dispatchers.Default) {
+            invertedIndex.clear()
+            for (key in templatesMap.keys) {
+                val toks = filterStopwordsAndMapSynonyms(key).first
+                for (t in toks) {
+                    val list = invertedIndex.getOrPut(t) { mutableListOf() }
+                    if (!list.contains(key)) list.add(key)
+                }
             }
         }
     }
@@ -1044,57 +1131,16 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private fun addChatMessage(sender: String, text: String) {
         runOnUi {
-            val row = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                val pad = dpToPx(6)
-                setPadding(pad, pad / 2, pad, pad / 2)
-                layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+            val position = messagesList.size
+            messagesList.add(MessageData(sender, text))
+            if (messagesList.size > MAX_MESSAGES) {
+                messagesList.removeAt(0)
+                messagesAdapter?.notifyItemRemoved(0)
             }
-            val isUser = sender.equals("You", ignoreCase = true)
-            if (isUser) {
-                val bubble = createMessageBubble(sender, text, isUser)
-                val lp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-                lp.gravity = Gravity.END
-                lp.marginStart = dpToPx(48)
-                row.addView(spaceView(), LinearLayout.LayoutParams(0, 0, 1f))
-                row.addView(bubble, lp)
-            } else {
-                val avatarView = ImageView(this).apply {
-                    val size = dpToPx(64)
-                    layoutParams = LinearLayout.LayoutParams(size, size)
-                    scaleType = ImageView.ScaleType.CENTER_CROP
-                    adjustViewBounds = true
-                    loadAvatarInto(this, sender)
-                    // при клике — лёгкое свечение, затем ouch
-                    setOnClickListener { view ->
-                        view.isEnabled = false
-                        val scaleX = ObjectAnimator.ofFloat(view, "scaleX", 1f, 1.08f, 1f)
-                        val scaleY = ObjectAnimator.ofFloat(view, "scaleY", 1f, 1.08f, 1f)
-                        scaleX.duration = 250
-                        scaleY.duration = 250
-                        scaleX.start()
-                        scaleY.start()
-                        Handler(Looper.getMainLooper()).postDelayed({
-                            loadAndSendOuchMessage(sender)
-                            view.isEnabled = true
-                        }, 260)
-                    }
-                }
-                val bubble = createMessageBubble(sender, text, isUser)
-                val bubbleLp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-                bubbleLp.marginStart = dpToPx(8)
-                row.addView(avatarView)
-                row.addView(bubble, bubbleLp)
-            }
-            messagesContainer.addView(row)
-            messagesContainer.findViewWithTag<View>("typingView")?.let { messagesContainer.removeView(it) }
-            if (messagesContainer.childCount > MAX_MESSAGES) {
-                val removeCount = messagesContainer.childCount - MAX_MESSAGES
-                repeat(removeCount) { messagesContainer.removeViewAt(0) }
-            }
-            scrollView.post { scrollView.smoothScrollTo(0, messagesContainer.bottom) }
-            if (!isUser) {
-                playNotificationSound()
+            messagesAdapter?.notifyItemInserted(position)
+            recyclerView.smoothScrollToPosition(position)
+            if (!sender.equals("You", ignoreCase = true)) {
+                playNotificationSoundAsync()
             }
         }
     }
@@ -1105,82 +1151,57 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private fun loadAndSendOuchMessage(mascot: String) {
         val uri = folderUri ?: return
-        try {
-            val dir = DocumentFile.fromTreeUri(this, uri) ?: return
-            val mascotOuch = dir.findFile("${mascot.lowercase(Locale.getDefault())}.txt") ?:                     dir.findFile("ouch.txt")
-            if (mascotOuch != null && mascotOuch.exists()) {
-                contentResolver.openInputStream(mascotOuch.uri)?.bufferedReader()?.use { reader ->
-                    val allText = reader.readText()
-                    val responses = allText.split("|").map { it.trim() }.filter { it.isNotEmpty() }
-                    if (responses.isNotEmpty()) {
-                        val randomResponse = responses.random()
-                        addChatMessage(mascot, randomResponse)
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                val dir = DocumentFile.fromTreeUri(this@ChatActivity, uri) ?: return@launch
+                val mascotOuch = dir.findFile("${mascot.lowercase(Locale.getDefault())}.txt") ?: dir.findFile("ouch.txt")
+                if (mascotOuch != null && mascotOuch.exists()) {
+                    contentResolver.openInputStream(mascotOuch.uri)?.bufferedReader()?.use { reader ->
+                        val allText = reader.readText()
+                        val responses = allText.split("|").map { it.trim() }.filter { it.isNotEmpty() }
+                        if (responses.isNotEmpty()) {
+                            val randomResponse = responses.random()
+                            withContext(Dispatchers.Main) {
+                                addChatMessage(mascot, randomResponse)
+                            }
+                        }
                     }
                 }
-            }
-        } catch (e: Exception) {
-            showCustomToast("Ошибка загрузки ouch.txt: ${e.message}")
-        }
-    }
-
-    private fun playNotificationSound() {
-        val uri = folderUri ?: return
-        try {
-            val dir = DocumentFile.fromTreeUri(this, uri) ?: return
-            val soundFile = dir.findFile("notify.ogg") ?: return
-            if (!soundFile.exists()) return
-            val afd = contentResolver.openAssetFileDescriptor(soundFile.uri, "r") ?: return
-            val player = MediaPlayer()
-            try {
-                player.setDataSource(afd.fileDescriptor, afd.startOffset, afd.length)
-                afd.close()
-                player.prepareAsync()
-                player.setOnPreparedListener { it.start() }
-                player.setOnCompletionListener { it.reset(); it.release() }
-                player.setOnErrorListener { mp, _, _ -> try { mp.reset(); mp.release() } catch (_: Exception) {}; true }
             } catch (e: Exception) {
-                try { afd.close() } catch (_: Exception) {}
-                try { player.reset(); player.release() } catch (_: Exception) {}
+                withContext(Dispatchers.Main) {
+                    showCustomToast("Ошибка загрузки ouch.txt: ${e.message}")
+                }
             }
-        } catch (_: Exception) {}
-    }
-
-    private fun spaceView(): View = View(this).apply {
-        layoutParams = LinearLayout.LayoutParams(0, 0, 1f)
-    }
-
-    private fun createMessageBubble(sender: String, text: String, isUser: Boolean): LinearLayout {
-        val container = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        val tvSender = TextView(this).apply {
-            this.text = "$sender:"
-            textSize = 12f
-            setTextColor(Color.parseColor("#AAAAAA"))
         }
-        val tv = TextView(this).apply {
-            this.text = text
-            textSize = 16f
-            setTextIsSelectable(true)
-            val pad = dpToPx(10)
-            setPadding(pad, pad, pad, pad)
-            val accent = if (isUser) {
-                Color.parseColor("#00FF00") // фиксированный красный для пользователя
-            } else {
-                safeParseColorOrDefault(currentThemeColor, Color.parseColor("#00FF00"))
-            }
-            background = createBubbleDrawable(accent)
+    }
+
+    private fun playNotificationSoundAsync() {
+        val uri = folderUri ?: return
+        lifecycleScope.launch(Dispatchers.IO) {
             try {
-                setTextColor(if (isUser) Color.WHITE else Color.parseColor(currentThemeColor))
-            } catch (_: Exception) {
-                setTextColor(Color.WHITE)
-            }
-                setOnClickListener { speakText(text) }
+                val dir = DocumentFile.fromTreeUri(this@ChatActivity, uri) ?: return@launch
+                val soundFile = dir.findFile("notify.ogg") ?: return@launch
+                if (!soundFile.exists()) return@launch
+                val afd = contentResolver.openAssetFileDescriptor(soundFile.uri, "r") ?: return@launch
+                val player = MediaPlayer()
+                try {
+                    player.setDataSource(afd.fileDescriptor, afd.startOffset, afd.length)
+                    afd.close()
+                    withContext(Dispatchers.Main) {
+                        player.prepareAsync()
+                        player.setOnPreparedListener { it.start() }
+                        player.setOnCompletionListener { it.reset(); it.release() }
+                        player.setOnErrorListener { mp, _, _ -> try { mp.reset(); mp.release() } catch (_: Exception) {}; true }
+                    }
+                } catch (e: Exception) {
+                    try { afd.close() } catch (_: Exception) {}
+                    try { player.reset(); player.release() } catch (_: Exception) {}
+                }
+            } catch (_: Exception) {}
         }
-        container.addView(tvSender)
-        container.addView(tv)
-        return container
     }
 
-    private fun createBubbleDrawable(accentColor: Int): GradientDrawable {
+    private fun createMessageBubbleDrawable(accentColor: Int): GradientDrawable {
         return GradientDrawable().apply {
             val bg = blendColors(Color.parseColor("#0A0A0A"), accentColor, 0.06f)
             setColor(bg)
@@ -1190,23 +1211,33 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     }
 
     private fun loadAvatarInto(target: ImageView, sender: String) {
-        val uri = folderUri ?: return
-        try {
-            val dir = DocumentFile.fromTreeUri(this, uri) ?: return
-            val s = sender.lowercase(Locale.getDefault())
-            val candidates = listOf("${s}_icon.png", "${s}_avatar.png", "${s}.png", currentMascotIcon)
-            for (name in candidates) {
-                val f = dir.findFile(name) ?: continue
-                if (f.exists()) {
-                    contentResolver.openInputStream(f.uri)?.use { ins ->
-                        val bmp = BitmapFactory.decodeStream(ins)
-                        target.setImageBitmap(bmp)
-                        return
+        val uri = folderUri ?: run { target.setImageResource(android.R.color.transparent); return }
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                val dir = DocumentFile.fromTreeUri(this@ChatActivity, uri) ?: return@launch
+                val s = sender.lowercase(Locale.getDefault())
+                val candidates = listOf("${s}_icon.png", "${s}_avatar.png", "${s}.png", currentMascotIcon)
+                for (name in candidates) {
+                    val f = dir.findFile(name) ?: continue
+                    if (f.exists()) {
+                        contentResolver.openInputStream(f.uri)?.use { ins ->
+                            val bmp = BitmapFactory.decodeStream(ins)
+                            withContext(Dispatchers.Main) {
+                                target.setImageBitmap(bmp)
+                            }
+                            return@launch
+                        }
                     }
                 }
+                withContext(Dispatchers.Main) {
+                    target.setImageResource(android.R.color.transparent)
+                }
+            } catch (_: Exception) {
+                withContext(Dispatchers.Main) {
+                    target.setImageResource(android.R.color.transparent)
+                }
             }
-        } catch (_: Exception) {}
-        target.setImageResource(android.R.color.transparent)
+        }
     }
 
     private fun blendColors(base: Int, accent: Int, ratio: Float): Int {
@@ -1229,125 +1260,121 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         return (dp * density).roundToInt()
     }
 
-    private fun loadTemplatesFromFile(filename: String) {
-        templatesMap.clear()
-        keywordResponses.clear()
-        mascotList.clear()
-        if (filename == "base.txt") {
-            contextMap.clear()
-        }
-        currentMascotName = "Racky"
-        currentMascotIcon = "raccoon_icon.png"
-        currentThemeColor = "#00FF00"
-        currentThemeBackground = "#000000"
-        loadSynonymsAndStopwords()
-        if (folderUri == null) {
-            loadFallbackTemplates()
-            rebuildInvertedIndex()
-            updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
-            return
-        }
-        try {
-            val dir = DocumentFile.fromTreeUri(this, folderUri!!) ?: run {
-                loadFallbackTemplates()
-                rebuildInvertedIndex()
-                updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
-                return
+    private suspend fun loadTemplatesFromFile(filename: String) {
+        withContext(Dispatchers.IO) {
+            templatesMap.clear()
+            keywordResponses.clear()
+            mascotList.clear()
+            if (filename == "base.txt") {
+                contextMap.clear()
             }
-            val file = dir.findFile(filename)
-            if (file == null || !file.exists()) {
+            currentMascotName = "Racky"
+            currentMascotIcon = "raccoon_icon.png"
+            currentThemeColor = "#00FF00"
+            currentThemeBackground = "#000000"
+            loadSynonymsAndStopwords() // already suspend
+            if (folderUri == null) {
                 loadFallbackTemplates()
-                rebuildInvertedIndex()
-                updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
-                return
+                return@withContext
             }
-            contentResolver.openInputStream(file.uri)?.bufferedReader()?.use { reader ->
-                reader.forEachLine { raw ->
-                    val l = raw.trim()
-                    if (l.isEmpty()) return@forEachLine
-                    if (filename == "base.txt" && l.startsWith(":") && l.endsWith(":")) {
-                        val contextLine = l.substring(1, l.length - 1)
-                        if (contextLine.contains("=")) {
-                            val parts = contextLine.split("=", limit = 2)
-                            if (parts.size == 2) {
-                                val keyword = parts[0].trim().lowercase(Locale.ROOT)
-                                val contextFile = parts[1].trim()
-                                if (keyword.isNotEmpty() && contextFile.isNotEmpty()) contextMap[keyword] = contextFile
-                            }
-                        }
-                        return@forEachLine
-                    }
-                    if (l.startsWith("-")) {
-                        val keywordLine = l.substring(1)
-                        if (keywordLine.contains("=")) {
-                            val parts = keywordLine.split("=", limit = 2)
-                            if (parts.size == 2) {
-                                val keyword = parts[0].trim().lowercase(Locale.ROOT)
-                                val responses = parts[1].split("|")
-                                val responseList = responses.mapNotNull { it.trim().takeIf { s -> s.isNotEmpty() } }.toMutableList()
-                                if (keyword.isNotEmpty() && responseList.isNotEmpty()) keywordResponses[keyword] = responseList
-                            }
-                        }
-                        return@forEachLine
-                    }
-                    if (!l.contains("=")) return@forEachLine
-                    val parts = l.split("=", limit = 2)
-                    if (parts.size == 2) {
-                        val triggerRaw = parts[0].trim()
-                        val trigger = normalizeText(triggerRaw)
-                        val triggerFiltered = filterStopwordsAndMapSynonyms(trigger).second
-                        val responses = parts[1].split("|")
-                        val responseList = responses.mapNotNull { it.trim().takeIf { s -> s.isNotEmpty() } }.toMutableList()
-                        if (triggerFiltered.isNotEmpty() && responseList.isNotEmpty()) templatesMap[triggerFiltered] = responseList
-                    }
+            try {
+                val dir = DocumentFile.fromTreeUri(this@ChatActivity, folderUri!!) ?: run {
+                    loadFallbackTemplates()
+                    return@withContext
                 }
-            }
-            val metadataFilename = filename.replace(".txt", "_metadata.txt")
-            val metadataFile = dir.findFile(metadataFilename)
-            if (metadataFile != null && metadataFile.exists()) {
-                contentResolver.openInputStream(metadataFile.uri)?.bufferedReader()?.use { reader ->
+                val file = dir.findFile(filename)
+                if (file == null || !file.exists()) {
+                    loadFallbackTemplates()
+                    return@withContext
+                }
+                contentResolver.openInputStream(file.uri)?.bufferedReader()?.use { reader ->
                     reader.forEachLine { raw ->
-                        val line = raw.trim()
-                        when {
-                            line.startsWith("mascot_list=") -> {
-                                val mascots = line.substring("mascot_list=".length).split("|")
-                                for (mascot in mascots) {
-                                    val parts = mascot.split(":")
-                                    if (parts.size == 4) {
-                                        val mascotData = mapOf(
-                                            "name" to parts[0].trim(),
-                                            "icon" to parts[1].trim(),
-                                            "color" to parts[2].trim(),
-                                            "background" to parts[3].trim()
-                                        )
-                                        mascotList.add(mascotData)
-                                    }
+                        val l = raw.trim()
+                        if (l.isEmpty()) return@forEachLine
+                        if (filename == "base.txt" && l.startsWith(":") && l.endsWith(":")) {
+                            val contextLine = l.substring(1, l.length - 1)
+                            if (contextLine.contains("=")) {
+                                val parts = contextLine.split("=", limit = 2)
+                                if (parts.size == 2) {
+                                    val keyword = parts[0].trim().lowercase(Locale.ROOT)
+                                    val contextFile = parts[1].trim()
+                                    if (keyword.isNotEmpty() && contextFile.isNotEmpty()) contextMap[keyword] = contextFile
                                 }
                             }
-                            line.startsWith("mascot_name=") -> currentMascotName = line.substring("mascot_name=".length).trim()
-                            line.startsWith("mascot_icon=") -> currentMascotIcon = line.substring("mascot_icon=".length).trim()
-                            line.startsWith("theme_color=") -> currentThemeColor = line.substring("theme_color=".length).trim()
-                            line.startsWith("theme_background=") -> currentThemeBackground = line.substring("theme_background=".length).trim()
+                            return@forEachLine
+                        }
+                        if (l.startsWith("-")) {
+                            val keywordLine = l.substring(1)
+                            if (keywordLine.contains("=")) {
+                                val parts = keywordLine.split("=", limit = 2)
+                                if (parts.size == 2) {
+                                    val keyword = parts[0].trim().lowercase(Locale.ROOT)
+                                    val responses = parts[1].split("|")
+                                    val responseList = responses.mapNotNull { it.trim().takeIf { s -> s.isNotEmpty() } }.toMutableList()
+                                    if (keyword.isNotEmpty() && responseList.isNotEmpty()) keywordResponses[keyword] = responseList
+                                }
+                            }
+                            return@forEachLine
+                        }
+                        if (!l.contains("=")) return@forEachLine
+                        val parts = l.split("=", limit = 2)
+                        if (parts.size == 2) {
+                            val triggerRaw = parts[0].trim()
+                            val trigger = normalizeText(triggerRaw)
+                            val triggerFiltered = filterStopwordsAndMapSynonyms(trigger).second
+                            val responses = parts[1].split("|")
+                            val responseList = responses.mapNotNull { it.trim().takeIf { s -> s.isNotEmpty() } }.toMutableList()
+                            if (triggerFiltered.isNotEmpty() && responseList.isNotEmpty()) templatesMap[triggerFiltered] = responseList
                         }
                     }
                 }
+                val metadataFilename = filename.replace(".txt", "_metadata.txt")
+                val metadataFile = dir.findFile(metadataFilename)
+                if (metadataFile != null && metadataFile.exists()) {
+                    contentResolver.openInputStream(metadataFile.uri)?.bufferedReader()?.use { reader ->
+                        reader.forEachLine { raw ->
+                            val line = raw.trim()
+                            when {
+                                line.startsWith("mascot_list=") -> {
+                                    val mascots = line.substring("mascot_list=".length).split("|")
+                                    for (mascot in mascots) {
+                                        val parts = mascot.split(":")
+                                        if (parts.size == 4) {
+                                            val mascotData = mapOf(
+                                                "name" to parts[0].trim(),
+                                                "icon" to parts[1].trim(),
+                                                "color" to parts[2].trim(),
+                                                "background" to parts[3].trim()
+                                            )
+                                            mascotList.add(mascotData)
+                                        }
+                                    }
+                                }
+                                line.startsWith("mascot_name=") -> currentMascotName = line.substring("mascot_name=".length).trim()
+                                line.startsWith("mascot_icon=") -> currentMascotIcon = line.substring("mascot_icon=".length).trim()
+                                line.startsWith("theme_color=") -> currentThemeColor = line.substring("theme_color=".length).trim()
+                                line.startsWith("theme_background=") -> currentThemeBackground = line.substring("theme_background=".length).trim()
+                            }
+                        }
+                    }
+                }
+                if (filename == "base.txt" && mascotList.isNotEmpty()) {
+                    val selected = mascotList.random()
+                    selected["name"]?.let { currentMascotName = it }
+                    selected["icon"]?.let { currentMascotIcon = it }
+                    selected["color"]?.let { currentThemeColor = it }
+                    selected["background"]?.let { currentThemeBackground = it }
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+                withContext(Dispatchers.Main) {
+                    showCustomToast("Ошибка чтения файла: ${e.message}")
+                }
+                loadFallbackTemplates()
             }
-            if (filename == "base.txt" && mascotList.isNotEmpty()) {
-                val selected = mascotList.random()
-                selected["name"]?.let { currentMascotName = it }
-                selected["icon"]?.let { currentMascotIcon = it }
-                selected["color"]?.let { currentThemeColor = it }
-                selected["background"]?.let { currentThemeBackground = it }
-            }
-            rebuildInvertedIndex()
-            updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
-        } catch (e: Exception) {
-            e.printStackTrace()
-            showCustomToast("Ошибка чтения файла: ${e.message}")
-            loadFallbackTemplates()
-            rebuildInvertedIndex()
-            updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
         }
+        withContext(Dispatchers.Default) { rebuildInvertedIndex() }
+        withContext(Dispatchers.Main) { updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground) }
     }
 
     private fun loadFallbackTemplates() {
@@ -1390,24 +1417,30 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private fun loadMascotMetadata(mascotName: String) {
         if (folderUri == null) return
         val metadataFilename = "${mascotName.lowercase(Locale.getDefault())}_metadata.txt"
-        val dir = DocumentFile.fromTreeUri(this, folderUri!!) ?: return
-        val metadataFile = dir.findFile(metadataFilename)
-        if (metadataFile != null && metadataFile.exists()) {
-            try {
-                contentResolver.openInputStream(metadataFile.uri)?.bufferedReader()?.use { reader ->
-                    reader.forEachLine { raw ->
-                        val line = raw.trim()
-                        when {
-                            line.startsWith("mascot_name=") -> currentMascotName = line.substring("mascot_name=".length).trim()
-                            line.startsWith("mascot_icon=") -> currentMascotIcon = line.substring("mascot_icon=".length).trim()
-                            line.startsWith("theme_color=") -> currentThemeColor = line.substring("theme_color=".length).trim()
-                            line.startsWith("theme_background=") -> currentThemeBackground = line.substring("theme_background=".length).trim()
+        lifecycleScope.launch(Dispatchers.IO) {
+            val dir = DocumentFile.fromTreeUri(this@ChatActivity, folderUri!!) ?: return@launch
+            val metadataFile = dir.findFile(metadataFilename)
+            if (metadataFile != null && metadataFile.exists()) {
+                try {
+                    contentResolver.openInputStream(metadataFile.uri)?.bufferedReader()?.use { reader ->
+                        reader.forEachLine { raw ->
+                            val line = raw.trim()
+                            when {
+                                line.startsWith("mascot_name=") -> currentMascotName = line.substring("mascot_name=".length).trim()
+                                line.startsWith("mascot_icon=") -> currentMascotIcon = line.substring("mascot_icon=".length).trim()
+                                line.startsWith("theme_color=") -> currentThemeColor = line.substring("theme_color=".length).trim()
+                                line.startsWith("theme_background=") -> currentThemeBackground = line.substring("theme_background=".length).trim()
+                            }
+                        }
+                        withContext(Dispatchers.Main) {
+                            updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
                         }
                     }
-                    updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
+                } catch (e: Exception) {
+                    withContext(Dispatchers.Main) {
+                        showCustomToast("Ошибка загрузки метаданных маскота: ${e.message}")
+                    }
                 }
-            } catch (e: Exception) {
-                showCustomToast("Ошибка загрузки метаданных маскота: ${e.message}")
             }
         }
     }
@@ -1418,7 +1451,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             loadMascotTopImage()
             mascotTopImage?.visibility = View.GONE
             try {
-                messagesContainer.setBackgroundColor(Color.parseColor(themeBackground))
+                recyclerView.setBackgroundColor(Color.parseColor(themeBackground))
             } catch (_: Exception) {}
         }
     }
@@ -1500,11 +1533,13 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 percent >= 20 -> 2
                 else -> 1
             }
-            val loaded = tryLoadBitmapFromFolder("battery_$iconIndex.png")
-            if (loaded != null) {
-                batteryImageView?.setImageBitmap(loaded)
-            } else {
-                tryLoadBitmapFromFolder("battery.png")?.let { batteryImageView?.setImageBitmap(it) }
+            lifecycleScope.launch(Dispatchers.IO) {
+                val loaded = tryLoadBitmapFromFolder("battery_$iconIndex.png")
+                withContext(Dispatchers.Main) {
+                    loaded?.let { batteryImageView?.setImageBitmap(it) } ?: run {
+                        tryLoadBitmapFromFolder("battery.png")?.let { batteryImageView?.setImageBitmap(it) }
+                    }
+                }
             }
             // клик по батарее — фиксированное сообщение из batterycare.txt (без рандома)
             batteryImageView?.setOnClickListener {
@@ -1623,17 +1658,19 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 val isConnected = caps != null && (hasWifi || hasCell || caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET))
 
                 // Три состояния: WiFi, Mobile, "airplane" (нет подключений). AirplaneMode OR !isConnected => offline state.
-                if (airplaneMode || !isConnected) {
-                    // используем airplane.png для состояния "все соединения отключены"
-                    tryLoadBitmapFromFolder("airplane.png")?.let { wifiImageView?.setImageBitmap(it) }
-                } else if (hasWifi) {
-                    tryLoadBitmapFromFolder("wifi.png")?.let { wifiImageView?.setImageBitmap(it) }
-                } else if (hasCell) {
-                    // mobile network icon (mobile.png)
-                    tryLoadBitmapFromFolder("mobile.png")?.let { wifiImageView?.setImageBitmap(it) }
-                } else {
-                    // fallback — если нет ни wifi ни mobile, показываем airplane
-                    tryLoadBitmapFromFolder("airplane.png")?.let { wifiImageView?.setImageBitmap(it) }
+                lifecycleScope.launch(Dispatchers.IO) {
+                    val bmp = if (airplaneMode || !isConnected) {
+                        tryLoadBitmapFromFolder("airplane.png")
+                    } else if (hasWifi) {
+                        tryLoadBitmapFromFolder("wifi.png")
+                    } else if (hasCell) {
+                        tryLoadBitmapFromFolder("mobile.png")
+                    } else {
+                        tryLoadBitmapFromFolder("airplane.png")
+                    }
+                    withContext(Dispatchers.Main) {
+                        bmp?.let { wifiImageView?.setImageBitmap(it) }
+                    }
                 }
             } catch (_: Exception) {
                 // silently ignore
@@ -1646,9 +1683,14 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             val bluetoothAdapter = BluetoothAdapter.getDefaultAdapter()
             val isBluetoothEnabled = bluetoothAdapter?.isEnabled == true
             if (isBluetoothEnabled) {
-                tryLoadBitmapFromFolder("bluetooth.png")?.let {
-                    bluetoothImageView?.setImageBitmap(it)
-                    bluetoothImageView?.visibility = View.VISIBLE
+                lifecycleScope.launch(Dispatchers.IO) {
+                    val bmp = tryLoadBitmapFromFolder("bluetooth.png")
+                    withContext(Dispatchers.Main) {
+                        bmp?.let {
+                            bluetoothImageView?.setImageBitmap(it)
+                            bluetoothImageView?.visibility = View.VISIBLE
+                        }
+                    }
                 }
             } else {
                 bluetoothImageView?.visibility = View.GONE
