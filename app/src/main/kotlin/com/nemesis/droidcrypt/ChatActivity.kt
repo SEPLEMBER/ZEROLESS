@@ -877,6 +877,9 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             cmd == "/clear" -> {
                 clearChat()
             }
+            cmd == "очистить чат" -> {
+                clearChat()
+            }
             else -> {
                 addChatMessage(currentMascotName, "Неизвестная команда: $cmdRaw")
             }
@@ -1265,7 +1268,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 reader.forEachLine { raw ->
                     val l = raw.trim()
                     if (l.isEmpty()) return@forEachLine
-                    if (filename == "base.txt" && l.startsWith(":") && l.endsWith(":")) {
+                    if (filename == "engineracer.txt" && l.startsWith(":") && l.endsWith(":")) {
                         val contextLine = l.substring(1, l.length - 1)
                         if (contextLine.contains("=")) {
                             val parts = contextLine.split("=", limit = 2)
