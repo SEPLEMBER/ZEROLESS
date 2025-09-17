@@ -1,21 +1,91 @@
 <resources>
+    <!-- Название приложения и заголовки -->
     <string name="app_name">DroidCrypt</string>
+    <string name="app_title">Pawstribe - %1$s</string>
     <string name="settings_title">Настройки</string>
     <string name="chat_title">Чат</string>
-    <string name="save_templates">Сохранить шаблоны</string>
-    <string name="clear_cache">Очистить SharedPrefs</string>
+
+    <!-- Элементы интерфейса -->
     <string name="back">Назад</string>
     <string name="send">Отправить</string>
+    <string name="lock">Заблокировать</string>
+    <string name="trash">Очистить чат</string>
+    <string name="envelope">Сообщения</string>
+    <string name="settings">Настройки</string>
+    <string name="battery">Батарея</string>
+    <string name="charging">Зарядка</string>
+    <string name="info">Информация</string>
+    <string name="time">Время</string>
+    <string name="save_templates">Сохранить шаблоны</string>
+    <string name="clear_cache">Очистить SharedPrefs</string>
     <string name="templates_hint">Каждый шаблон в новой строке. Формат: триггер=ответ</string>
     <string name="start_chat">Перейти в чат</string>
     <string name="open_settings">Открыть настройки</string>
-    <string name="lock">Заблокировать</string>
-<string name="trash">Очистить чат</string>
-<string name="envelope">Сообщения</string>
-<string name="settings">Настройки</string>
-<string name="battery">Батарея</string>
-<string name="charging">Зарядка</string>
-<string name="info">Информация</string>
-<string name="time">Время</string>
 
+    <!-- Диалоговые сообщения -->
+    <string name="welcome_message">Добро пожаловать!</string>
+    <string name="typing_indicator">печатает...</string>
+
+    <!-- Ответы по умолчанию -->
+    <string name="default_response_hello">Привет! Чем могу помочь?</string>
+    <string name="default_response_how_are_you">Всё отлично, а у тебя?</string>
+    <string name="default_response_unknown">Не понял запрос. Попробуй другой вариант.</string>
+
+    <!-- Ответы для времени и даты -->
+    <string name="date_response">Сегодня %1$s.</string>
+    <string name="day_response">Сегодня %1$s.</string>
+    <string name="year_response">Сейчас %1$s год.</string>
+    <string name="date_day_response">Сегодня %1$s, %2$s.</string>
+
+    <!-- Антиспамовые сообщения -->
+    <string-array name="anti_spam_responses">
+        <item>Ты надоел, давай что-то новенького!</item>
+        <item>Спамить нехорошо, попробуй другой запрос.</item>
+        <item>Я устал от твоих повторений!</item>
+        <item>Хватит спамить, придумай что-то интересное.</item>
+        <item>Эй, не зацикливайся, попробуй другой вопрос!</item>
+        <item>Повторяешь одно и то же? Давай разнообразие!</item>
+        <item>Слишком много повторов, я же не робот... ну, почти.</item>
+        <item>Не спамь, пожалуйста, задай новый вопрос!</item>
+        <item>Пять раз одно и то же? Попробуй что-то другое.</item>
+        <item>Я уже ответил, давай новый запрос!</item>
+    </string-array>
+
+    <!-- Сообщения о батарее -->
+    <string name="battery_urgent_warning">Это не шутки. Поставь на зарядку.</string>
+    <string-array name="battery_warning_variants">
+        <item>Пожалуйста, поставь устройство на зарядку — батарейка почти села.</item>
+        <item>Аккумулятор низкий, лучше подключить зарядку.</item>
+        <item>Осталось немного заряда, поставь телефон на заряд.</item>
+    </string-array>
+
+    <!-- Сообщения для команд -->
+    <string name="command_reload_start">Перезагружаю шаблоны...</string>
+    <string name="command_reload_complete">Шаблоны перезагружены.</string>
+    <string name="command_stats">Контекст: %1$s. Шаблонов: %2$d. Ключевых ответов: %3$d.</string>
+    <string name="command_clear">Чат очищен. Возвращаюсь к началу.</string>
+    <string name="command_unknown">Неизвестная команда: %1$s</string>
+
+    <!-- Сообщения об ошибках -->
+    <string name="folder_not_selected">Папка не выбрана! Открой настройки и выбери папку.</string>
+    <string name="error_loading_ouch">Ошибка загрузки ouch.txt: %1$s</string>
+    <string name="error_loading_timetosleep">Ошибка загрузки timetosleep.txt: %1$s</string>
+    <string name="error_loading_cldsys">Ошибка загрузки cldsys.txt: %1$s</string>
+    <string name="error_reading_file">Ошибка чтения файла: %1$s</string>
+    <string name="error_loading_mascot_metadata">Ошибка загрузки метаданных маскота: %1$s</string>
+    <string name="error_loading_batterycare">Ошибка загрузки batterycare.txt: %1$s</string>
+
+    <!-- Fallback шаблоны -->
+    <string-array name="fallback_hello_responses">
+        <item>Привет! Чем могу помочь?</item>
+        <item>Здравствуй!</item>
+    </string-array>
+    <string-array name="fallback_how_are_you_responses">
+        <item>Всё отлично, а у тебя?</item>
+        <item>Нормально, как дела?</item>
+    </string-array>
+    <string-array name="fallback_thanks_responses">
+        <item>Рад, что помог!</item>
+        <item>Всегда пожалуйста!</item>
+    </string-array>
 </resources>
