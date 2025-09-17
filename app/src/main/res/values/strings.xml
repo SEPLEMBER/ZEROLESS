@@ -1,111 +1,7 @@
 <resources>
-    <!-- App and UI titles -->
     <string name="app_name">DroidCrypt</string>
-    <string name="app_title_template">Pawstribe - %1$s</string>
     <string name="settings_title">Настройки</string>
     <string name="chat_title">Чат</string>
-    <string name="info">Информация</string>
-
-    <!-- Welcome and initial messages -->
-    <string name="welcome_message">Добро пожаловать!</string>
-    <string name="folder_not_selected">Папка не выбрана! Открой настройки и выбери папку.</string>
-    <string name="you">Ты</string>
-    <string name="typing_indicator">печатает...</string>
-    <string name="chat_cleared">Чат очищен. Возвращаюсь к началу.</string>
-
-    <!-- Anti-spam responses -->
-    <string name="anti_spam_1">Ты надоел, давай что-то новенького!</string>
-    <string name="anti_spam_2">Спамить нехорошо, попробуй другой запрос.</string>
-    <string name="anti_spam_3">Я устал от твоих повторений!</string>
-    <string name="anti_spam_4">Хватит спамить, придумай что-то интересное.</string>
-    <string name="anti_spam_5">Эй, не зацикливайся, попробуй другой вопрос!</string>
-    <string name="anti_spam_6">Повторяешь одно и то же? Давай разнообразие!</string>
-    <string name="anti_spam_7">Слишком много повторов, я же не робот... ну, почти.</string>
-    <string name="anti_spam_8">Не спамь, пожалуйста, задай новый вопрос!</string>
-    <string name="anti_spam_9">Пять раз одно и то же? Попробуй что-то другое.</string>
-    <string name="anti_spam_10">Я уже ответил, давай новый запрос!</string>
-
-    <!-- Dummy responses -->
-    <string name="dummy_response_hello">Привет! Чем могу помочь?</string>
-    <string name="dummy_response_how_are_you">Всё отлично, а у тебя?</string>
-    <string name="dummy_response_unknown">Не понял запрос. Попробуй другой вариант.</string>
-
-    <!-- Command responses -->
-    <string name="reload_templates">Перезагружаю шаблоны...</string>
-    <string name="templates_reloaded">Шаблоны перезагружены.</string>
-    <string name="stats_message">Контекст: %1$s. Шаблонов: %2$d. Ключевых ответов: %3$d.</string>
-    <string name="unknown_command">Неизвестная команда: %1$s</string>
-
-    <!-- Battery warnings -->
-    <string name="battery_urgent">Это не шутки. Поставь на зарядку.</string>
-    <string name="battery_warning_1">Пожалуйста, поставь устройство на зарядку — батарейка почти села.</string>
-    <string name="battery_warning_2">Аккумулятор низкий, лучше подключить зарядку.</string>
-    <string name="battery_warning_3">Осталось немного заряда, поставь телефон на заряд.</string>
-
-    <!-- File names -->
-    <string name="base_context_file">base.txt</string>
-    <string name="pictures_meta_file">pictures_meta.txt</string>
-    <string name="synonyms_file">synonims.txt</string>
-    <string name="stopwords_file">stopwords.txt</string>
-    <string name="ouch_file">ouch.txt</string>
-    <string name="notify_sound_file">notify.ogg</string>
-    <string name="battery_care_file">batterycare.txt</string>
-    <string name="time_to_sleep_file">timetosleep.txt</string>
-    <string name="calendar_system_file">cldsys.txt</string>
-    <string name="raccoon_icon">raccoon_icon.png</string>
-    <string name="mascot_top_icon">mascot_top.png</string>
-    <string name="lock_icon">lock.png</string>
-    <string name="trash_icon">trash.png</string>
-    <string name="envelope_icon">envelope.png</string>
-    <string name="settings_icon">settings.png</string>
-    <string name="send_icon">send.png</string>
-    <string name="charging_icon">charging.png</string>
-    <string name="bluetooth_icon">bluetooth.png</string>
-    <string name="wifi_icon">wifi.png</string>
-    <string name="mobile_icon">mobile.png</string>
-    <string name="airplane_icon">airplane.png</string>
-    <string name="battery_icon">battery.png</string>
-    <string name="battery_1_icon">battery_1.png</string>
-    <string name="battery_2_icon">battery_2.png</string>
-    <string name="battery_3_icon">battery_3.png</string>
-    <string name="battery_4_icon">battery_4.png</string>
-    <string name="battery_5_icon">battery_5.png</string>
-
-    <!-- Default mascot values -->
-    <string name="default_mascot_name">Racky</string>
-    <string name="default_theme_color">#00FF00</string>
-    <string name="default_theme_background">#000000</string>
-
-    <!-- Date and time responses -->
-    <string name="date_response">Сегодня %1$s.</string>
-    <string name="day_response">Сегодня %1$s.</string>
-    <string name="year_response">Сейчас %1$s год.</string>
-    <string name="date_day_response">Сегодня %1$s, %2$s.</string>
-
-    <!-- Fallback templates -->
-    <string name="fallback_hello_1">Привет! Чем могу помочь?</string>
-    <string name="fallback_hello_2">Здравствуй!</string>
-    <string name="fallback_how_are_you_1">Всё отлично, а у тебя?</string>
-    <string name="fallback_how_are_you_2">Нормально, как дела?</string>
-    <string name="fallback_thanks_1">Рад, что помог!</string>
-    <string name="fallback_thanks_2">Всегда пожалуйста!</string>
-    <string name="suggestion_hello">Привет</string>
-    <string name="suggestion_how_are_you">Как дела?</string>
-    <string name="suggestion_tell_about">Расскажи о себе</string>
-    <string name="suggestion_exit">Выход</string>
-
-    <!-- Error messages -->
-    <string name="error_reading_file">Ошибка чтения файла: %1$s</string>
-    <string name="error_loading_ouch">Ошибка загрузки ouch.txt: %1$s</string>
-    <string name="error_loading_battery_care">Ошибка загрузки batterycare.txt: %1$s</string>
-    <string name="error_loading_time_to_sleep">Ошибка загрузки timetosleep.txt: %1$s</string>
-    <string name="error_loading_calendar_system">Ошибка загрузки cldsys.txt: %1$s</string>
-
-    <!-- UI elements -->
-    <string name="sender_label">%1$s:</string>
-    <string name="battery_percent">%1$d%%</string>
-    <string name="time_placeholder">--:--</string>
-    <string name="battery_percent_placeholder">--%</string>
     <string name="save_templates">Сохранить шаблоны</string>
     <string name="clear_cache">Очистить SharedPrefs</string>
     <string name="back">Назад</string>
@@ -114,23 +10,12 @@
     <string name="start_chat">Перейти в чат</string>
     <string name="open_settings">Открыть настройки</string>
     <string name="lock">Заблокировать</string>
-    <string name="trash">Очистить чат</string>
-    <string name="envelope">Сообщения</string>
-    <string name="settings">Настройки</string>
-    <string name="battery">Батарея</string>
-    <string name="charging">Зарядка</string>
-    <string name="time">Время</string>
+<string name="trash">Очистить чат</string>
+<string name="envelope">Сообщения</string>
+<string name="settings">Настройки</string>
+<string name="battery">Батарея</string>
+<string name="charging">Зарядка</string>
+<string name="info">Информация</string>
+<string name="time">Время</string>
 
-    <!-- Keywords for query processing -->
-    <string name="hello_keyword">привет</string>
-    <string name="how_are_you_keyword">как дела</string>
-    <string name="thanks_keyword">спасибо</string>
-    <string name="date_keyword">число</string>
-    <string name="day_keyword">день</string>
-    <string name="year_keyword">год</string>
-
-    <!-- Commands -->
-    <string name="command_reload">/reload</string>
-    <string name="command_stats">/stats</string>
-    <string name="command_clear">/clear</string>
 </resources>
