@@ -9,7 +9,6 @@ import android.widget.LinearLayout
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
-import androidx.preference.PreferenceManager
 import com.nemesis.droidcrypt.utils.security.SecCoreUtils
 
 class MainActivity : AppCompatActivity() {
@@ -65,11 +64,10 @@ class MainActivity : AppCompatActivity() {
             .setView(container)
             .setPositiveButton("OK") { dialog, _ ->
                 val password = editText.text.toString().toCharArray()
-                val prefs = PreferenceManager.getDefaultSharedPreferences(this)
+                val prefs = getSharedPreferences("my_prefs", MODE_PRIVATE) // Заменено PreferenceManager
 
                 try {
-                    val masterKey =
-                        SecCoreUtils.loadMasterFromPrefs(prefs, "wrapped_master_key", password)
+                    val masterKey = SecCoreUtils.loadMasterFromPrefs(prefs, "wrapped_master_key", password)
 
                     SecCoreUtils.wipe(password) // сразу очищаем пароль из памяти
 
