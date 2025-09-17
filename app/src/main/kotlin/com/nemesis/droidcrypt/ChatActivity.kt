@@ -38,8 +38,8 @@ import android.graphics.BitmapFactory
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.wifi.WifiManager
-import com.pawscribe.chat.R
-import com.pawscribe.chat.databinding.ActivityChatBinding
+import com.nemesis.droidcrypt
+import com.nemesis.droidcrypt.databinding.ActivityChatBinding
 
 data class DataSnapshots(
     val contextMap: Map<String, String>,
