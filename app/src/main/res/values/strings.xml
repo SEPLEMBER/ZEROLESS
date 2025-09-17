@@ -89,6 +89,10 @@
     <string name="fallback_how_are_you_2">Нормально, как дела?</string>
     <string name="fallback_thanks_1">Рад, что помог!</string>
     <string name="fallback_thanks_2">Всегда пожалуйста!</string>
+    <string name="suggestion_hello">Привет</string>
+    <string name="suggestion_how_are_you">Как дела?</string>
+    <string name="suggestion_tell_about">Расскажи о себе</string>
+    <string name="suggestion_exit">Выход</string>
 
     <!-- Error messages -->
     <string name="error_reading_file">Ошибка чтения файла: %1$s</string>
