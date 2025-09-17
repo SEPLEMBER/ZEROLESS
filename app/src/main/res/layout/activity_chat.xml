@@ -7,7 +7,7 @@
     android:background="@color/background_black"
     android:padding="8dp">
 
-    <!-- Top bar: Battery icon + percentage (left), time (center), icons (right) -->
+    <!-- Top bar: Battery, WiFi, Bluetooth (left), time (center), icons (right) -->
     <LinearLayout
         android:id="@+id/topBar"
         android:layout_width="match_parent"
@@ -19,7 +19,7 @@
         android:paddingEnd="8dp"
         android:background="@color/card_dark">
 
-        <!-- Left section: Battery icon and percentage -->
+        <!-- Left section: Battery, WiFi, Bluetooth -->
         <LinearLayout
             android:layout_width="0dp"
             android:layout_height="match_parent"
@@ -28,9 +28,28 @@
             android:gravity="center_vertical|start">
 
             <ImageView
+                android:id="@+id/bluetooth_image"
+                android:layout_width="56dp"
+                android:layout_height="56dp"
+                android:scaleType="fitCenter"
+                android:adjustViewBounds="true"
+                android:contentDescription="@string/bluetooth"
+                android:visibility="gone" />
+
+            <ImageView
+                android:id="@+id/wifi_image"
+                android:layout_width="56dp"
+                android:layout_height="56dp"
+                android:layout_marginStart="6dp"
+                android:scaleType="fitCenter"
+                android:adjustViewBounds="true"
+                android:contentDescription="@string/wifi" />
+
+            <ImageView
                 android:id="@+id/battery_image"
                 android:layout_width="56dp"
                 android:layout_height="56dp"
+                android:layout_marginStart="6dp"
                 android:scaleType="fitCenter"
                 android:adjustViewBounds="true"
                 android:contentDescription="@string/battery" />
@@ -39,10 +58,10 @@
                 android:id="@+id/battery_percent"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
                 android:text="--%"
                 android:textColor="@color/typing_orange"
                 android:textSize="16sp"
-                android:layout_marginStart="8dp"
                 android:fontFamily="monospace" />
         </LinearLayout>
 
@@ -129,22 +148,15 @@
         </LinearLayout>
     </LinearLayout>
 
-    <!-- Chat area background slightly lighter than page -->
-    <ScrollView
-        android:id="@+id/scrollView"
+    <!-- Chat area with RecyclerView -->
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/chatMessagesContainer"
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
-        android:fillViewport="true"
         android:background="@color/chat_area_bg"
-        android:padding="8dp">
-
-        <LinearLayout
-            android:id="@+id/chatMessagesContainer"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical" />
-    </ScrollView>
+        android:padding="8dp"
+        android:clipToPadding="false" />
 
     <!-- Input row: text + envelope (send) -->
     <LinearLayout
@@ -181,5 +193,4 @@
             android:scaleType="fitCenter"
             android:adjustViewBounds="true" />
     </LinearLayout>
-
 </LinearLayout>
