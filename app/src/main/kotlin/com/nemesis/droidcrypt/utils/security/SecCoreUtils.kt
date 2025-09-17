@@ -61,7 +61,7 @@ object SecCoreUtils {
     // Публичный метод для очистки CharArray
     fun wipe(chars: CharArray?) {
         if (chars == null) return
-        for (i in chars.indices) chars[i] = '\0' // Исправлено: используем нулевой символ
+        for (i in chars.indices) chars[i] = '\u0000' // Исправлено: используем нулевой символ
     }
 
     // ----- PBKDF2 derivation -----
