@@ -202,7 +202,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private fun setupToolbar() {
         // Безопасный доступ к topBar/leftLayout
-        val leftLayout = findTopBarChildViewGroup("leftLayout") ?: return
+        val leftLayout = findTopBarChildViewGroup("leftLayout") as? LinearLayout ?: return
         leftLayout.removeAllViews()
         leftLayout.orientation = LinearLayout.HORIZONTAL
         leftLayout.gravity = Gravity.CENTER_VERTICAL
@@ -911,37 +911,41 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     }
 
     private fun createMessageBubble(sender: String, text: String, isUser: Boolean): LinearLayout {
-        return LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            if (!isUser) {
-                layoutParams = LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT
-                ).apply { marginStart = dpToPx(8) }
-            }
-
-            val senderTextView = TextView(this).apply {
-                text = getString(R.string.sender_label, sender)
-                textSize = 12f
-                setTextColor(Color.parseColor("#AAAAAA"))
-            }
-
-            val messageTextView = TextView(this).apply {
-                this.text = text
-                textSize = 16f
-                setTextIsSelectable(true)
-                val pad = dpToPx(10)
-                setPadding(pad, pad, pad, pad)
-                val accent = if (isUser) Color.RED else safeParseColorOrDefault(currentThemeColor, Color.GREEN)
-                background = createBubbleDrawable(accent)
-                setTextColor(if (isUser) Color.WHITE else try { Color.parseColor(currentThemeColor) } catch (_: Exception) { Color.WHITE })
-                setOnClickListener { speakText(text) }
-            }
-
-            addView(senderTextView)
-            addView(messageTextView)
+    return LinearLayout(this@ChatActivity).apply {
+        orientation = LinearLayout.VERTICAL
+        if (!isUser) {
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { marginStart = dpToPx(8) }
         }
+
+            val senderTextView = TextView(this@ChatActivity).apply {
+            text = getString(R.string.sender_label, sender)
+            textSize = 12f
+            setTextColor(Color.parseColor("#AAAAAA"))
+        }
+
+            val messageTextView = TextView(this@ChatActivity).apply {
+            this.text = text
+            textSize = 16f
+            setTextIsSelectable(true)
+            val pad = dpToPx(10)
+            setPadding(pad, pad, pad, pad)
+            val accent = if (isUser) Color.RED else safeParseColorOrDefault(currentThemeColor, Color.GREEN)
+            background = createBubbleDrawable(accent)
+            setTextColor(
+                if (isUser) Color.WHITE
+                else try { Color.parseColor(currentThemeColor) }
+                catch (_: Exception) { Color.WHITE }
+            )
+            setOnClickListener { speakText(text) }
+        }
+            
+            addView(senderTextView)
+        addView(messageTextView)
     }
+}
 
     private fun createAvatarView(sender: String): ImageView {
         return ImageView(this).apply {
