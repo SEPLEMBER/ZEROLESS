@@ -19,6 +19,7 @@ import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
+import android.view.LayoutInflater
 import android.view.WindowManager
 import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
@@ -91,7 +92,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private var timeTextView: TextView? = null
     private var infoIconButton: ImageButton? = null // оставляем поле, но не добавляем в тулбар
 
-     // TTS
+    // TTS
     private var tts: TextToSpeech? = null
     
     // Data structures
@@ -188,14 +189,16 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                 val layoutParams = itemView.layoutParams as RecyclerView.LayoutParams
                 if (isUser) {
-                    layoutParams.gravity = Gravity.END
-                    layoutParams.marginStart = dpToPx(48)
-                    layoutParams.marginEnd = 0
+                    (layoutParams as ViewGroup.MarginLayoutParams).apply {
+                        marginStart = dpToPx(48)
+                        marginEnd = dpToPx(8)
+                    }
                     avatar.visibility = View.GONE
                 } else {
-                    layoutParams.gravity = Gravity.START
-                    layoutParams.marginStart = 0
-                    layoutParams.marginEnd = dpToPx(48)
+                    (layoutParams as ViewGroup.MarginLayoutParams).apply {
+                        marginStart = dpToPx(8)
+                        marginEnd = dpToPx(48)
+                    }
                     avatar.visibility = View.VISIBLE
                     loadAvatarInto(avatar, data.sender)
                     avatar.setOnClickListener {
@@ -221,6 +224,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_chat)
+        setupToolbar()
         window.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
         supportActionBar?.setBackgroundDrawable(ColorDrawable(Color.argb(128, 0, 0, 0)))
         window.setBackgroundDrawable(ColorDrawable(Color.BLACK))
@@ -339,6 +343,84 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         loadMascotTopImage()
         mascotTopImage?.visibility = View.GONE
+    }
+
+    private fun setupToolbar() {
+        val topBar = findViewById<LinearLayout>(R.id.topBar) ?: return
+        val leftLayout = topBar.getChildAt(0) as? LinearLayout ?: return
+        leftLayout.removeAllViews()
+        leftLayout.orientation = LinearLayout.HORIZONTAL
+        leftLayout.gravity = Gravity.CENTER_VERTICAL
+
+        bluetoothImageView = ImageView(this).apply {
+            val iconSize = dpToPx(56)
+            layoutParams = LinearLayout.LayoutParams(iconSize, iconSize)
+            scaleType = ImageView.ScaleType.CENTER_CROP
+            adjustViewBounds = true
+            visibility = View.GONE
+        }
+        leftLayout.addView(bluetoothImageView)
+
+        wifiImageView = ImageView(this).apply {
+            val iconSize = dpToPx(56)
+            layoutParams = LinearLayout.LayoutParams(iconSize, iconSize).apply {
+                marginStart = dpToPx(6)
+            }
+            scaleType = ImageView.ScaleType.CENTER_CROP
+            adjustViewBounds = true
+        }
+        leftLayout.addView(wifiImageView)
+
+        batteryImageView = ImageView(this).apply {
+            val iconSize = dpToPx(56)
+            layoutParams = LinearLayout.LayoutParams(iconSize, iconSize).apply {
+                marginStart = dpToPx(6)
+            }
+            scaleType = ImageView.ScaleType.CENTER_CROP
+            adjustViewBounds = true
+        }
+        batteryPercentView = TextView(this).apply {
+            text = "--%"
+            textSize = 16f
+            setTextColor(Color.parseColor("#00BFFF"))
+            val lp = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                marginStart = dpToPx(8)
+            }
+            layoutParams = lp
+        }
+        leftLayout.addView(batteryImageView)
+        leftLayout.addView(batteryPercentView)
+
+        val spacerIndex = 1
+        val spacer = topBar.getChildAt(spacerIndex)
+        topBar.removeViewAt(spacerIndex)
+        timeTextView = TextView(this).apply {
+            text = "--:--"
+            textSize = 20f
+            setTextColor(Color.parseColor("#FFA500"))
+            gravity = Gravity.CENTER
+            val lp = LinearLayout.LayoutParams(
+                0,
+                dpToPx(56),
+                1f
+            )
+            layoutParams = lp
+        }
+        topBar.addView(timeTextView, spacerIndex)
+
+        btnCharging = ImageButton(this).apply {
+            background = null
+            val iconSize = dpToPx(56)
+            val lp = LinearLayout.LayoutParams(iconSize, iconSize)
+            layoutParams = lp
+            scaleType = ImageView.ScaleType.CENTER_CROP
+            adjustViewBounds = true
+            visibility = View.GONE
+        }
+        topBar.addView(btnCharging)
     }
 
     override fun onInit(status: Int) {
@@ -1080,7 +1162,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private fun speakText(text: String) {
         tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "message_${System.currentTimeMillis()}")
-  }
+    }
 
     private fun loadAndSendOuchMessage(mascot: String) {
         val uri = folderUri ?: return
@@ -1134,7 +1216,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
     }
 
-    private fun createMessageBubbleDrawable(accentColor: Int): GradientDrawable {
+    private fun createBubbleDrawable(accentColor: Int): GradientDrawable {
         return GradientDrawable().apply {
             val bg = blendColors(Color.parseColor("#0A0A0A"), accentColor, 0.06f)
             setColor(bg)
