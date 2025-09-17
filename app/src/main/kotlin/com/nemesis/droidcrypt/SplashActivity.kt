@@ -48,7 +48,7 @@ class SplashActivity : AppCompatActivity() {
         Handler(Looper.getMainLooper()).postDelayed({
             startActivity(Intent(this, ChatActivity::class.java))
             finish()
-        }, 500)
+        }, 50)
     }
 
     private fun loadImageFromSAF(filename: String, target: ImageView) {
