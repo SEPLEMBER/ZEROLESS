@@ -1,5 +1,3 @@
-package com.nemesis.droidcrypt
-
 import android.animation.ObjectAnimator
 import android.content.*
 import android.graphics.*
@@ -28,10 +26,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
+import java.text.DateFormat
 import java.util.*
 import kotlin.math.abs
 import kotlin.math.min
 import kotlin.math.roundToInt
+import kotlin.random.Random
 
 class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
@@ -82,6 +82,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private val invertedIndex = HashMap<String, MutableList<String>>()
     private val synonymsMap = HashMap<String, String>()
     private val stopwords = HashSet<String>()
+    private val queryCountMap = HashMap<String, Int>()
     private var currentMascotName = "Racky"
     private var currentMascotIcon = "raccoon_icon.png"
     private var currentThemeColor = "#00FF00"
@@ -237,20 +238,23 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private fun showLoadingScreen(show: Boolean) {
         runOnUi {
-            val loadingView = findViewById<TextView>(R.id.loadingView) ?: TextView(this).apply {
-                id = R.id.loadingView
-                text = "Подождите..."
-                textSize = 18f
-                setTextColor(Color.WHITE)
-                setBackgroundColor(Color.BLACK)
-                gravity = Gravity.CENTER
-                layoutParams = ViewGroup.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.MATCH_PARENT
-                )
-                (findViewById<ViewGroup>(android.R.id.content)).addView(this)
+            var loadingView = findViewById<TextView>(R.id.loadingView)
+            if (loadingView == null && show) {
+                loadingView = TextView(this).apply {
+                    id = R.id.loadingView
+                    text = "Подождите..."
+                    textSize = 18f
+                    setTextColor(Color.WHITE)
+                    setBackgroundColor(Color.BLACK)
+                    gravity = Gravity.CENTER
+                    layoutParams = ViewGroup.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT
+                    )
+                    (findViewById<ViewGroup>(android.R.id.content)).addView(this)
+                }
             }
-            loadingView.visibility = if (show) View.VISIBLE else View.GONE
+            loadingView?.visibility = if (show) View.VISIBLE else View.GONE
         }
     }
 
@@ -446,7 +450,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         val repeats = queryCountMap.getOrDefault(qKeyForCount, 0)
         if (repeats >= 5) {
-            val spamResp = antiSpamResponses.random(Random())
+            val spamResp = antiSpamResponses.random()
             addChatMessage(currentMascotName, spamResp)
             return
         }
@@ -524,7 +528,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
             templatesMap[qFiltered]?.let { possible ->
                 if (possible.isNotEmpty()) {
-                    subqueryResponses.add(possible.random(Random()))
+                    subqueryResponses.add(possible.random())
                     answered = true
                     processedSubqueries.add(qFiltered)
                 }
@@ -537,14 +541,14 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     if (processedSubqueries.contains(token) || token.length < 2) continue
                     templatesMap[token]?.let { possible ->
                         if (possible.isNotEmpty()) {
-                            subqueryResponses.add(possible.random(Random()))
+                            subqueryResponses.add(possible.random())
                             processedSubqueries.add(token)
                         }
                     }
                     if (subqueryResponses.size < MAX_SUBQUERY_RESPONSES) {
                         keywordResponses[token]?.let { possible ->
                             if (possible.isNotEmpty()) {
-                                subqueryResponses.add(possible.random(Random()))
+                                subqueryResponses.add(possible.random())
                                 processedSubqueries.add(token)
                             }
                         }
@@ -557,7 +561,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                         if (processedSubqueries.contains(twoTokens)) continue
                         templatesMap[twoTokens]?.let { possible ->
                             if (possible.isNotEmpty()) {
-                                subqueryResponses.add(possible.random(Random()))
+                                subqueryResponses.add(possible.random())
                                 processedSubqueries.add(twoTokens)
                             }
                         }
@@ -575,7 +579,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             for ((keyword, responses) in keywordResponses) {
                 if (qFiltered.contains(keyword) && responses.isNotEmpty()) {
                     return@launch withContext(Dispatchers.Main) {
-                        addChatMessage(currentMascotName, responses.random(Random()))
+                        addChatMessage(currentMascotName, responses.random())
                     }
                 }
             }
@@ -618,7 +622,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 val possible = templatesMap[bestByJaccard]
                 if (!possible.isNullOrEmpty()) {
                     return@launch withContext(Dispatchers.Main) {
-                        addChatMessage(currentMascotName, possible.random(Random()))
+                        addChatMessage(currentMascotName, possible.random())
                     }
                 }
             }
@@ -640,7 +644,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 val possible = templatesMap[bestKey]
                 if (!possible.isNullOrEmpty()) {
                     return@launch withContext(Dispatchers.Main) {
-                        addChatMessage(currentMascotName, possible.random(Random()))
+                        addChatMessage(currentMascotName, possible.random())
                     }
                 }
             }
@@ -660,7 +664,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                         localTemplates[qFiltered]?.let { possible ->
                             if (possible.isNotEmpty()) {
                                 return@launch withContext(Dispatchers.Main) {
-                                    addChatMessage(currentMascotName, possible.random(Random()))
+                                    addChatMessage(currentMascotName, possible.random())
                                 }
                             }
                         }
@@ -708,7 +712,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                             val possible = localTemplates[bestLocal]
                             if (!possible.isNullOrEmpty()) {
                                 return@launch withContext(Dispatchers.Main) {
-                                    addChatMessage(currentMascotName, possible.random(Random()))
+                                    addChatMessage(currentMascotName, possible.random())
                                 }
                             }
                         }
@@ -728,7 +732,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                             val possible = localTemplates[bestLocalKey]
                             if (!possible.isNullOrEmpty()) {
                                 return@launch withContext(Dispatchers.Main) {
-                                    addChatMessage(currentMascotName, possible.random(Random()))
+                                    addChatMessage(currentMascotName, possible.random())
                                 }
                             }
                         }
@@ -793,7 +797,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 runOnUi {
                     typingView?.let { messagesContainer.removeView(it); typingView = null }
                 }
-            }, (1000..3000).random(Random()).toLong())
+            }, (1000..3000).random().toLong())
         }
     }
 
@@ -950,7 +954,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 row.addView(bubble, lp)
             } else {
                 val avatarView = ImageView(this).apply {
-                    val size = dpProc
+                    val size = dpToPx(40)
                     layoutParams = LinearLayout.LayoutParams(size, size)
                     scaleType = ImageView.ScaleType.CENTER_CROP
                     adjustViewBounds = true
@@ -1002,7 +1006,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     val allText = reader.readText()
                     val responses = allText.split("|").map { it.trim() }.filter { it.isNotEmpty() }
                     if (responses.isNotEmpty()) {
-                        val randomResponse = responses.random(Random())
+                        val randomResponse = responses.random()
                         addChatMessage(mascot, randomResponse)
                     }
                 }
@@ -1236,7 +1240,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     }
                 }
                 if (filename == "base.txt" && mascotList.isNotEmpty()) {
-                    val selected = mascotList.random(Random())
+                    val selected = mascotList.random()
                     selected["name"]?.let { currentMascotName = it }
                     selected["icon"]?.let { currentMascotIcon = it }
                     selected["color"]?.let { currentThemeColor = it }
@@ -1427,7 +1431,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     "Аккумулятор низкий, лучше подключить зарядку.",
                     "Осталось немного заряда, поставь телефон на заряд."
                 )
-                addChatMessage(currentMascotName, variants.random(Random()))
+                addChatMessage(currentMascotName, variants.random())
             }
             lastBatteryWarningStage = percent
         }
@@ -1475,7 +1479,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     val allText = reader.readText()
                     val responses = allText.split("|").map { it.trim() }.filter { it.isNotEmpty() }
                     if (responses.isNotEmpty()) {
-                        return responses.random(Random())
+                        return responses.random()
                     }
                 }
             }
@@ -1486,71 +1490,39 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     }
 
     private fun processDateTimeQuery(query: String): String? {
-    val calendar = Calendar.getInstance()
-    val dateFormat = SimpleDateFormat("dd MMMM yyyy", Locale("ru"))
-    val dayFormat = SimpleDateFormat("EEEE", Locale("ru"))
-    val yearFormat = SimpleDateFormat("yyyy", Locale("ru"))
-    val currentDate = dateFormat.format(calendar.time)
-    val currentDay = dayFormat.format(calendar.time)
-    val currentYear = yearFormat.format(calendar.time)
-    val uri = folderUri ?: return getDefaultDateTimeResponse(query, currentDate, currentDay, currentYear)
-    try {
-        val dir = DocumentFile.fromTreeUri(this, uri) ?: return getDefaultDateTimeResponse(query, currentDate, currentDay, currentYear)
-        val cldsysFile = dir.findFile("cldsys.txt")
-        if (cldsysFile != null && cldsysFile.exists()) {
-            contentResolver.openInputStream(cldsysFile.uri)?.bufferedReader()?.use { reader ->
-                val allText = reader.readText()
-                val responses = allText.split("|").map { it.trim() }.filter { it.isNotEmpty() }
-                if (responses.isNotEmpty()) {
-                    val response = responses.random(Random())
-                    return when {
-                        query.contains("число") -> response.replace("{date}", currentDate)
-                        query.contains("день") -> response.replace("{day}", currentDay)
-                        query.contains("год") -> response.replace("{year}", currentYear)
-                        else -> response.replace("{date}", currentDate)
+        val calendar = Calendar.getInstance()
+        val dateFormat = SimpleDateFormat("dd MMMM yyyy", Locale("ru"))
+        val dayFormat = SimpleDateFormat("EEEE", Locale("ru"))
+        val yearFormat = SimpleDateFormat("yyyy", Locale("ru"))
+        val currentDate = dateFormat.format(calendar.time)
+        val currentDay = dayFormat.format(calendar.time)
+        val currentYear = yearFormat.format(calendar.time)
+        val uri = folderUri ?: return getDefaultDateTimeResponse(query, currentDate, currentDay, currentYear)
+        try {
+            val dir = DocumentFile.fromTreeUri(this, uri) ?: return getDefaultDateTimeResponse(query, currentDate, currentDay, currentYear)
+            val cldsysFile = dir.findFile("cldsys.txt")
+            if (cldsysFile != null && cldsysFile.exists()) {
+                contentResolver.openInputStream(cldsysFile.uri)?.bufferedReader()?.use { reader ->
+                    val allText = reader.readText()
+                    val responses = allText.split("|").map { it.trim() }.filter { it.isNotEmpty() }
+                    if (responses.isNotEmpty()) {
+                        return responses.random()
                     }
                 }
             }
+        } catch (e: Exception) {
+            showCustomToast("Ошибка загрузки cldsys.txt: ${e.message}")
         }
-    } catch (e: Exception) {
-        showCustomToast("Ошибка загрузки cldsys.txt: ${e.message}")
+        return getDefaultDateTimeResponse(query, currentDate, currentDay, currentYear)
     }
-    return getDefaultDateTimeResponse(query, currentDate, currentDay, currentYear)
-}
 
-private fun getDefaultDateTimeResponse(query: String, date: String, day: String, year: String): String {
-    return when {
-        query.contains("число") -> "Сегодня $date."
-        query.contains("день") -> "Сегодня $day."
-        query.contains("год") -> "Сейчас $year год."
-        else -> "Сегодня $date, $day."
-    }
-}
-
-private fun startTimeUpdater() {
-    stopTimeUpdater()
-    timeUpdaterRunnable = object : Runnable {
-        override fun run() {
-            val now = Date()
-            val is24Hour = DateFormat.is24HourFormat(this@ChatActivity)
-            val fmt = if (is24Hour) {
-                SimpleDateFormat("HH:mm", Locale.getDefault())
-            } else {
-                SimpleDateFormat("hh:mm a", Locale.getDefault())
-            }
-            val s = fmt.format(now)
-            runOnUi {
-                timeTextView?.text = s
-            }
-            val delay = 60000L
-            timeHandler.postDelayed(this, delay)
+    private fun getDefaultDateTimeResponse(query: String, currentDate: String, currentDay: String, currentYear: String): String {
+        return when {
+            query.contains("какое сегодня число") -> "Сегодня $currentDate."
+            query.contains("какой сегодня день") || query.contains("какой сейчас день") -> "Сегодня $currentDay."
+            query.contains("какой сейчас год") -> "Сейчас $currentYear год."
+            else -> "Сегодня $currentDate, $currentDay."
         }
     }
-    timeHandler.post(timeUpdaterRunnable!!)
-}
 
-private fun stopTimeUpdater() {
-    timeUpdaterRunnable?.let { timeHandler.removeCallbacks(it) }
-    timeUpdaterRunnable = null
-}
 }
