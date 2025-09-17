@@ -103,7 +103,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private var currentMascotIcon = "raccoon_icon.png"
     private var currentThemeColor = "#00FF00"
     private var currentThemeBackground = "#000000"
-    private var currentContext = "startup.txt"
+    private var currentContext = "base.txt"
     private var lastQuery = ""
     private var userActivityCount = 0
 
@@ -515,13 +515,6 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         addChatMessage("You", userInput)
         showTypingIndicator()
 
-        if (currentContext != "base.txt") {
-            currentContext = "base.txt"
-            loadTemplatesFromFile(currentContext)
-            rebuildInvertedIndex()
-            updateAutoComplete()
-        }
-
         if (qKeyForCount == lastQuery) {
             val cnt = queryCountMap.getOrDefault(qKeyForCount, 0)
             queryCountMap[qKeyForCount] = cnt + 1
@@ -882,9 +875,6 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 addChatMessage(currentMascotName, msg)
             }
             cmd == "/clear" -> {
-                clearChat()
-            }
-            cmd == "очистить чат" -> {
                 clearChat()
             }
             else -> {
@@ -1275,7 +1265,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 reader.forEachLine { raw ->
                     val l = raw.trim()
                     if (l.isEmpty()) return@forEachLine
-                    if (filename == "engineracer.txt" && l.startsWith(":") && l.endsWith(":")) {
+                    if (filename == "base.txt" && l.startsWith(":") && l.endsWith(":")) {
                         val contextLine = l.substring(1, l.length - 1)
                         if (contextLine.contains("=")) {
                             val parts = contextLine.split("=", limit = 2)
