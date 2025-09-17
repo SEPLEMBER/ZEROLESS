@@ -11,6 +11,7 @@ import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.documentfile.provider.DocumentFile
+import com.nemesis.droidcrypt.utils.security.SecCoreUtils
 import java.io.BufferedReader
 import java.io.FileInputStream
 import java.io.FileOutputStream
@@ -21,6 +22,7 @@ class SettingsActivity : AppCompatActivity() {
     companion object {
         private const val PREF_KEY_FOLDER_URI = "pref_folder_uri"
         private const val PREF_KEY_DISABLE_SCREENSHOTS = "pref_disable_screenshots"
+        private const val PREF_KEY_MASTER_KEY = "pref_master_key"
     }
 
     private var folderUri: Uri? = null
@@ -28,7 +30,11 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var clearTemplatesButton: Button
     private lateinit var backButton: Button
     private lateinit var saveTemplatesButton: Button
+    private lateinit var protectButton: Button
+    private lateinit var unprotectButton: Button
     private lateinit var templatesInput: EditText
+    private lateinit var masterKeyInput: EditText
+    private lateinit var passwordInput: EditText
     private lateinit var disableScreenshotsSwitch: Switch
     private lateinit var prefs: SharedPreferences
 
@@ -42,11 +48,12 @@ class SettingsActivity : AppCompatActivity() {
                             uri,
                             Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
                         )
-                    } catch (_: SecurityException) {
+                        prefs.edit().putString(PREF_KEY_FOLDER_URI, uri.toString()).apply()
+                        Toast.makeText(this, "Папка выбрана", Toast.LENGTH_SHORT).show()
+                        loadTemplatesFromFile("base.txt")
+                    } catch (e: SecurityException) {
+                        Toast.makeText(this, "Ошибка доступа к папке", Toast.LENGTH_SHORT).show()
                     }
-                    prefs.edit().putString(PREF_KEY_FOLDER_URI, uri.toString()).apply()
-                    Toast.makeText(this, "Папка выбрана", Toast.LENGTH_SHORT).show()
-                    loadTemplatesFromFile("base.txt")
                 } ?: Toast.makeText(this, "Ошибка: папка не выбрана", Toast.LENGTH_SHORT).show()
             }
         }
@@ -55,18 +62,22 @@ class SettingsActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_settings)
 
-        // Используем прямой SharedPreferences
         prefs = getSharedPreferences("my_prefs", MODE_PRIVATE)
 
         selectFolderButton = findViewById(R.id.selectFolderButton)
         clearTemplatesButton = findViewById(R.id.clearTemplatesButton)
         backButton = findViewById(R.id.backButton)
         saveTemplatesButton = findViewById(R.id.saveTemplatesButton)
+        protectButton = findViewById(R.id.protectButton)
+        unprotectButton = findViewById(R.id.unprotectButton)
         templatesInput = findViewById(R.id.templatesInput)
+        masterKeyInput = findViewById(R.id.masterKeyInput)
+        passwordInput = findViewById(R.id.passwordInput)
         disableScreenshotsSwitch = findViewById(R.id.disableScreenshotsSwitch)
 
         templatesInput.setText("")
         disableScreenshotsSwitch.isChecked = prefs.getBoolean(PREF_KEY_DISABLE_SCREENSHOTS, false)
+        masterKeyInput.setText(prefs.getString(PREF_KEY_MASTER_KEY, ""))
 
         // Восстанавливаем сохранённый URI папки
         prefs.getString(PREF_KEY_FOLDER_URI, null)?.let { saved ->
@@ -77,8 +88,9 @@ class SettingsActivity : AppCompatActivity() {
                     Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
                 )
                 loadTemplatesFromFile("base.txt")
-            } catch (_: Exception) {
+            } catch (e: Exception) {
                 folderUri = null
+                Toast.makeText(this, "Ошибка загрузки папки", Toast.LENGTH_SHORT).show()
             }
         }
 
@@ -127,9 +139,47 @@ class SettingsActivity : AppCompatActivity() {
             Toast.makeText(this, "Сохранено: $savedCount, пропущено: $skipped", Toast.LENGTH_SHORT).show()
         }
 
+        protectButton.setOnClickListener {
+            val masterKey = masterKeyInput.text.toString().trim()
+            val password = passwordInput.text.toString().trim()
+
+            if (masterKey.isEmpty() || password.isEmpty()) {
+                Toast.makeText(this, "Введите ключ и пароль", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+
+            prefs.edit().putString(PREF_KEY_MASTER_KEY, masterKey).apply()
+            encryptTextFiles(masterKey, password)
+            passwordInput.setText("") // Очищаем поле пароля
+            Toast.makeText(this, "Файлы зашифрованы", Toast.LENGTH_SHORT).show()
+        }
+
+        unprotectButton.setOnClickListener {
+            val password = passwordInput.text.toString().trim()
+            if (password.isEmpty()) {
+                Toast.makeText(this, "Введите пароль", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+
+            val masterKey = prefs.getString(PREF_KEY_MASTER_KEY, null)
+            if (masterKey == null) {
+                Toast.makeText(this, "Ключ не найден", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+
+            if (decryptTextFiles(masterKey, password)) {
+                SessionKeys.masterKey = masterKey.toByteArray()
+                passwordInput.setText("") // Очищаем поле пароля
+                Toast.makeText(this, "Файлы расшифрованы", Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(this, "Ошибка расшифровки: неверный пароль", Toast.LENGTH_SHORT).show()
+            }
+        }
+
         disableScreenshotsSwitch.setOnCheckedChangeListener { _, isChecked ->
             prefs.edit().putBoolean(PREF_KEY_DISABLE_SCREENSHOTS, isChecked).apply()
-            Toast.makeText(this,
+            Toast.makeText(
+                this,
                 if (isChecked) "Скриншоты запрещены" else "Скриншоты разрешены",
                 Toast.LENGTH_SHORT
             ).show()
@@ -137,12 +187,46 @@ class SettingsActivity : AppCompatActivity() {
 
         backButton.setOnClickListener {
             prefs.edit().putBoolean(PREF_KEY_DISABLE_SCREENSHOTS, disableScreenshotsSwitch.isChecked).apply()
-            setResult(RESULT_OK, Intent().apply {
-                putExtra("folderUri", folderUri)
-                putExtra("disableScreenshots", disableScreenshotsSwitch.isChecked)
-            })
-            finish()
+            val masterKey = masterKeyInput.text.toString().trim()
+            if (masterKey.isNotEmpty()) {
+                prefs.edit().putString(PREF_KEY_MASTER_KEY, masterKey).apply()
+            }
+
+            val password = passwordInput.text.toString().trim()
+            if (password.isNotEmpty()) {
+                val storedMasterKey = prefs.getString(PREF_KEY_MASTER_KEY, null)
+                if (storedMasterKey != null) {
+                    try {
+                        val derivedKey = SecCoreUtils.deriveDbKey(storedMasterKey.toByteArray(), password.toByteArray())
+                        SessionKeys.masterKey = derivedKey
+                        passwordInput.setText("") // Очищаем поле пароля
+                        val intent = Intent(this, ChatActivity::class.java).apply {
+                            putExtra("folderUri", folderUri)
+                            putExtra("disableScreenshots", disableScreenshotsSwitch.isChecked)
+                        }
+                        startActivity(intent)
+                        finish()
+                    } catch (e: Exception) {
+                        Toast.makeText(this, "Ошибка расшифровки: неверный пароль", Toast.LENGTH_SHORT).show()
+                        startMainActivity()
+                    }
+                } else {
+                    Toast.makeText(this, "Ключ не задан", Toast.LENGTH_SHORT).show()
+                    startMainActivity()
+                }
+            } else {
+                startMainActivity()
+            }
         }
+    }
+
+    private fun startMainActivity() {
+        val intent = Intent(this, MainActivity::class.java).apply {
+            putExtra("folderUri", folderUri)
+            putExtra("disableScreenshots", disableScreenshotsSwitch.isChecked)
+        }
+        startActivity(intent)
+        finish()
     }
 
     private fun openFolderPicker() {
@@ -199,6 +283,69 @@ class SettingsActivity : AppCompatActivity() {
         } catch (e: Exception) {
             Toast.makeText(this, "Ошибка загрузки: ${e.message}", Toast.LENGTH_SHORT).show()
             templatesInput.setText("")
+        }
+    }
+
+    private fun encryptTextFiles(masterKey: String, password: String) {
+        try {
+            val dir = DocumentFile.fromTreeUri(this, folderUri!!)
+            if (dir == null || !dir.exists() || !dir.isDirectory) {
+                Toast.makeText(this, "Ошибка: папка недоступна", Toast.LENGTH_SHORT).show()
+                return
+            }
+            dir.listFiles().filter { it.name?.endsWith(".txt") == true }.forEach { file ->
+                try {
+                    contentResolver.openInputStream(file.uri)?.use { input ->
+                        val content = input.readBytes()
+                        val salt = file.name!!.toByteArray()
+                        val derivedKey = SecCoreUtils.deriveDbKey(masterKey.toByteArray(), salt)
+                        val encryptedContent = SecCoreUtils.encryptAesGcm(content, derivedKey)
+                        SecCoreUtils.wipe(derivedKey)
+                        contentResolver.openFileDescriptor(file.uri, "w")?.use { pfd ->
+                            FileOutputStream(pfd.fileDescriptor).use { fos ->
+                                fos.write(encryptedContent)
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    Toast.makeText(this, "Ошибка шифрования файла ${file.name}", Toast.LENGTH_SHORT).show()
+                }
+            }
+        } catch (e: Exception) {
+            Toast.makeText(this, "Ошибка шифрования: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun decryptTextFiles(masterKey: String, password: String): Boolean {
+        try {
+            val dir = DocumentFile.fromTreeUri(this, folderUri!!)
+            if (dir == null || !dir.exists() || !dir.isDirectory) {
+                Toast.makeText(this, "Ошибка: папка недоступна", Toast.LENGTH_SHORT).show()
+                return false
+            }
+            dir.listFiles().filter { it.name?.endsWith(".txt") == true }.forEach { file ->
+                try {
+                    contentResolver.openInputStream(file.uri)?.use { input ->
+                        val encryptedContent = input.readBytes()
+                        val salt = file.name!!.toByteArray()
+                        val derivedKey = SecCoreUtils.deriveDbKey(masterKey.toByteArray(), salt)
+                        val decryptedContent = SecCoreUtils.decryptAesGcm(encryptedContent, derivedKey)
+                        SecCoreUtils.wipe(derivedKey)
+                        contentResolver.openFileDescriptor(file.uri, "w")?.use { pfd ->
+                            FileOutputStream(pfd.fileDescriptor).use { fos ->
+                                fos.write(decryptedContent)
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    Toast.makeText(this, "Ошибка расшифровки файла ${file.name}", Toast.LENGTH_SHORT).show()
+                    return false
+                }
+            }
+            return true
+        } catch (e: Exception) {
+            Toast.makeText(this, "Ошибка расшифровки: ${e.message}", Toast.LENGTH_SHORT).show()
+            return false
         }
     }
 }
