@@ -44,15 +44,14 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     companion object {
         private const val PREF_KEY_FOLDER_URI = "pref_folder_uri"
         private const val PREF_KEY_DISABLE_SCREENSHOTS = "pref_disable_screenshots"
-        private const val MAX_CONTEXT_SWITCH = 6 // Note: This is now unused due to logic simplification
+        private const val MAX_CONTEXT_SWITCH = 6
         private const val MAX_MESSAGES = 250
-        private const val CANDIDATE_TOKEN_THRESHOLD = 2 // минимальное число общих токенов для кандидата
-        private const val MAX_SUBQUERY_RESPONSES = 3 // Ограничение на количество подответов
-        private const val SUBQUERY_RESPONSE_DELAY = 1500L // Задержка для индикатора "печатает..."
-        private const val MAX_CANDIDATES_FOR_LEV = 25 // ограничение числа кандидатов для Levenshtein
+        private const val CANDIDATE_TOKEN_THRESHOLD = 2
+        private const val MAX_SUBQUERY_RESPONSES = 3
+        private const val SUBQUERY_RESPONSE_DELAY = 1500L
+        private const val MAX_CANDIDATES_FOR_LEV = 25
         private const val JACCARD_THRESHOLD = 0.50
 
-        // Debounce for send button
         private const val SEND_DEBOUNCE_MS = 400L
     }
 
@@ -64,7 +63,6 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
     }
 
-    // UI
     private var folderUri: Uri? = null
     private lateinit var scrollView: ScrollView
     private lateinit var queryInput: AutoCompleteTextView
@@ -78,18 +76,15 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private lateinit var messagesContainer: LinearLayout
     private var adapter: ArrayAdapter<String>? = null
 
-    // Added UI elements (status bar overlay)
     private var batteryImageView: ImageView? = null
     private var batteryPercentView: TextView? = null
     private var wifiImageView: ImageView? = null
     private var bluetoothImageView: ImageView? = null
     private var timeTextView: TextView? = null
-    private var infoIconButton: ImageButton? = null // оставляем поле, но не добавляем в тулбар
+    private var infoIconButton: ImageButton? = null
 
-    // TTS
     private var tts: TextToSpeech? = null
 
-    // Data structures
     private val fallback = arrayOf("Привет", "Как дела?", "Расскажи о себе", "Выход")
     private val templatesMap = HashMap<String, MutableList<String>>()
     private val contextMap = HashMap<String, String>()
@@ -107,7 +102,6 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private var lastQuery = ""
     private var userActivityCount = 0
 
-    // Dialogs / idle
     private val dialogHandler = Handler(Looper.getMainLooper())
     private var idleCheckRunnable: Runnable? = null
     private var lastUserInputTime = System.currentTimeMillis()
@@ -122,20 +116,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private var timeUpdaterRunnable: Runnable? = null
 
     init {
-        antiSpamResponses.addAll(
-            listOf(
-                "Ты надоел, давай что-то новенького!",
-                "Спамить нехорошо, попробуй другой запрос.",
-                "Я устал от твоих повторений!",
-                "Хватит спамить, придумай что-то интересное.",
-                "Эй, не зацикливайся, попробуй другой вопрос!",
-                "Повторяешь одно и то же? Давай разнообразие!",
-                "Слишком много повторов, я же не робот... ну, почти.",
-                "Не спамь, пожалуйста, задай новый вопрос!",
-                "Пять раз одно и то же? Попробуй что-то другое.",
-                "Я уже ответил, давай новый запрос!"
-            )
-        )
+        antiSpamResponses.addAll(resources.getStringArray(R.array.anti_spam_responses))
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -186,14 +167,12 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         setupIconTouchEffect(btnEnvelopeTop)
         setupIconTouchEffect(btnSettings)
         setupIconTouchEffect(envelopeInputButton)
-        // убрал setupIconTouchEffect(infoIconButton) — кнопка info не добавляется в тулбар
         setupIconTouchEffect(btnCharging)
 
         btnLock?.setOnClickListener { finish() }
         btnTrash?.setOnClickListener { clearChat() }
         btnSettings?.setOnClickListener { startActivity(Intent(this, SettingsActivity::class.java)) }
         btnEnvelopeTop?.setOnClickListener { startActivity(Intent(this, PostsActivity::class.java)) }
-        // infoIconButton не добавляем; btnCharging оставляем
         btnCharging?.setOnClickListener { startActivity(Intent(this, PostsActivity::class.java)) }
 
         envelopeInputButton?.setOnClickListener {
@@ -219,20 +198,19 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             true
         }
 
-        // Инициализация TTS
         tts = TextToSpeech(this, this)
 
         if (folderUri == null) {
-            showCustomToast("Папка не выбрана! Открой настройки и выбери папку.")
+            showCustomToast(getString(R.string.folder_not_selected))
             loadFallbackTemplates()
             rebuildInvertedIndex()
             updateAutoComplete()
-            addChatMessage(currentMascotName, "Добро пожаловать!")
+            addChatMessage(currentMascotName, getString(R.string.welcome_message))
         } else {
             loadTemplatesFromFile(currentContext)
             rebuildInvertedIndex()
             updateAutoComplete()
-            addChatMessage(currentMascotName, "Добро пожаловать!")
+            addChatMessage(currentMascotName, getString(R.string.welcome_message))
         }
 
         queryInput.setOnItemClickListener { parent, _, position, _ ->
@@ -326,9 +304,6 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
         topBar.addView(timeTextView, spacerIndex)
 
-        // убираем infoIconButton из тулбара — перенесём в настройки позже
-        // оставляем место для других кнопок, но info не добавляем
-
         btnCharging = ImageButton(this).apply {
             background = null
             val iconSize = dpToPx(56)
@@ -418,7 +393,6 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 } catch (_: Exception) {}
             }
 
-            // infoIconButton — больше не заполняем
             tryLoadToImageButton("lock.png", btnLock)
             tryLoadToImageButton("trash.png", btnTrash)
             tryLoadToImageButton("envelope.png", btnEnvelopeTop)
@@ -428,8 +402,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             tryLoadToImageView("battery_5.png", batteryImageView)
             tryLoadToImageView("wifi.png", wifiImageView)
             tryLoadToImageView("bluetooth.png", bluetoothImageView)
-            // mobile icon may be named mobile.png
-            tryLoadToImageView("mobile.png", null) // just ensure file exists if needed; loaded dynamically in updateNetworkUI
+            tryLoadToImageView("mobile.png", null)
         } catch (e: Exception) {
             e.printStackTrace()
         }
@@ -485,7 +458,6 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         val calendar = Calendar.getInstance()
         val hour = calendar.get(Calendar.HOUR_OF_DAY)
         val minute = calendar.get(Calendar.MINUTE)
-        // расширенная логика: если поздно (23:00-06:00), предложить лечь спать при втором вводе
         if ((hour >= 23 || hour < 6) && userActivityCount == 2) {
             val sleepResponse = loadTimeToSleepResponse()
             if (sleepResponse != null) {
@@ -567,7 +539,6 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 return Pair(mapped, joined)
             }
 
-            // helper: parses a templates file into maps (без изменения UI) — используется для тематического поиска
             fun parseTemplatesFromFile(filename: String): Pair<HashMap<String, MutableList<String>>, HashMap<String, MutableList<String>>> {
                 val localTemplates = HashMap<String, MutableList<String>>()
                 val localKeywords = HashMap<String, MutableList<String>>()
@@ -598,7 +569,6 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                             if (parts.size == 2) {
                                 val triggerRaw = parts[0].trim()
                                 val trigger = normalizeLocal(triggerRaw)
-                                // map synonyms/stopwords to produce filtered trigger key
                                 val triggerFiltered = filterStopwordsAndMapSynonymsLocal(trigger).second
                                 val responses = parts[1].split("|")
                                 val responseList = responses.mapNotNull { it.trim().takeIf { s -> s.isNotEmpty() } }.toMutableList()
@@ -674,7 +644,6 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 }
             }
 
-            // основной candidate поиск (используем snapshot)
             val qTokens = if (qTokensFiltered.isNotEmpty()) qTokensFiltered else tokenizeLocal(qFiltered)
             val candidateCounts = HashMap<String, Int>()
             for (tok in qTokens) {
@@ -695,7 +664,6 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     .take(MAX_CANDIDATES_FOR_LEV)
             }
 
-            // Jaccard на snapshot
             var bestByJaccard: String? = null
             var bestJaccard = 0.0
             val qSet = qTokens.toSet()
@@ -720,7 +688,6 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 }
             }
 
-            // Fuzzy / Levenshtein on snapshot
             var bestKey: String? = null
             var bestDist = Int.MAX_VALUE
             for (key in candidates) {
@@ -744,11 +711,9 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 }
             }
 
-            // Попытка контекстного перехода: если найден ключ в base => переход в тематический файл.
             val lower = normalizeLocal(qFiltered)
             for ((keyword, value) in contextMapSnapshot) {
                 if (lower.contains(keyword)) {
-                    // Специальная обработка для pictures_meta.txt
                     if (value == "pictures_meta.txt") {
                         return@launch withContext(Dispatchers.IO) {
                             val imageResult = loadImageFromMeta(qFiltered, qTokens)
@@ -763,7 +728,6 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                         }
                     } else {
                         return@launch withContext(Dispatchers.Main) {
-                            // если надо — переключаем глобальный контекст (UI thread)
                             if (value != currentContext) {
                                 currentContext = value
                                 loadTemplatesFromFile(currentContext)
@@ -771,9 +735,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                                 updateAutoComplete()
                             }
                         }.let {
-                            // после переключения — в background проверим тематический файл на совпадения
                             val (localTemplates, localKeywords) = parseTemplatesFromFile(value)
-                            // сначала точное совпадение в тематическом файле
                             localTemplates[ qFiltered ]?.let { possible ->
                                 if (possible.isNotEmpty()) {
                                     return@launch withContext(Dispatchers.Main) {
@@ -782,7 +744,6 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                                     }
                                 }
                             }
-                            // построим локальный inverted index для тематического файла
                             val localInverted = HashMap<String, MutableList<String>>()
                             for ((k, v) in localTemplates) {
                                 val toks = filterStopwordsAndMapSynonymsLocal(k).first
@@ -791,7 +752,6 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                                     if (!list.contains(k)) list.add(k)
                                 }
                             }
-                            // кандидаты из локального inverted
                             val localCandidateCounts = HashMap<String, Int>()
                             val tokens = qTokens
                             for (tok in tokens) {
@@ -810,7 +770,6 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                                 localTemplates.keys.filter { abs(it.length - qFiltered.length) <= md }
                                     .take(MAX_CANDIDATES_FOR_LEV)
                             }
-                            // Jaccard local
                             var bestLocal: String? = null
                             var bestLocalJ = 0.0
                             val qSetLocal = tokens.toSet()
@@ -834,7 +793,6 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                                     }
                                 }
                             }
-                            // Levenshtein local
                             var bestLocalKey: String? = null
                             var bestLocalDist = Int.MAX_VALUE
                             for (key in localCandidates) {
@@ -856,7 +814,6 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                                     }
                                 }
                             }
-                            // если ничего не нашлось — вернём дефолтный ответ
                             return@launch withContext(Dispatchers.Main) {
                                 addChatMessage(currentMascotName, getDummyResponse(qOrig))
                                 startIdleTimer()
@@ -879,7 +836,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         val metaFile = dir.findFile("pictures_meta.txt") ?: return null
         if (!metaFile.exists()) return null
 
-        val imageMap = HashMap<String, String>() // trigger -> imagefile
+        val imageMap = HashMap<String, String>()
         contentResolver.openInputStream(metaFile.uri)?.bufferedReader()?.use { reader ->
             reader.forEachLine { raw ->
                 val l = raw.trim()
@@ -900,7 +857,6 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         if (imageMap.isEmpty()) return null
 
-        // Поиск по Jaccard
         var bestByJaccard: String? = null
         var bestJaccard = 0.0
         val qSet = qTokens.toSet()
@@ -920,7 +876,6 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             return loadBitmapFromFolder(imgFile)
         }
 
-        // Fuzzy / Levenshtein
         var bestKey: String? = null
         var bestDist = Int.MAX_VALUE
         val candidates = imageMap.keys.take(MAX_CANDIDATES_FOR_LEV)
@@ -970,7 +925,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     setImageBitmap(bitmap)
                     scaleType = ImageView.ScaleType.CENTER_CROP
                     adjustViewBounds = true
-                    val accent = Color.parseColor("#FF0000") // фиксированный красный для пользователя
+                    val accent = Color.parseColor("#FF0000")
                     background = createBubbleDrawable(accent)
                     layoutParams = LinearLayout.LayoutParams(
                         ViewGroup.LayoutParams.WRAP_CONTENT,
@@ -991,7 +946,6 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     scaleType = ImageView.ScaleType.CENTER_CROP
                     adjustViewBounds = true
                     loadAvatarInto(this, sender)
-                    // при клике — лёгкое свечение, затем ouch
                     setOnClickListener { view ->
                         view.isEnabled = false
                         val scaleX = ObjectAnimator.ofFloat(view, "scaleX", 1f, 1.08f, 1f)
@@ -1039,23 +993,23 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         val cmd = cmdRaw.trim().lowercase(Locale.getDefault())
         when {
             cmd == "/reload" -> {
-                addChatMessage(currentMascotName, "Перезагружаю шаблоны...")
+                addChatMessage(currentMascotName, getString(R.string.command_reload_start))
                 loadTemplatesFromFile(currentContext)
                 rebuildInvertedIndex()
                 updateAutoComplete()
-                addChatMessage(currentMascotName, "Шаблоны перезагружены.")
+                addChatMessage(currentMascotName, getString(R.string.command_reload_complete))
             }
             cmd == "/stats" -> {
                 val templatesCount = templatesMap.size
                 val keywordsCount = keywordResponses.size
-                val msg = "Контекст: $currentContext. Шаблонов: $templatesCount. Ключевых ответов: $keywordsCount."
+                val msg = getString(R.string.command_stats, currentContext, templatesCount, keywordsCount)
                 addChatMessage(currentMascotName, msg)
             }
             cmd == "/clear" -> {
                 clearChat()
             }
             else -> {
-                addChatMessage(currentMascotName, "Неизвестная команда: $cmdRaw")
+                addChatMessage(currentMascotName, getString(R.string.command_unknown, cmdRaw))
             }
         }
     }
@@ -1065,7 +1019,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             val existing = messagesContainer.findViewWithTag<View>("typingView")
             if (existing != null) return@runOnUi
             val typingView = TextView(this).apply {
-                text = "печатает..."
+                text = getString(R.string.typing_indicator)
                 textSize = 14f
                 setTextColor(getColor(android.R.color.white))
                 setBackgroundColor(0x80000000.toInt())
@@ -1098,7 +1052,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             loadTemplatesFromFile(currentContext)
             rebuildInvertedIndex()
             updateAutoComplete()
-            addChatMessage(currentMascotName, "Чат очищен. Возвращаюсь к началу.")
+            addChatMessage(currentMascotName, getString(R.string.command_clear))
         }
     }
 
@@ -1113,9 +1067,9 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private fun getDummyResponse(query: String): String {
         val lower = query.lowercase(Locale.ROOT)
         return when {
-            lower.contains("привет") -> "Привет! Чем могу помочь?"
-            lower.contains("как дела") -> "Всё отлично, а у тебя?"
-            else -> "Не понял запрос. Попробуй другой вариант."
+            lower.contains("привет") -> getString(R.string.default_response_hello)
+            lower.contains("как дела") -> getString(R.string.default_response_how_are_you)
+            else -> getString(R.string.default_response_unknown)
         }
     }
 
@@ -1242,7 +1196,6 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     scaleType = ImageView.ScaleType.CENTER_CROP
                     adjustViewBounds = true
                     loadAvatarInto(this, sender)
-                    // при клике — лёгкое свечение, затем ouch
                     setOnClickListener { view ->
                         view.isEnabled = false
                         val scaleX = ObjectAnimator.ofFloat(view, "scaleX", 1f, 1.08f, 1f)
@@ -1292,7 +1245,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 }
             }
         } catch (e: Exception) {
-            showCustomToast("Ошибка загрузки ouch.txt: ${e.message}")
+            showCustomToast(getString(R.string.error_loading_ouch, e.message))
         }
     }
 
@@ -1340,7 +1293,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             val pad = dpToPx(10)
             setPadding(pad, pad, pad, pad)
             val accent = if (isUser) {
-                Color.parseColor("#FF0000") // фиксированный красный для пользователя
+                Color.parseColor("#FF0000")
             } else {
                 safeParseColorOrDefault(currentThemeColor, Color.parseColor("#00FF00"))
             }
@@ -1520,7 +1473,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
         } catch (e: Exception) {
             e.printStackTrace()
-            showCustomToast("Ошибка чтения файла: ${e.message}")
+            showCustomToast(getString(R.string.error_reading_file, e.message))
             loadFallbackTemplates()
             rebuildInvertedIndex()
             updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
@@ -1533,10 +1486,10 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         keywordResponses.clear()
         mascotList.clear()
         val t1 = filterStopwordsAndMapSynonyms(normalizeText("привет")).second
-        templatesMap[t1] = mutableListOf("Привет! Чем могу помочь?", "Здравствуй!")
+        templatesMap[t1] = resources.getStringArray(R.array.fallback_hello_responses).toMutableList()
         val t2 = filterStopwordsAndMapSynonyms(normalizeText("как дела")).second
-        templatesMap[t2] = mutableListOf("Всё отлично, а у тебя?", "Нормально, как дела?")
-        keywordResponses["спасибо"] = mutableListOf("Рад, что помог!", "Всегда пожалуйста!")
+        templatesMap[t2] = resources.getStringArray(R.array.fallback_how_are_you_responses).toMutableList()
+        keywordResponses["спасибо"] = resources.getStringArray(R.array.fallback_thanks_responses).toMutableList()
     }
 
     private fun updateAutoComplete() {
@@ -1584,14 +1537,14 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
                 }
             } catch (e: Exception) {
-                showCustomToast("Ошибка загрузки метаданных маскота: ${e.message}")
+                showCustomToast(getString(R.string.error_loading_mascot_metadata, e.message))
             }
         }
     }
 
     private fun updateUI(mascotName: String, mascotIcon: String, themeColor: String, themeBackground: String) {
         runOnUi {
-            title = "Pawstribe - $mascotName"
+            title = getString(R.string.app_title, mascotName)
             loadMascotTopImage()
             mascotTopImage?.visibility = View.GONE
             try {
@@ -1683,7 +1636,6 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             } else {
                 tryLoadBitmapFromFolder("battery.png")?.let { batteryImageView?.setImageBitmap(it) }
             }
-            // клик по батарее — фиксированное сообщение из batterycare.txt (без рандома)
             batteryImageView?.setOnClickListener {
                 lifecycleScope.launch(Dispatchers.IO) {
                     val resp = loadBatteryCareResponse()
@@ -1700,13 +1652,9 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 btnCharging?.visibility = View.GONE
             }
             if (percent <= urgentThreshold && lastBatteryWarningStage > urgentThreshold) {
-                addChatMessage(currentMascotName, "Это не шутки. Поставь на зарядку.")
+                addChatMessage(currentMascotName, getString(R.string.battery_urgent_warning))
             } else if (percent <= warningThreshold && lastBatteryWarningStage > warningThreshold) {
-                val variants = listOf(
-                    "Пожалуйста, поставь устройство на зарядку — батарейка почти села.",
-                    "Аккумулятор низкий, лучше подключить зарядку.",
-                    "Осталось немного заряда, поставь телефон на заряд."
-                )
+                val variants = resources.getStringArray(R.array.battery_warning_variants)
                 addChatMessage(currentMascotName, variants.random())
             }
             lastBatteryWarningStage = percent
@@ -1721,13 +1669,11 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             if (file != null && file.exists()) {
                 contentResolver.openInputStream(file.uri)?.bufferedReader()?.use { reader ->
                     val allText = reader.readText().trim()
-                    // не используем рандом — отправляем как единое сообщение
                     if (allText.isNotEmpty()) return allText
                 }
             }
         } catch (e: Exception) {
-            // не крашить — покажем тост
-            showCustomToast("Ошибка загрузки batterycare.txt: ${e.message}")
+            showCustomToast(getString(R.string.error_loading_batterycare, e.message))
         }
         return null
     }
@@ -1799,21 +1745,16 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 val hasCell = caps?.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) == true
                 val isConnected = caps != null && (hasWifi || hasCell || caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET))
 
-                // Три состояния: WiFi, Mobile, "airplane" (нет подключений). AirplaneMode OR !isConnected => offline state.
                 if (airplaneMode || !isConnected) {
-                    // используем airplane.png для состояния "все соединения отключены"
                     tryLoadBitmapFromFolder("airplane.png")?.let { wifiImageView?.setImageBitmap(it) }
                 } else if (hasWifi) {
                     tryLoadBitmapFromFolder("wifi.png")?.let { wifiImageView?.setImageBitmap(it) }
                 } else if (hasCell) {
-                    // mobile network icon (mobile.png)
                     tryLoadBitmapFromFolder("mobile.png")?.let { wifiImageView?.setImageBitmap(it) }
                 } else {
-                    // fallback — если нет ни wifi ни mobile, показываем airplane
                     tryLoadBitmapFromFolder("airplane.png")?.let { wifiImageView?.setImageBitmap(it) }
                 }
             } catch (_: Exception) {
-                // silently ignore
             }
         }
     }
@@ -1848,7 +1789,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 }
             }
         } catch (e: Exception) {
-            showCustomToast("Ошибка загрузки timetosleep.txt: ${e.message}")
+            showCustomToast(getString(R.string.error_loading_timetosleep, e.message))
         }
         return null
     }
@@ -1881,17 +1822,17 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 }
             }
         } catch (e: Exception) {
-            showCustomToast("Ошибка загрузки cldsys.txt: ${e.message}")
+            showCustomToast(getString(R.string.error_loading_cldsys, e.message))
         }
         return getDefaultDateTimeResponse(query, currentDate, currentDay, currentYear)
     }
 
     private fun getDefaultDateTimeResponse(query: String, date: String, day: String, year: String): String {
         return when {
-            query.contains("число") -> "Сегодня $date."
-            query.contains("день") -> "Сегодня $day."
-            query.contains("год") -> "Сейчас $year год."
-            else -> "Сегодня $date, $day."
+            query.contains("число") -> getString(R.string.date_response, date)
+            query.contains("день") -> getString(R.string.day_response, day)
+            query.contains("год") -> getString(R.string.year_response, year)
+            else -> getString(R.string.date_day_response, date, day)
         }
     }
 
