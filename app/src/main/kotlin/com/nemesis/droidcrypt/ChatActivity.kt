@@ -482,43 +482,45 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     }
 
     private fun loadToolbarIconsAsync() {
-        lifecycleScope.launch(Dispatchers.IO) {
-            val uri = folderUri ?: return@launch
-            try {
-                val dir = DocumentFile.fromTreeUri(this@ChatActivity, uri) ?: return@launch
+    lifecycleScope.launch(Dispatchers.IO) {
+        val uri = folderUri ?: return@launch
+        try {
+            val dir = DocumentFile.fromTreeUri(this@ChatActivity, uri) ?: return@launch
 
-                fun loadBitmapAsync(name: String, target: ImageView?, buttonTarget: ImageButton? = null) {
-                    try {
-                        val file = dir.findFile(name)
-                        if (file != null && file.exists()) {
-                            contentResolver.openInputStream(file.uri)?.use { ins ->
-                                val bmp = BitmapFactory.decodeStream(ins)
-                                withContext(Dispatchers.Main) {
-                                    bmp?.let {
-                                        if (target != null) target.setImageBitmap(it)
-                                        if (buttonTarget != null) buttonTarget.setImageBitmap(it)
-                                    }
+            // Внутренняя функция loadBitmapAsync, объявленная как suspend
+            suspend fun loadBitmapAsync(name: String, target: ImageView?, buttonTarget: ImageButton? = null) {
+                try {
+                    val file = dir.findFile(name)
+                    if (file != null && file.exists()) {
+                        contentResolver.openInputStream(file.uri)?.use { ins ->
+                            val bmp = BitmapFactory.decodeStream(ins)
+                            withContext(Dispatchers.Main) {
+                                bmp?.let {
+                                    if (target != null) target.setImageBitmap(it)
+                                    if (buttonTarget != null) buttonTarget.setImageBitmap(it)
                                 }
                             }
                         }
-                    } catch (_: Exception) {}
-                }
-
-                loadBitmapAsync("lock.png", null, btnLock)
-                loadBitmapAsync("trash.png", null, btnTrash)
-                loadBitmapAsync("envelope.png", null, btnEnvelopeTop)
-                loadBitmapAsync("settings.png", null, btnSettings)
-                loadBitmapAsync("charging.png", null, btnCharging)
-                loadBitmapAsync("send.png", null, envelopeInputButton)
-                loadBitmapAsync("battery_5.png", batteryImageView)
-                loadBitmapAsync("wifi.png", wifiImageView)
-                loadBitmapAsync("bluetooth.png", bluetoothImageView)
-                loadBitmapAsync("mobile.png", null) // preload if needed
-            } catch (e: Exception) {
-                e.printStackTrace()
+                    }
+                } catch (_: Exception) {}
             }
+
+            // Вызовы loadBitmapAsync
+            loadBitmapAsync("lock.png", null, btnLock)
+            loadBitmapAsync("trash.png", null, btnTrash)
+            loadBitmapAsync("envelope.png", null, btnEnvelopeTop)
+            loadBitmapAsync("settings.png", null, btnSettings)
+            loadBitmapAsync("charging.png", null, btnCharging)
+            loadBitmapAsync("send.png", null, envelopeInputButton)
+            loadBitmapAsync("battery_5.png", batteryImageView)
+            loadBitmapAsync("wifi.png", wifiImageView)
+            loadBitmapAsync("bluetooth.png", bluetoothImageView)
+            loadBitmapAsync("mobile.png", null) // preload if needed
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
     }
+}
 
     private fun loadMascotTopImage() {
         val uri = folderUri ?: return
