@@ -41,12 +41,6 @@ android {
         includeInApk = false
         includeInBundle = false
     }
-
-    // ✅ включаем биндинг
-    buildFeatures {
-        viewBinding = true
-        dataBinding = true
-    }
 }
 
 dependencies {
