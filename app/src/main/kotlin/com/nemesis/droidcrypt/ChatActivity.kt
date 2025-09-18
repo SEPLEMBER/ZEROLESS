@@ -877,6 +877,9 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             cmd == "/clear" -> {
                 clearChat()
             }
+            cmd == "Очисти чат" -> {
+                clearChat()
+            }
             else -> {
                 addChatMessage(currentMascotName, "Неизвестная команда: $cmdRaw")
             }
