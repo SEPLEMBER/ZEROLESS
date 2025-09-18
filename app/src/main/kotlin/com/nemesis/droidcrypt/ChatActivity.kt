@@ -1,5 +1,3 @@
-package com.nemesis.droidcrypt
-
 import android.animation.ObjectAnimator
 import android.content.*
 import android.graphics.*
@@ -26,7 +24,6 @@ import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.delay
 import java.util.*
 import kotlin.math.abs
 import kotlin.math.log10
@@ -76,11 +73,11 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     // TTS
     private var tts: TextToSpeech? = null
-
+    
     // Data structures
     private val fallback = arrayOf("Привет", "Как дела?", "Расскажи о себе", "Выход")
     private val templatesMap = HashMap<String, MutableList<String>>()
-    private val contextMap = HashMap<String, String>() // keyword -> filename (parsed from base.txt lines like :золото=resourcesmoney.txt:)
+    private val contextMap = HashMap<String, String>()
     private val keywordResponses = HashMap<String, MutableList<String>>()
     private val antiSpamResponses = mutableListOf<String>()
     private val mascotList = mutableListOf<Map<String, String>>()
@@ -109,10 +106,6 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
     }
     private val tokenWeights = HashMap<String, Double>()
-
-    // New: user variables and last topic for context
-    private val userVariables = HashMap<String, String>()
-    private var lastTopic: String? = null
 
     init {
         antiSpamResponses.addAll(
@@ -214,7 +207,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         // Инициализация TTS
         tts = TextToSpeech(this, this)
-
+        
         if (folderUri == null) {
             showCustomToast("Папка не выбрана! Открой настройки и выбери папку.")
             loadFallbackTemplates()
@@ -223,7 +216,6 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             updateAutoComplete()
             addChatMessage(currentMascotName, "Добро пожаловать!")
         } else {
-            // currentContext по умолчанию "base.txt" — загрузим его, чтобы заполнить contextMap
             loadTemplatesFromFile(currentContext)
             rebuildInvertedIndex()
             computeTokenWeights()
@@ -330,79 +322,48 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
     }
 
-    // processUserQuery now supports optional splitting control (allowSplit)
-    private fun processUserQuery(userInput: String, allowSplit: Boolean = true) {
+    private fun splitQueryIntoSubqueries(input: String): List<String> {
+        val normalized = normalizeText(input)
+        val tokens = tokenize(normalized).filter { !stopwords.contains(it) }
+        val subqueries = mutableListOf<String>()
+        var currentPrefix = ""
+        
+        for (i in tokens.indices) {
+            if (tokens[i] in listOf("что", "как", "кто", "где", "когда", "почему")) {
+                if (currentPrefix.isNotEmpty()) {
+                    subqueries.add(currentPrefix.trim())
+                }
+                currentPrefix = tokens[i]
+            } else {
+                currentPrefix += " ${tokens[i]}"
+            }
+        }
+        if (currentPrefix.isNotEmpty()) {
+            subqueries.add(currentPrefix.trim())
+        }
+        
+        return subqueries.filter { it.isNotEmpty() }.distinct().take(MAX_SUBQUERY_RESPONSES)
+    }
+
+    private fun processUserQuery(userInput: String) {
         if (userInput.startsWith("/")) {
             handleCommand(userInput.trim())
             return
         }
 
-        val rawInput = userInput.trim()
-        // Split compound queries early (commas/semicolons). Keep changes minimal: schedule subqueries.
-        if (allowSplit) {
-            val parts = rawInput.split(Regex("[,;]")).map { it.trim() }.filter { it.isNotEmpty() }
-            if (parts.size > 1) {
-                // Show single user message and schedule subqueries
-                addChatMessage("You", rawInput)
-                showTypingIndicator()
-                for ((idx, part) in parts.withIndex()) {
-                    val delayMs = idx * SUBQUERY_RESPONSE_DELAY
-                    Handler(Looper.getMainLooper()).postDelayed({
-                        processUserQuery(part, false)
-                    }, delayMs)
-                }
-                return
-            }
-        }
-
-        // Resolve pronouns 'оно/она/он' to lastTopic (context recall)
-        var processedInput = rawInput
-        lastTopic?.let { topic ->
-            if (processedInput.contains(Regex("\\b(оно|она|он)\\b", RegexOption.IGNORE_CASE))) {
-                processedInput = processedInput.replace(Regex("\\b(оно|она|он)\\b", RegexOption.IGNORE_CASE), topic)
-            }
-        }
-
-        val qOrigRaw = processedInput
-        val qOrig = normalizeText(qOrigRaw)
-        val (qTokensFiltered, qFiltered) = filterStopwordsAndMapSynonyms(qOrig)
-        val qKeyForCount = qFiltered
-
-        if (qFiltered.isEmpty()) return
-
-        // Кэш: проверка на повторный запрос
-        queryCache[qKeyForCount]?.let { cachedResponse ->
-            addChatMessage(currentMascotName, applyVariables(cachedResponse))
-            startIdleTimer()
-            return
-        }
-
+        val qOrigRaw = userInput.trim()
+        addChatMessage("You", qOrigRaw)
         lastUserInputTime = System.currentTimeMillis()
         userActivityCount++
 
-        addChatMessage("You", userInput)
-        showTypingIndicator()
-
-        // Антиспам с временным окном
-        val now = System.currentTimeMillis()
-        val timestamps = queryTimestamps.getOrPut(qKeyForCount) { mutableListOf() }
-        timestamps.add(now)
-        timestamps.removeAll { it < now - SPAM_WINDOW_MS }
-        if (timestamps.size >= 5) {
-            val spamResp = antiSpamResponses.random()
-            addChatMessage(currentMascotName, spamResp)
+        val subqueries = splitQueryIntoSubqueries(qOrigRaw)
+        if (subqueries.isEmpty()) {
+            addChatMessage(currentMascotName, getDummyResponse(qOrigRaw))
             startIdleTimer()
             return
         }
 
-        val templatesSnapshot = HashMap(templatesMap)
-        val invertedIndexSnapshot = HashMap<String, MutableList<String>>()
-        for ((k, v) in invertedIndex) invertedIndexSnapshot[k] = ArrayList(v)
-        val synonymsSnapshot = HashMap(synonymsMap)
-        val stopwordsSnapshot = HashSet(stopwords)
-        val keywordResponsesSnapshot = HashMap<String, MutableList<String>>()
-        for ((k, v) in keywordResponses) keywordResponsesSnapshot[k] = ArrayList(v)
-        val contextMapSnapshot = HashMap(contextMap)
+        showTypingIndicator()
 
         lifecycleScope.launch(Dispatchers.Default) {
             data class ResponseResult(val text: String? = null, val wantsContextSwitch: String? = null)
@@ -423,9 +384,9 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 val toks = tokenizeLocal(input)
                 val mapped = toks.map { tok ->
                     val n = normalizeLocal(tok)
-                    val s = synonymsSnapshot[n] ?: n
+                    val s = synonymsMap[n] ?: n
                     s
-                }.filter { it.isNotEmpty() && !stopwordsSnapshot.contains(it) }
+                }.filter { it.isNotEmpty() && !stopwords.contains(it) }
                 val joined = mapped.joinToString(" ")
                 return Pair(mapped, joined)
             }
@@ -442,11 +403,6 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                         reader.forEachLine { raw ->
                             val l = raw.trim()
                             if (l.isEmpty()) return@forEachLine
-                            // preserve same parsing rules as loadTemplatesFromFile (but do not alter global maps)
-                            if (filename == "base.txt" && l.startsWith(":") && l.endsWith(":")) {
-                                // context mapping lines are handled in loadTemplatesFromFile; skip here
-                                return@forEachLine
-                            }
                             if (l.startsWith("-")) {
                                 val keywordLine = l.substring(1)
                                 if (keywordLine.contains("=")) {
@@ -478,421 +434,309 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 return Pair(localTemplates, localKeywords)
             }
 
-            // helper: check if a response string looks like a file-redirect (contains .txt)
-            fun looksLikeFilename(resp: String): Boolean {
-                val t = resp.trim().lowercase(Locale.getDefault())
-                return t.contains(".txt")
-            }
+            suspend fun processSingleQuery(qOrig: String, delay: Long) {
+                val qFiltered = normalizeLocal(qOrig)
+                val qKeyForCount = qFiltered
+                val (qTokensFiltered, _) = filterStopwordsAndMapSynonymsLocal(qOrig)
 
-            // recursive resolver: try to find a response for lookupKey inside filename (depth-limited)
-            suspend fun resolveInFile(filename: String, lookupKey: String, depth: Int = 0): String? {
-                if (depth > 3) return null
-                val (fileTemplates, fileKeywords) = parseTemplatesFromFile(filename)
-                // 1) exact in fileTemplates
-                fileTemplates[lookupKey]?.let { list ->
-                    if (list.isNotEmpty()) {
-                        val candidate = list.random()
-                        // if candidate is a redirect to another file, follow it
-                        if (looksLikeFilename(candidate)) {
-                            // extract filename (strip surrounding colons if any)
-                            val f = candidate.replace(":", "").trim()
-                            return resolveInFile(f, lookupKey, depth + 1) ?: candidate
-                        }
-                        return candidate
+                // Кэш: проверка на повторный запрос
+                queryCache[qKeyForCount]?.let { cachedResponse ->
+                    withContext(Dispatchers.Main) {
+                        addChatMessage(currentMascotName, cachedResponse)
+                        startIdleTimer()
+                    }
+                    return
+                }
+
+                // Антиспам с временным окном
+                val now = System.currentTimeMillis()
+                val timestamps = queryTimestamps.getOrPut(qKeyForCount) { mutableListOf() }
+                timestamps.add(now)
+                timestamps.removeAll { it < now - SPAM_WINDOW_MS }
+                if (timestamps.size >= 5) {
+                    withContext(Dispatchers.Main) {
+                        val spamResp = antiSpamResponses.random()
+                        addChatMessage(currentMascotName, spamResp)
+                        startIdleTimer()
+                    }
+                    return
+                }
+
+                val templatesSnapshot = HashMap(templatesMap)
+                val invertedIndexSnapshot = HashMap<String, MutableList<String>>()
+                for ((k, v) in invertedIndex) invertedIndexSnapshot[k] = ArrayList(v)
+                val synonymsSnapshot = HashMap(synonymsMap)
+                val stopwordsSnapshot = HashSet(stopwords)
+                val keywordResponsesSnapshot = HashMap<String, MutableList<String>>()
+                for ((k, v) in keywordResponses) keywordResponsesSnapshot[k] = ArrayList(v)
+                val contextMapSnapshot = HashMap(contextMap)
+
+                var answered = false
+                val subqueryResponses = mutableListOf<String>()
+                val processedSubqueries = mutableSetOf<String>()
+
+                templatesSnapshot[qFiltered]?.let { possible ->
+                    if (possible.isNotEmpty()) {
+                        subqueryResponses.add(possible.random())
+                        answered = true
+                        processedSubqueries.add(qFiltered)
                     }
                 }
-                // 2) exact in fileKeywords
-                fileKeywords[lookupKey]?.let { list ->
-                    if (list.isNotEmpty()) {
-                        val candidate = list.random()
-                        if (looksLikeFilename(candidate)) {
-                            val f = candidate.replace(":", "").trim()
-                            return resolveInFile(f, lookupKey, depth + 1) ?: candidate
-                        }
-                        return candidate
-                    }
-                }
-                // 3) fuzzy over fileTemplates keys
-                if (fileTemplates.isNotEmpty()) {
-                    val qSet = filterStopwordsAndMapSynonymsLocal(lookupKey).first.toSet()
-                    var bestK: String? = null
-                    var bestJ = 0.0
-                    val jaccardThresholdLocal = getJaccardThreshold(lookupKey)
-                    for (k in fileTemplates.keys) {
-                        val ktoks = filterStopwordsAndMapSynonymsLocal(k).first.toSet()
-                        if (ktoks.isEmpty()) continue
-                        val wj = weightedJaccard(qSet, ktoks)
-                        if (wj > bestJ) { bestJ = wj; bestK = k }
-                    }
-                    if (bestK != null && bestJ >= jaccardThresholdLocal) {
-                        val list = fileTemplates[bestK]
-                        if (!list.isNullOrEmpty()) {
-                            val candidate = list.random()
-                            if (looksLikeFilename(candidate)) {
-                                val f = candidate.replace(":", "").trim()
-                                return resolveInFile(f, lookupKey, depth + 1) ?: candidate
-                            }
-                            return candidate
-                        }
-                    }
-                }
-                return null
-            }
 
-            // --- Improved: detect "что такое" pattern and answer per term using contextMap + base.txt + referenced files
-            val normalizedOrig = normalizeLocal(qOrigRaw)
-            if (normalizedOrig.startsWith("что такое")) {
-                val after = normalizedOrig.removePrefix("что такое").trim()
-                if (after.isNotEmpty()) {
-                    // Split terms by 'и', commas or semicolons
-                    val termParts = after.split(Regex("\\s*(?:и|,|;)\\s*")).map { it.trim() }.filter { it.isNotEmpty() }
-                    if (termParts.isNotEmpty()) {
-                        // canonicalize terms via synonyms/stopwords
-                        val canonicalTerms = termParts.map { tp ->
-                            val mapped = filterStopwordsAndMapSynonymsLocal(tp).second
-                            if (mapped.isNotEmpty()) mapped else tp
-                        }
-
-                        // remember first canonical topic for context recall
-                        val firstTopic = canonicalTerms.firstOrNull()
-                        if (!firstTopic.isNullOrEmpty()) {
-                            lastTopic = firstTopic
-                        }
-
-                        for ((idx, rawTerm) in canonicalTerms.withIndex()) {
-                            var respToSend: String? = null
-                            val lookupKey = rawTerm
-
-                            // 1) try current templates (templatesSnapshot)
-                            templatesSnapshot[lookupKey]?.let { list ->
-                                if (list.isNotEmpty()) respToSend = list.random()
-                            }
-                            if (respToSend == null) {
-                                keywordResponsesSnapshot[lookupKey]?.let { list ->
-                                    if (list.isNotEmpty()) respToSend = list.random()
-                                }
-                            }
-
-                            // 2) if not found in current, consult contextMap (from base.txt). If contextMap has mapping, open that file and search inside it.
-                            if (respToSend == null) {
-                                val mappedContextFile = contextMapSnapshot[lookupKey]
-                                if (mappedContextFile != null) {
-                                    // mappedContextFile may be e.g. resourcesmoney.txt (without colons)
-                                    val candidate = resolveInFile(mappedContextFile, lookupKey)
-                                    if (!candidate.isNullOrEmpty()) respToSend = candidate
-                                }
-                            }
-
-                            // 3) If still not found, try to resolve directly in base.txt (some projects keep definitions there)
-                            if (respToSend == null) {
-                                val candidate = resolveInFile("base.txt", lookupKey)
-                                if (!candidate.isNullOrEmpty()) respToSend = candidate
-                            }
-
-                            // 4) fallback: try fuzzy in global templates
-                            if (respToSend == null) {
-                                val qSet = filterStopwordsAndMapSynonymsLocal(lookupKey).first.toSet()
-                                var bestK: String? = null
-                                var bestJ = 0.0
-                                val jaccardThresholdLocal = getJaccardThreshold(lookupKey)
-                                for (k in templatesSnapshot.keys) {
-                                    val ktoks = filterStopwordsAndMapSynonymsLocal(k).first.toSet()
-                                    if (ktoks.isEmpty()) continue
-                                    val wj = weightedJaccard(qSet, ktoks)
-                                    if (wj > bestJ) { bestJ = wj; bestK = k }
-                                }
-                                if (bestK != null && bestJ >= jaccardThresholdLocal) {
-                                    templatesSnapshot[bestK]?.let { list -> if (list.isNotEmpty()) respToSend = list.random() }
-                                }
-                            }
-
-                            // final fallback message
-                            if (respToSend == null) respToSend = "Не знаю подробно про $rawTerm, но могу поискать в шаблонах."
-
-                            withContext(Dispatchers.Main) {
-                                addChatMessage(currentMascotName, applyVariables(respToSend!!))
-                                startIdleTimer()
-                            }
-                            // space between replies if multiple terms
-                            if (idx < canonicalTerms.size - 1) delay(SUBQUERY_RESPONSE_DELAY)
-                        }
-                        return@launch
-                    }
-                }
-            }
-            // --- End "что такое" handling
-
-            // Save name if user introduced themselves: "меня зовут <Name>"
-            val lowerRaw = qOrigRaw.lowercase(Locale.getDefault())
-            if (lowerRaw.contains("меня зовут")) {
-                try {
-                    val marker = "меня зовут"
-                    val idx = lowerRaw.indexOf(marker)
-                    val afterPhrase = if (idx >= 0) qOrigRaw.substring(idx + marker.length).trim() else ""
-                    val nameCandidate = afterPhrase.split(Regex("\\s+")).firstOrNull()?.trim()?.replace(Regex("[^\\p{L}\\-]"), "") ?: ""
-                    if (nameCandidate.isNotEmpty()) {
-                        val cleanName = nameCandidate.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }
-                        userVariables["name"] = cleanName
-                        // polite reply
-                        withContext(Dispatchers.Main) {
-                            addChatMessage(currentMascotName, applyVariables("Приятно, \$name!"))
-                            startIdleTimer()
-                        }
-                        return@launch
-                    }
-                } catch (_: Exception) { /* non-fatal */ }
-            }
-
-            var answered = false
-            val subqueryResponses = mutableListOf<String>()
-            val processedSubqueries = mutableSetOf<String>()
-
-            templatesSnapshot[qFiltered]?.let { possible ->
-                if (possible.isNotEmpty()) {
-                    subqueryResponses.add(possible.random())
-                    answered = true
-                    processedSubqueries.add(qFiltered)
-                }
-            }
-
-            if (subqueryResponses.size < MAX_SUBQUERY_RESPONSES) {
-                val tokens = if (qTokensFiltered.isNotEmpty()) qTokensFiltered else tokenizeLocal(qFiltered)
-                for (token in tokens) {
-                    if (subqueryResponses.size >= MAX_SUBQUERY_RESPONSES) break
-                    if (processedSubqueries.contains(token) || token.length < 2) continue
-                    templatesSnapshot[token]?.let { possible ->
-                        if (possible.isNotEmpty()) {
-                            subqueryResponses.add(possible.random())
-                            processedSubqueries.add(token)
-                        }
-                    }
-                    if (subqueryResponses.size < MAX_SUBQUERY_RESPONSES) {
-                        keywordResponsesSnapshot[token]?.let { possible ->
+                if (subqueryResponses.size < MAX_SUBQUERY_RESPONSES) {
+                    val tokens = if (qTokensFiltered.isNotEmpty()) qTokensFiltered else tokenizeLocal(qFiltered)
+                    for (token in tokens) {
+                        if (subqueryResponses.size >= MAX_SUBQUERY_RESPONSES) break
+                        if (processedSubqueries.contains(token) || token.length < 2) continue
+                        templatesSnapshot[token]?.let { possible ->
                             if (possible.isNotEmpty()) {
                                 subqueryResponses.add(possible.random())
                                 processedSubqueries.add(token)
                             }
                         }
+                        if (subqueryResponses.size < MAX_SUBQUERY_RESPONSES) {
+                            keywordResponsesSnapshot[token]?.let { possible ->
+                                if (possible.isNotEmpty()) {
+                                    subqueryResponses.add(possible.random())
+                                    processedSubqueries.add(token)
+                                }
+                            }
+                        }
                     }
-                }
-                if (subqueryResponses.size < MAX_SUBQUERY_RESPONSES && tokens.size > 1) {
-                    for (i in 0 until tokens.size - 1) {
-                        if (subqueryResponses.size >= MAX_SUBQUERY_RESPONSES) break
-                        val twoTokens = "${tokens[i]} ${tokens[i + 1]}"
-                        if (processedSubqueries.contains(twoTokens)) continue
-                        templatesSnapshot[twoTokens]?.let { possible ->
-                            if (possible.isNotEmpty()) {
-                                subqueryResponses.add(possible.random())
-                                processedSubqueries.add(twoTokens)
+                    if (subqueryResponses.size < MAX_SUBQUERY_RESPONSES && tokens.size > 1) {
+                        for (i in 0 until tokens.size - 1) {
+                            if (subqueryResponses.size >= MAX_SUBQUERY_RESPONSES) break
+                            val twoTokens = "${tokens[i]} ${tokens[i + 1]}"
+                            if (processedSubqueries.contains(twoTokens)) continue
+                            templatesSnapshot[twoTokens]?.let { possible ->
+                                if (possible.isNotEmpty()) {
+                                    subqueryResponses.add(possible.random())
+                                    processedSubqueries.add(twoTokens)
+                                }
                             }
                         }
                     }
                 }
-            }
 
-            if (subqueryResponses.isNotEmpty()) {
-                val combined = subqueryResponses.joinToString(". ")
-                withContext(Dispatchers.Main) {
-                    addChatMessage(currentMascotName, applyVariables(combined))
-                    startIdleTimer()
-                }
-                return@launch
-            }
-
-            for ((keyword, responses) in keywordResponsesSnapshot) {
-                if (qFiltered.contains(keyword) && responses.isNotEmpty()) {
+                if (subqueryResponses.isNotEmpty()) {
+                    val combined = subqueryResponses.joinToString(". ")
                     withContext(Dispatchers.Main) {
-                        addChatMessage(currentMascotName, applyVariables(responses.random()))
+                        kotlinx.coroutines.delay(delay)
+                        addChatMessage(currentMascotName, combined)
                         startIdleTimer()
+                        cacheResponse(qKeyForCount, combined)
                     }
-                    return@launch
+                    return
                 }
-            }
 
-            val qTokens = if (qTokensFiltered.isNotEmpty()) qTokensFiltered else tokenizeLocal(qFiltered)
-            val candidateCounts = HashMap<String, Int>()
-            for (tok in qTokens) {
-                invertedIndexSnapshot[tok]?.forEach { trig ->
-                    candidateCounts[trig] = candidateCounts.getOrDefault(trig, 0) + 1
-                }
-            }
-
-            val candidates: List<String> = if (candidateCounts.isNotEmpty()) {
-                candidateCounts.entries
-                    .filter { it.value >= CANDIDATE_TOKEN_THRESHOLD }
-                    .sortedByDescending { it.value }
-                    .map { it.key }
-                    .take(MAX_CANDIDATES_FOR_LEV)
-            } else {
-                val maxDist = getFuzzyDistance(qFiltered)
-                templatesSnapshot.keys.filter { abs(it.length - qFiltered.length) <= maxDist }
-                    .take(MAX_CANDIDATES_FOR_LEV)
-            }
-
-            var bestByJaccard: String? = null
-            var bestJaccard = 0.0
-            val qSet = qTokens.toSet()
-            val jaccardThreshold = getJaccardThreshold(qFiltered)
-            for (key in candidates) {
-                val keyTokens = filterStopwordsAndMapSynonymsLocal(key).first.toSet()
-                if (keyTokens.isEmpty()) continue
-                val weightedJ = weightedJaccard(qSet, keyTokens)
-                if (weightedJ > bestJaccard) {
-                    bestJaccard = weightedJ
-                    bestByJaccard = key
-                }
-            }
-            if (bestByJaccard != null && bestJaccard >= jaccardThreshold) {
-                val possible = templatesSnapshot[bestByJaccard]
-                if (!possible.isNullOrEmpty()) {
-                    val response = possible.random()
-                    withContext(Dispatchers.Main) {
-                        addChatMessage(currentMascotName, applyVariables(response))
-                        startIdleTimer()
-                        cacheResponse(qKeyForCount, response)
-                    }
-                    return@launch
-                }
-            }
-
-            var bestKey: String? = null
-            var bestDist = Int.MAX_VALUE
-            for (key in candidates) {
-                val maxDist = getFuzzyDistance(qFiltered)
-                if (abs(key.length - qFiltered.length) > maxDist + 1) continue
-                val d = levenshtein(qFiltered, key, qFiltered)
-                if (d < bestDist) {
-                    bestDist = d
-                    bestKey = key
-                }
-                if (bestDist == 0) break
-            }
-            val maxDistLocal = getFuzzyDistance(qFiltered)
-            if (bestKey != null && bestDist <= maxDistLocal) {
-                val possible = templatesSnapshot[bestKey]
-                if (!possible.isNullOrEmpty()) {
-                    val response = possible.random()
-                    withContext(Dispatchers.Main) {
-                        addChatMessage(currentMascotName, applyVariables(response))
-                        startIdleTimer()
-                        cacheResponse(qKeyForCount, response)
-                    }
-                    return@launch
-                }
-            }
-
-            val lower = normalizeLocal(qFiltered)
-            val detectedContext = detectContext(lower)
-            if (detectedContext != null) {
-                withContext(Dispatchers.Main) {
-                    if (detectedContext != currentContext) {
-                        currentContext = detectedContext
-                        loadTemplatesFromFile(currentContext)
-                        rebuildInvertedIndex()
-                        computeTokenWeights()
-                        updateAutoComplete()
-                    }
-                }
-                val (localTemplates, localKeywords) = parseTemplatesFromFile(detectedContext)
-                localTemplates[qFiltered]?.let { possible ->
-                    if (possible.isNotEmpty()) {
-                        val response = possible.random()
+                for ((keyword, responses) in keywordResponsesSnapshot) {
+                    if (qFiltered.contains(keyword) && responses.isNotEmpty()) {
                         withContext(Dispatchers.Main) {
-                            addChatMessage(currentMascotName, applyVariables(response))
+                            kotlinx.coroutines.delay(delay)
+                            addChatMessage(currentMascotName, responses.random())
                             startIdleTimer()
-                            cacheResponse(qKeyForCount, response)
+                            cacheResponse(qKeyForCount, responses.random())
                         }
-                        return@launch
+                        return
                     }
                 }
-                val localInverted = HashMap<String, MutableList<String>>()
-                for ((k, v) in localTemplates) {
-                    val toks = filterStopwordsAndMapSynonymsLocal(k).first
-                    for (t in toks) {
-                        val list = localInverted.getOrPut(t) { mutableListOf() }
-                        if (!list.contains(k)) list.add(k)
+
+                val qTokens = if (qTokensFiltered.isNotEmpty()) qTokensFiltered else tokenizeLocal(qFiltered)
+                val candidateCounts = HashMap<String, Int>()
+                for (tok in qTokens) {
+                    invertedIndexSnapshot[tok]?.forEach { trig ->
+                        candidateCounts[trig] = candidateCounts.getOrDefault(trig, 0) + 1
                     }
                 }
-                val localCandidateCounts = HashMap<String, Int>()
-                val tokensLocal = qTokens
-                for (tok in tokensLocal) {
-                    localInverted[tok]?.forEach { trig ->
-                        localCandidateCounts[trig] = localCandidateCounts.getOrDefault(trig, 0) + 1
-                    }
-                }
-                val localCandidates: List<String> = if (localCandidateCounts.isNotEmpty()) {
-                    localCandidateCounts.entries
+
+                val candidates: List<String> = if (candidateCounts.isNotEmpty()) {
+                    candidateCounts.entries
                         .filter { it.value >= CANDIDATE_TOKEN_THRESHOLD }
                         .sortedByDescending { it.value }
                         .map { it.key }
                         .take(MAX_CANDIDATES_FOR_LEV)
                 } else {
-                    val md = getFuzzyDistance(qFiltered)
-                    localTemplates.keys.filter { abs(it.length - qFiltered.length) <= md }
+                    val maxDist = getFuzzyDistance(qFiltered)
+                    templatesSnapshot.keys.filter { abs(it.length - qFiltered.length) <= maxDist }
                         .take(MAX_CANDIDATES_FOR_LEV)
                 }
-                var bestLocal: String? = null
-                var bestLocalJ = 0.0
-                val qSetLocal = tokensLocal.toSet()
-                for (key in localCandidates) {
+
+                var bestByJaccard: String? = null
+                var bestJaccard = 0.0
+                val qSet = qTokens.toSet()
+                val jaccardThreshold = getJaccardThreshold(qFiltered)
+                for (key in candidates) {
                     val keyTokens = filterStopwordsAndMapSynonymsLocal(key).first.toSet()
                     if (keyTokens.isEmpty()) continue
-                    val weightedJ = weightedJaccard(qSetLocal, keyTokens)
-                    if (weightedJ > bestLocalJ) {
-                        bestLocalJ = weightedJ
-                        bestLocal = key
+                    val weightedJ = weightedJaccard(qSet, keyTokens)
+                    if (weightedJ > bestJaccard) {
+                        bestJaccard = weightedJ
+                        bestByJaccard = key
                     }
                 }
-                if (bestLocal != null && bestLocalJ >= jaccardThreshold) {
-                    val possible = localTemplates[bestLocal]
+                if (bestByJaccard != null && bestJaccard >= jaccardThreshold) {
+                    val possible = templatesSnapshot[bestByJaccard]
                     if (!possible.isNullOrEmpty()) {
                         val response = possible.random()
                         withContext(Dispatchers.Main) {
-                            addChatMessage(currentMascotName, applyVariables(response))
+                            kotlinx.coroutines.delay(delay)
+                            addChatMessage(currentMascotName, response)
                             startIdleTimer()
                             cacheResponse(qKeyForCount, response)
                         }
-                        return@launch
+                        return
                     }
                 }
-                var bestLocalKey: String? = null
-                var bestLocalDist = Int.MAX_VALUE
-                for (key in localCandidates) {
-                    val maxD = getFuzzyDistance(qFiltered)
-                    if (abs(key.length - qFiltered.length) > maxD + 1) continue
+
+                var bestKey: String? = null
+                var bestDist = Int.MAX_VALUE
+                for (key in candidates) {
+                    val maxDist = getFuzzyDistance(qFiltered)
+                    if (abs(key.length - qFiltered.length) > maxDist + 1) continue
                     val d = levenshtein(qFiltered, key, qFiltered)
-                    if (d < bestLocalDist) {
-                        bestLocalDist = d
-                        bestLocalKey = key
+                    if (d < bestDist) {
+                        bestDist = d
+                        bestKey = key
                     }
-                    if (bestLocalDist == 0) break
+                    if (bestDist == 0) break
                 }
-                if (bestLocalKey != null && bestLocalDist <= getFuzzyDistance(qFiltered)) {
-                    val possible = localTemplates[bestLocalKey]
+                val maxDistLocal = getFuzzyDistance(qFiltered)
+                if (bestKey != null && bestDist <= maxDistLocal) {
+                    val possible = templatesSnapshot[bestKey]
                     if (!possible.isNullOrEmpty()) {
                         val response = possible.random()
                         withContext(Dispatchers.Main) {
-                            addChatMessage(currentMascotName, applyVariables(response))
+                            kotlinx.coroutines.delay(delay)
+                            addChatMessage(currentMascotName, response)
                             startIdleTimer()
                             cacheResponse(qKeyForCount, response)
                         }
-                        return@launch
+                        return
                     }
                 }
+
+                val lower = normalizeLocal(qFiltered)
+                val detectedContext = detectContext(lower)
+                if (detectedContext != null) {
+                    withContext(Dispatchers.Main) {
+                        if (detectedContext != currentContext) {
+                            currentContext = detectedContext
+                            loadTemplatesFromFile(currentContext)
+                            rebuildInvertedIndex()
+                            computeTokenWeights()
+                            updateAutoComplete()
+                        }
+                    }
+                    val (localTemplates, localKeywords) = parseTemplatesFromFile(detectedContext)
+                    localTemplates[qFiltered]?.let { possible ->
+                        if (possible.isNotEmpty()) {
+                            val response = possible.random()
+                            withContext(Dispatchers.Main) {
+                                kotlinx.coroutines.delay(delay)
+                                addChatMessage(currentMascotName, response)
+                                startIdleTimer()
+                                cacheResponse(qKeyForCount, response)
+                            }
+                            return
+                        }
+                    }
+                    val localInverted = HashMap<String, MutableList<String>>()
+                    for ((k, v) in localTemplates) {
+                        val toks = filterStopwordsAndMapSynonymsLocal(k).first
+                        for (t in toks) {
+                            val list = localInverted.getOrPut(t) { mutableListOf() }
+                            if (!list.contains(k)) list.add(k)
+                        }
+                    }
+                    val localCandidateCounts = HashMap<String, Int>()
+                    val tokensLocal = qTokens
+                    for (tok in tokensLocal) {
+                        localInverted[tok]?.forEach { trig ->
+                            localCandidateCounts[trig] = localCandidateCounts.getOrDefault(trig, 0) + 1
+                        }
+                    }
+                    val localCandidates: List<String> = if (localCandidateCounts.isNotEmpty()) {
+                        localCandidateCounts.entries
+                            .filter { it.value >= CANDIDATE_TOKEN_THRESHOLD }
+                            .sortedByDescending { it.value }
+                            .map { it.key }
+                            .take(MAX_CANDIDATES_FOR_LEV)
+                    } else {
+                        val md = getFuzzyDistance(qFiltered)
+                        localTemplates.keys.filter { abs(it.length - qFiltered.length) <= md }
+                            .take(MAX_CANDIDATES_FOR_LEV)
+                    }
+                    var bestLocal: String? = null
+                    var bestLocalJ = 0.0
+                    val qSetLocal = tokensLocal.toSet()
+                    for (key in localCandidates) {
+                        val keyTokens = filterStopwordsAndMapSynonymsLocal(key).first.toSet()
+                        if (keyTokens.isEmpty()) continue
+                        val weightedJ = weightedJaccard(qSetLocal, keyTokens)
+                        if (weightedJ > bestLocalJ) {
+                            bestLocalJ = weightedJ
+                            bestLocal = key
+                        }
+                    }
+                    if (bestLocal != null && bestLocalJ >= jaccardThreshold) {
+                        val possible = localTemplates[bestLocal]
+                        if (!possible.isNullOrEmpty()) {
+                            val response = possible.random()
+                            withContext(Dispatchers.Main) {
+                                kotlinx.coroutines.delay(delay)
+                                addChatMessage(currentMascotName, response)
+                                startIdleTimer()
+                                cacheResponse(qKeyForCount, response)
+                            }
+                            return
+                        }
+                    }
+                    var bestLocalKey: String? = null
+                    var bestLocalDist = Int.MAX_VALUE
+                    for (key in localCandidates) {
+                        val maxD = getFuzzyDistance(qFiltered)
+                        if (abs(key.length - qFiltered.length) > maxD + 1) continue
+                        val d = levenshtein(qFiltered, key, qFiltered)
+                        if (d < bestLocalDist) {
+                            bestLocalDist = d
+                            bestLocalKey = key
+                        }
+                        if (bestLocalDist == 0) break
+                    }
+                    if (bestLocalKey != null && bestLocalDist <= getFuzzyDistance(qFiltered)) {
+                        val possible = localTemplates[bestLocalKey]
+                        if (!possible.isNullOrEmpty()) {
+                            val response = possible.random()
+                            withContext(Dispatchers.Main) {
+                                kotlinx.coroutines.delay(delay)
+                                addChatMessage(currentMascotName, response)
+                                startIdleTimer()
+                                cacheResponse(qKeyForCount, response)
+                            }
+                            return
+                        }
+                    }
+                    val dummy = getDummyResponse(qOrig)
+                    withContext(Dispatchers.Main) {
+                        kotlinx.coroutines.delay(delay)
+                        addChatMessage(currentMascotName, dummy)
+                        startIdleTimer()
+                        cacheResponse(qKeyForCount, dummy)
+                    }
+                    return
+                }
+
                 val dummy = getDummyResponse(qOrig)
                 withContext(Dispatchers.Main) {
-                    addChatMessage(currentMascotName, applyVariables(dummy))
+                    kotlinx.coroutines.delay(delay)
+                    addChatMessage(currentMascotName, dummy)
                     startIdleTimer()
                     cacheResponse(qKeyForCount, dummy)
                 }
-                return@launch
             }
 
-            val dummy = getDummyResponse(qOrig)
-            withContext(Dispatchers.Main) {
-                addChatMessage(currentMascotName, applyVariables(dummy))
-                startIdleTimer()
-                cacheResponse(qKeyForCount, dummy)
+            subqueries.forEachIndexed { index, subquery ->
+                processSingleQuery(subquery, index * SUBQUERY_RESPONSE_DELAY)
             }
         }
     }
@@ -1212,7 +1056,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     val responses = allText.split("|").map { it.trim() }.filter { it.isNotEmpty() }
                     if (responses.isNotEmpty()) {
                         val randomResponse = responses.random()
-                        addChatMessage(mascot, applyVariables(randomResponse))
+                        addChatMessage(mascot, randomResponse)
                     }
                 }
             }
@@ -1556,25 +1400,6 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             dialogHandler.postDelayed(it, 5000)
         }
     }
-
-    // --- New helper: apply user variables into response text (supports $name or ${name})
-    private fun applyVariables(text: String): String {
-        var out = text
-        // replace ${var} patterns
-        val braceRegex = Regex("\\$\\{([a-zA-Z0-9_]+)\\}")
-        out = out.replace(braceRegex) { mr ->
-            val key = mr.groupValues[1]
-            userVariables[key] ?: mr.value
-        }
-        // replace $var patterns
-        val simpleRegex = Regex("\\$([a-zA-Z0-9_]+)")
-        out = out.replace(simpleRegex) { mr ->
-            val key = mr.groupValues[1]
-            userVariables[key] ?: mr.value
-        }
-        return out
-    }
-    // --- end helpers
 
     private fun runOnUiThread(block: () -> Unit) {
         if (Looper.myLooper() == Looper.getMainLooper()) block()
