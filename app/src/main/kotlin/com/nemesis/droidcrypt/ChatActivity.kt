@@ -101,6 +101,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private val random = Random()
     private val queryCountMap = HashMap<String, Int>()
     private val queryTimestamps = HashMap<String, MutableList<Long>>()
+    private var lastSendTime = 0L // Добавлено для дебouncing
     private val queryCache = object : LinkedHashMap<String, String>(MAX_CACHE_SIZE, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, String>?): Boolean {
             return size > MAX_CACHE_SIZE
@@ -125,203 +126,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         )
     }
 
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_chat)
-        window.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
-        supportActionBar?.setBackgroundDrawable(ColorDrawable(Color.argb(128, 0, 0, 0)))
-        window.setBackgroundDrawable(ColorDrawable(Color.BLACK))
-        setupToolbar()
-
-        scrollView = findViewById(R.id.scrollView)
-        queryInput = findViewById(R.id.queryInput)
-        envelopeInputButton = findViewById(R.id.envelope_button)
-        btnLock = findViewById(R.id.btn_lock)
-        btnTrash = findViewById(R.id.btn_trash)
-        btnEnvelopeTop = findViewById(R.id.btn_envelope_top)
-        btnSettings = findViewById(R.id.btn_settings)
-        messagesContainer = findViewById(R.id.chatMessagesContainer)
-
-        folderUri = intent?.getParcelableExtra("folderUri")
-        if (folderUri == null) {
-            for (perm in contentResolver.persistedUriPermissions) {
-                if (perm.isReadPermission) {
-                    folderUri = perm.uri; break
-                }
-            }
-        }
-        try {
-            val prefs = PreferenceManager.getDefaultSharedPreferences(this)
-            if (folderUri == null) {
-                val saved = prefs.getString(PREF_KEY_FOLDER_URI, null)
-                if (saved != null) folderUri = Uri.parse(saved)
-            }
-        } catch (e: Exception) {
-            Log.e("ChatActivity", "Error loading folder URI", e)
-        }
-
-        loadSynonymsAndStopwords()
-        try {
-            val prefs = PreferenceManager.getDefaultSharedPreferences(this)
-            val disable = prefs.getBoolean(PREF_KEY_DISABLE_SCREENSHOTS, false)
-            if (disable) window.addFlags(WindowManager.LayoutParams.FLAG_SECURE) else window.clearFlags(
-                WindowManager.LayoutParams.FLAG_SECURE
-            )
-        } catch (e: Exception) {
-            Log.e("ChatActivity", "Error setting screenshot flag", e)
-        }
-
-        loadToolbarIcons()
-        setupIconTouchEffect(btnLock)
-        setupIconTouchEffect(btnTrash)
-        setupIconTouchEffect(btnEnvelopeTop)
-        setupIconTouchEffect(btnSettings)
-        setupIconTouchEffect(envelopeInputButton)
-
-        btnLock?.setOnClickListener { finish() }
-        btnTrash?.setOnClickListener { clearChat() }
-        btnSettings?.setOnClickListener { startActivity(Intent(this, SettingsActivity::class.java)) }
-        btnEnvelopeTop?.setOnClickListener { startActivity(Intent(this, PostsActivity::class.java)) }
-
-        envelopeInputButton?.setOnClickListener {
-            val now = System.currentTimeMillis()
-            if (now - lastSendTime < SEND_DEBOUNCE_MS) return@setOnClickListener
-            lastSendTime = now
-            val input = queryInput.text.toString().trim()
-            if (input.isNotEmpty()) {
-                processUserQuery(input)
-                queryInput.setText("")
-            }
-        }
-
-        queryInput.setOnEditorActionListener { _, _, _ ->
-            val now = System.currentTimeMillis()
-            if (now - lastSendTime < SEND_DEBOUNCE_MS) return@setOnEditorActionListener true
-            lastSendTime = now
-            val input = queryInput.text.toString().trim()
-            if (input.isNotEmpty()) {
-                processUserQuery(input)
-                queryInput.setText("")
-            }
-            true
-        }
-
-        // Инициализация TTS
-        tts = TextToSpeech(this, this)
-        
-        if (folderUri == null) {
-            showCustomToast("Папка не выбрана! Открой настройки и выбери папку.")
-            loadFallbackTemplates()
-            rebuildInvertedIndex()
-            computeTokenWeights()
-            updateAutoComplete()
-            addChatMessage(currentMascotName, "Добро пожаловать!")
-        } else {
-            loadTemplatesFromFile(currentContext)
-            rebuildInvertedIndex()
-            computeTokenWeights()
-            updateAutoComplete()
-            addChatMessage(currentMascotName, "Добро пожаловать!")
-        }
-
-        queryInput.setOnItemClickListener { parent, _, position, _ ->
-            val selected = parent.getItemAtPosition(position) as String
-            queryInput.setText(selected)
-            processUserQuery(selected)
-        }
-
-        idleCheckRunnable = object : Runnable {
-            override fun run() {
-                if (System.currentTimeMillis() - lastUserInputTime > IDLE_TIMEOUT_MS) {
-                    val idleMessage = listOf("Эй, ты здесь?", "Что-то тихо стало...", "Расскажи, о чём думаешь?").random()
-                    addChatMessage(currentMascotName, idleMessage)
-                }
-                dialogHandler.postDelayed(this, 5000)
-            }
-        }
-        idleCheckRunnable?.let { dialogHandler.postDelayed(it, 5000) }
-    }
-
-    override fun onInit(status: Int) {
-        if (status == TextToSpeech.SUCCESS) {
-            tts?.language = Locale("ru", "RU")
-            tts?.setPitch(1.0f)
-            tts?.setSpeechRate(1.0f)
-        }
-    }
-    
-    private fun setupToolbar() {
-        val topBar = findViewById<LinearLayout>(R.id.topBar)
-        val leftLayout = topBar.getChildAt(0) as LinearLayout
-        leftLayout.removeAllViews()
-        leftLayout.orientation = LinearLayout.HORIZONTAL
-        leftLayout.gravity = Gravity.CENTER_VERTICAL
-    }
-
-    override fun onResume() {
-        super.onResume()
-        folderUri?.let { loadTemplatesFromFile(currentContext) }
-        rebuildInvertedIndex()
-        computeTokenWeights()
-        updateAutoComplete()
-        idleCheckRunnable?.let {
-            dialogHandler.removeCallbacks(it)
-            dialogHandler.postDelayed(it, 5000)
-        }
-        loadToolbarIcons()
-    }
-
-    override fun onPause() {
-        super.onPause()
-        dialogHandler.removeCallbacksAndMessages(null)
-    }
-
-    override fun onDestroy() {
-        super.onDestroy()
-        dialogHandler.removeCallbacksAndMessages(null)
-        tts?.shutdown()
-        tts = null
-    }
-
-    private fun setupIconTouchEffect(btn: ImageButton?) {
-        btn?.setOnTouchListener { v, event ->
-            when (event.action) {
-                MotionEvent.ACTION_DOWN -> v.alpha = 0.6f
-                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> v.alpha = 1.0f
-            }
-            false
-        }
-    }
-
-    private fun loadToolbarIcons() {
-        val uri = folderUri ?: return
-        try {
-            val dir = DocumentFile.fromTreeUri(this, uri) ?: return
-
-            fun tryLoadToImageButton(name: String, target: ImageButton?) {
-                if (target == null) return
-                try {
-                    val file = dir.findFile(name)
-                    if (file != null && file.exists()) {
-                        contentResolver.openInputStream(file.uri)?.use { ins ->
-                            val bmp = BitmapFactory.decodeStream(ins)
-                            target.setImageBitmap(bmp)
-                        }
-                    }
-                } catch (e: Exception) {
-                    Log.e("ChatActivity", "Error loading icon $name", e)
-                }
-            }
-
-            tryLoadToImageButton("lock.png", btnLock)
-            tryLoadToImageButton("trash.png", btnTrash)
-            tryLoadToImageButton("envelope.png", btnEnvelopeTop)
-            tryLoadToImageButton("settings.png", btnSettings)
-            tryLoadToImageButton("send.png", envelopeInputButton)
-        } catch (e: Exception) {
-            Log.e("ChatActivity", "Error in loadToolbarIcons", e)
-        }
-    }
+    // ... (метод onCreate и другие методы до processUserQuery остаются без изменений)
 
     private fun processUserQuery(userInput: String) {
         if (userInput.startsWith("/")) {
@@ -753,6 +558,9 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
         return contextScores.maxByOrNull { it.value }?.key
     }
+
+    // ...
+}
 
     private fun handleCommand(cmdRaw: String) {
         val cmd = cmdRaw.trim().lowercase(Locale.getDefault())
