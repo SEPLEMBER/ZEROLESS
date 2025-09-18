@@ -611,6 +611,24 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 }
             }
 
+            val lowerRaw = qOrigRaw.lowercase(Locale.getDefault())
+            if (lowerRaw.contains("меня зовут")) {
+                try {
+            val afterPhrase =
+            qOrigRaw.substringAfter(Regex("меня зовут"), "").trim(
+                val nameCandidate =
+                    afterPhrase.split(Regex("\\s+")).firstOrNull()?.trim()?.replace(Regex("[^\\p{L}\\-]"), "") ?: ""
+                if (nameCandidate.isNotEmpty()) {
+                    val cleanName = nameCandidate.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }
+                    userVariables["name"] = cleanName
+                    withContext(Dispatchers.Main) {
+                        addChatMessage(currentMascotName, applyVariables("Приятно, \$name!"))
+                        startIdleTimer()
+                    }
+                    return@launch
+                }
+                } catch (_: Exception) { /* non-fatal */ }
+                    
             val qTokens = if (qTokensFiltered.isNotEmpty()) qTokensFiltered else tokenizeLocal(qFiltered)
             val candidateCounts = HashMap<String, Int>()
             for (tok in qTokens) {
@@ -1384,6 +1402,25 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
     }
 
+    // --- New helper: apply user variables into response text (supports $name or ${name})
+    private fun applyVariables(text: String): String {
+        var out = text
+        // replace ${var} patterns
+        val braceRegex = Regex("\\$\\{([a-zA-Z0-9_]+)\\}")
+        out = out.replace(braceRegex) { mr ->
+            val key = mr.groupValues[1]
+            userVariables[key] ?: mr.value
+        }
+        // replace $var patterns
+        val simpleRegex = Regex("\\$([a-zA-Z0-9_]+)")
+        out = out.replace(simpleRegex) { mr ->
+            val key = mr.groupValues[1]
+            userVariables[key] ?: mr.value
+        }
+        return out
+    }
+                }
+
     private fun loadFallbackTemplates() {
         templatesMap.clear()
         contextMap.clear()
@@ -1481,6 +1518,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             dialogHandler.postDelayed(it, 5000)
         }
     }
+                }
 
     private fun runOnUiThread(block: () -> Unit) {
         if (Looper.myLooper() == Looper.getMainLooper()) block()
