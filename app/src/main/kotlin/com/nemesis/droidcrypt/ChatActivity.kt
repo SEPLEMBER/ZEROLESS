@@ -30,8 +30,9 @@ import java.util.*
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
-// импорт Engine
+// Используем Engine и ChatCore
 import com.nemesis.droidcrypt.Engine
+import com.nemesis.droidcrypt.ChatCore
 
 class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
@@ -158,10 +159,10 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
 
         // Загрузка синонимов/стоп-слов — нужно до инициализации engine
-ChatCore.loadSynonymsAndStopwords(this, folderUri, synonymsMap, stopwords)
+        ChatCore.loadSynonymsAndStopwords(this, folderUri, synonymsMap, stopwords)
 
-// Инициализация Engine ...
-engine = Engine(templatesMap, synonymsMap, stopwords)
+        // Инициализация Engine ...
+        engine = Engine(templatesMap, synonymsMap, stopwords)
 
         // Рассчитать веса (синхронизируем tokenWeights)
         engine.computeTokenWeights()
@@ -216,6 +217,7 @@ engine = Engine(templatesMap, synonymsMap, stopwords)
         // Инициализация TTS
         tts = TextToSpeech(this, this)
 
+        // Загрузка шаблонов / fallback
         if (folderUri == null) {
             showCustomToast("Папка не выбрана! Открой настройки и выбери папку.")
             loadFallbackTemplates()
@@ -378,179 +380,7 @@ engine = Engine(templatesMap, synonymsMap, stopwords)
         val contextMapSnapshot = HashMap(contextMap)
 
         lifecycleScope.launch(Dispatchers.Default) {
-            data class ResponseResult(val text: String? = null, val wantsContextSwitch: String? = null)
-
-            fun tokenizeLocal(s: String): List<String> {
-                if (s.isBlank()) return emptyList()
-                return s.split(Regex("\\s+")).map { it.trim() }.filter { it.isNotEmpty() }
-            }
-
-            fun normalizeLocal(s: String): String {
-                val lower = s.lowercase(Locale.getDefault())
-                val cleaned = lower.replace(Regex("[^\\p{L}\\p{Nd}\\s]"), " ")
-                val collapsed = cleaned.replace(Regex("\\s+"), " ").trim()
-                return collapsed
-            }
-
-            fun filterStopwordsAndMapSynonymsLocal(input: String): Pair<List<String>, String> {
-                val toks = tokenizeLocal(input)
-                val mapped = toks.map { tok ->
-                    val n = normalizeLocal(tok)
-                    val s = synonymsSnapshot[n] ?: n
-                    s
-                }.filter { it.isNotEmpty() && !stopwordsSnapshot.contains(it) }
-                val joined = mapped.joinToString(" ")
-                return Pair(mapped, joined)
-            }
-
-            fun parseTemplatesFromFile(filename: String): Pair<HashMap<String, MutableList<String>>, HashMap<String, MutableList<String>>> {
-                val localTemplates = HashMap<String, MutableList<String>>()
-                val localKeywords = HashMap<String, MutableList<String>>()
-                val uriLocal = folderUri ?: return Pair(localTemplates, localKeywords)
-                try {
-                    val dir = DocumentFile.fromTreeUri(this@ChatActivity, uriLocal) ?: return Pair(localTemplates, localKeywords)
-                    val file = dir.findFile(filename) ?: return Pair(localTemplates, localKeywords)
-                    if (!file.exists()) return Pair(localTemplates, localKeywords)
-                    contentResolver.openInputStream(file.uri)?.bufferedReader()?.use { reader ->
-                        reader.forEachLine { raw ->
-                            val l = raw.trim()
-                            if (l.isEmpty()) return@forEachLine
-                            if (l.startsWith("-")) {
-                                val keywordLine = l.substring(1)
-                                if (keywordLine.contains("=")) {
-                                    val parts = keywordLine.split("=", limit = 2)
-                                    if (parts.size == 2) {
-                                        val keyword = parts[0].trim().lowercase(Locale.ROOT)
-                                        val responses = parts[1].split("|")
-                                        val responseList = responses.mapNotNull { it.trim().takeIf { s -> s.isNotEmpty() } }.toMutableList()
-                                        if (keyword.isNotEmpty() && responseList.isNotEmpty()) localKeywords[keyword] = responseList
-                                    }
-                                }
-                                return@forEachLine
-                            }
-                            if (!l.contains("=")) return@forEachLine
-                            val parts = l.split("=", limit = 2)
-                            if (parts.size == 2) {
-                                val triggerRaw = parts[0].trim()
-                                val trigger = normalizeLocal(triggerRaw)
-                                val triggerFiltered = filterStopwordsAndMapSynonymsLocal(trigger).second
-                                val responses = parts[1].split("|")
-                                val responseList = responses.mapNotNull { it.trim().takeIf { s -> s.isNotEmpty() } }.toMutableList()
-                                if (triggerFiltered.isNotEmpty() && responseList.isNotEmpty()) localTemplates[triggerFiltered] = responseList
-                            }
-                        }
-                    }
-                } catch (e: Exception) {
-                    Log.e("ChatActivity", "Error parsing templates from $filename", e)
-                }
-                return Pair(localTemplates, localKeywords)
-            }
-
-            // --- Исправленная функция поиска по core-файлам (разрешает ответы, указывающие на .txt) ---
-            fun searchInCoreFiles(qFiltered: String, qTokens: List<String>, qSet: Set<String>, jaccardThreshold: Double): String? {
-                val uriLocal = folderUri ?: return null
-                try {
-                    val dir = DocumentFile.fromTreeUri(this@ChatActivity, uriLocal) ?: return null
-
-                    // Вспомогательная утилита: если строка выглядит как имя .txt файла — открыть его и взять ответы оттуда
-                    fun resolvePotentialFileResponse(respRaw: String): String {
-                        val respTrim = respRaw.trim()
-                        val resp = respTrim.removeSuffix(":").trim()
-                        if (resp.contains(".txt", ignoreCase = true)) {
-                            // Оставляем только имя файла (после последнего '/')
-                            val filename = resp.substringAfterLast('/').trim()
-                            if (filename.isNotEmpty()) {
-                                val (tpls, keywords) = parseTemplatesFromFile(filename)
-                                val allResponses = mutableListOf<String>()
-                                for (lst in tpls.values) allResponses.addAll(lst)
-                                for (lst in keywords.values) allResponses.addAll(lst)
-                                if (allResponses.isNotEmpty()) return allResponses.random()
-                                // если файл парсируется, но пуст — пробуем вернуть исходную строк без расширения
-                                return respTrim
-                            }
-                        }
-                        return respRaw // fallback — вернуть исходную строку
-                    }
-
-                    // Поиск по core1.txt - core9.txt
-                    for (i in 1..9) {
-                        val filename = "core$i.txt"
-                        val file = dir.findFile(filename) ?: continue
-                        if (!file.exists()) continue
-
-                        val (coreTemplates, coreKeywords) = parseTemplatesFromFile(filename)
-                        if (coreTemplates.isEmpty() && coreKeywords.isEmpty()) continue
-
-                        // Точный поиск
-                        coreTemplates[qFiltered]?.let { possible ->
-                            if (possible.isNotEmpty()) {
-                                val chosen = possible.random()
-                                return resolvePotentialFileResponse(chosen)
-                            }
-                        }
-
-                        // Поиск по ключевым словам
-                        for ((keyword, responses) in coreKeywords) {
-                            if (qFiltered.contains(keyword) && responses.isNotEmpty()) {
-                                val chosen = responses.random()
-                                return resolvePotentialFileResponse(chosen)
-                            }
-                        }
-
-                        // Jaccard поиск
-                        var bestByJaccard: String? = null
-                        var bestJaccard = 0.0
-                        for (key in coreTemplates.keys) {
-                            val keyTokens = filterStopwordsAndMapSynonymsLocal(key).first.toSet()
-                            if (keyTokens.isEmpty()) continue
-                            val weightedJ = engine.weightedJaccard(qSet, keyTokens)
-                            if (weightedJ > bestJaccard) {
-                                bestJaccard = weightedJ
-                                bestByJaccard = key
-                            }
-                        }
-                        if (bestByJaccard != null && bestJaccard >= jaccardThreshold) {
-                            val possible = coreTemplates[bestByJaccard]
-                            if (!possible.isNullOrEmpty()) {
-                                val chosen = possible.random()
-                                return resolvePotentialFileResponse(chosen)
-                            }
-                        }
-
-                        // Levenshtein поиск
-                        var bestKey: String? = null
-                        var bestDist = Int.MAX_VALUE
-                        val candidates = coreTemplates.keys.filter { abs(it.length - qFiltered.length) <= engine.getFuzzyDistance(qFiltered) }
-                            .take(MAX_CANDIDATES_FOR_LEV)
-
-                        for (key in candidates) {
-                            val maxDist = engine.getFuzzyDistance(qFiltered)
-                            if (abs(key.length - qFiltered.length) > maxDist + 1) continue
-                            val d = engine.levenshtein(qFiltered, key, qFiltered)
-                            if (d < bestDist) {
-                                bestDist = d
-                                bestKey = key
-                            }
-                            if (bestDist == 0) break
-                        }
-
-                        if (bestKey != null && bestDist <= engine.getFuzzyDistance(qFiltered)) {
-                            val possible = coreTemplates[bestKey]
-                            if (!possible.isNullOrEmpty()) {
-                                val chosen = possible.random()
-                                return resolvePotentialFileResponse(chosen)
-                            }
-                        }
-                    }
-
-                    return null
-                } catch (e: Exception) {
-                    Log.e("ChatActivity", "Error searching in core files", e)
-                    return null
-                }
-            }
-            // --- конец searchInCoreFiles ---
-
+            // Subquery quick matches
             var answered = false
             val subqueryResponses = mutableListOf<String>()
             val processedSubqueries = mutableSetOf<String>()
@@ -564,7 +394,7 @@ engine = Engine(templatesMap, synonymsMap, stopwords)
             }
 
             if (subqueryResponses.size < MAX_SUBQUERY_RESPONSES) {
-                val tokens = if (qTokensFiltered.isNotEmpty()) qTokensFiltered else tokenizeLocal(qFiltered)
+                val tokens = if (qTokensFiltered.isNotEmpty()) qTokensFiltered else engine.tokenize(qFiltered)
                 for (token in tokens) {
                     if (subqueryResponses.size >= MAX_SUBQUERY_RESPONSES) break
                     if (processedSubqueries.contains(token) || token.length < 2) continue
@@ -607,6 +437,7 @@ engine = Engine(templatesMap, synonymsMap, stopwords)
                 return@launch
             }
 
+            // keyword responses
             for ((keyword, responses) in keywordResponsesSnapshot) {
                 if (qFiltered.contains(keyword) && responses.isNotEmpty()) {
                     withContext(Dispatchers.Main) {
@@ -617,7 +448,8 @@ engine = Engine(templatesMap, synonymsMap, stopwords)
                 }
             }
 
-            val qTokens = if (qTokensFiltered.isNotEmpty()) qTokensFiltered else tokenizeLocal(qFiltered)
+            // Candidate building using inverted index
+            val qTokens = if (qTokensFiltered.isNotEmpty()) qTokensFiltered else engine.tokenize(qFiltered)
             val candidateCounts = HashMap<String, Int>()
             for (tok in qTokens) {
                 invertedIndexSnapshot[tok]?.forEach { trig ->
@@ -642,7 +474,7 @@ engine = Engine(templatesMap, synonymsMap, stopwords)
             val qSet = qTokens.toSet()
             val jaccardThreshold = engine.getJaccardThreshold(qFiltered)
             for (key in candidates) {
-                val keyTokens = filterStopwordsAndMapSynonymsLocal(key).first.toSet()
+                val keyTokens = engine.filterStopwordsAndMapSynonyms(key).first.toSet()
                 if (keyTokens.isEmpty()) continue
                 val weightedJ = engine.weightedJaccard(qSet, keyTokens)
                 if (weightedJ > bestJaccard) {
@@ -663,6 +495,7 @@ engine = Engine(templatesMap, synonymsMap, stopwords)
                 }
             }
 
+            // Levenshtein fallback on candidates
             var bestKey: String? = null
             var bestDist = Int.MAX_VALUE
             for (key in candidates) {
@@ -689,8 +522,8 @@ engine = Engine(templatesMap, synonymsMap, stopwords)
                 }
             }
 
-            // далее — код поиска контекста и core-файлов (использует engine там, где нужно)
-            val lower = normalizeLocal(qFiltered)
+            // Context detection & local-context search
+            val lower = engine.normalizeText(qFiltered)
             val detectedContext = detectContext(lower)
             if (detectedContext != null) {
                 withContext(Dispatchers.Main) {
@@ -702,7 +535,15 @@ engine = Engine(templatesMap, synonymsMap, stopwords)
                         updateAutoComplete()
                     }
                 }
-                val (localTemplates, localKeywords) = parseTemplatesFromFile(detectedContext)
+
+                val (localTemplates, localKeywords) = ChatCore.parseTemplatesFromFile(
+                    this@ChatActivity,
+                    folderUri,
+                    detectedContext,
+                    synonymsSnapshot,
+                    stopwordsSnapshot
+                )
+
                 localTemplates[qFiltered]?.let { possible ->
                     if (possible.isNotEmpty()) {
                         val response = possible.random()
@@ -714,14 +555,17 @@ engine = Engine(templatesMap, synonymsMap, stopwords)
                         return@launch
                     }
                 }
+
+                // build local inverted
                 val localInverted = HashMap<String, MutableList<String>>()
-                for ((k, v) in localTemplates) {
-                    val toks = filterStopwordsAndMapSynonymsLocal(k).first
+                for ((k, _) in localTemplates) {
+                    val toks = engine.filterStopwordsAndMapSynonyms(k).first
                     for (t in toks) {
                         val list = localInverted.getOrPut(t) { mutableListOf() }
                         if (!list.contains(k)) list.add(k)
                     }
                 }
+
                 val localCandidateCounts = HashMap<String, Int>()
                 val tokensLocal = qTokens
                 for (tok in tokensLocal) {
@@ -729,6 +573,7 @@ engine = Engine(templatesMap, synonymsMap, stopwords)
                         localCandidateCounts[trig] = localCandidateCounts.getOrDefault(trig, 0) + 1
                     }
                 }
+
                 val localCandidates: List<String> = if (localCandidateCounts.isNotEmpty()) {
                     localCandidateCounts.entries
                         .filter { it.value >= CANDIDATE_TOKEN_THRESHOLD }
@@ -740,11 +585,12 @@ engine = Engine(templatesMap, synonymsMap, stopwords)
                     localTemplates.keys.filter { abs(it.length - qFiltered.length) <= md }
                         .take(MAX_CANDIDATES_FOR_LEV)
                 }
+
                 var bestLocal: String? = null
                 var bestLocalJ = 0.0
                 val qSetLocal = tokensLocal.toSet()
                 for (key in localCandidates) {
-                    val keyTokens = filterStopwordsAndMapSynonymsLocal(key).first.toSet()
+                    val keyTokens = engine.filterStopwordsAndMapSynonyms(key).first.toSet()
                     if (keyTokens.isEmpty()) continue
                     val weightedJ = engine.weightedJaccard(qSetLocal, keyTokens)
                     if (weightedJ > bestLocalJ) {
@@ -764,6 +610,7 @@ engine = Engine(templatesMap, synonymsMap, stopwords)
                         return@launch
                     }
                 }
+
                 var bestLocalKey: String? = null
                 var bestLocalDist = Int.MAX_VALUE
                 for (key in localCandidates) {
@@ -789,8 +636,18 @@ engine = Engine(templatesMap, synonymsMap, stopwords)
                     }
                 }
 
-                // Поиск по core файлам если не найдено в контексте
-                val coreResult = searchInCoreFiles(qFiltered, tokensLocal, qSetLocal, jaccardThreshold)
+                // Поиск по core файлами (делегируем ChatCore)
+                val coreResult = ChatCore.searchInCoreFiles(
+                    this@ChatActivity,
+                    folderUri,
+                    qFiltered,
+                    tokensLocal,
+                    qSetLocal,
+                    jaccardThreshold,
+                    synonymsSnapshot,
+                    stopwordsSnapshot,
+                    engine
+                )
                 if (coreResult != null) {
                     withContext(Dispatchers.Main) {
                         addChatMessage(currentMascotName, coreResult)
@@ -810,7 +667,17 @@ engine = Engine(templatesMap, synonymsMap, stopwords)
             }
 
             // Поиск по core файлам если не найдено в base
-            val coreResult = searchInCoreFiles(qFiltered, qTokens, qSet, jaccardThreshold)
+            val coreResult = ChatCore.searchInCoreFiles(
+                this@ChatActivity,
+                folderUri,
+                qFiltered,
+                qTokens,
+                qSet,
+                jaccardThreshold,
+                synonymsSnapshot,
+                stopwordsSnapshot,
+                engine
+            )
             if (coreResult != null) {
                 withContext(Dispatchers.Main) {
                     addChatMessage(currentMascotName, coreResult)
@@ -948,20 +815,9 @@ engine = Engine(templatesMap, synonymsMap, stopwords)
     private fun levenshtein(s: String, t: String, qFiltered: String): Int = engine.levenshtein(s, t, qFiltered)
 
     private fun rebuildInvertedIndex() {
+        val newIndex = engine.rebuildInvertedIndex(MIN_TOKEN_LENGTH, MAX_TOKENS_PER_INDEX)
         invertedIndex.clear()
-        val tempIndex = HashMap<String, MutableList<String>>()
-        for (key in templatesMap.keys) {
-            val toks = filterStopwordsAndMapSynonyms(key).first.filter { it.length >= MIN_TOKEN_LENGTH || keywordResponses.containsKey(it) }
-            for (t in toks) {
-                val list = tempIndex.getOrPut(t) { mutableListOf() }
-                if (!list.contains(key)) list.add(key)
-                if (list.size > MAX_TOKENS_PER_INDEX) {
-                    list.sortByDescending { templatesMap[it]?.size ?: 0 }
-                    list.subList(MAX_TOKENS_PER_INDEX, list.size).clear()
-                }
-            }
-        }
-        invertedIndex.putAll(tempIndex)
+        invertedIndex.putAll(newIndex)
         trimTemplatesMap()
     }
 
@@ -1166,6 +1022,7 @@ engine = Engine(templatesMap, synonymsMap, stopwords)
     }
 
     private fun loadTemplatesFromFile(filename: String) {
+        // Делегируем загрузку ChatCore.loadTemplatesFromFile
         templatesMap.clear()
         keywordResponses.clear()
         mascotList.clear()
@@ -1176,119 +1033,46 @@ engine = Engine(templatesMap, synonymsMap, stopwords)
         currentMascotIcon = "raccoon_icon.png"
         currentThemeColor = "#00FF00"
         currentThemeBackground = "#000000"
+
+        // Обновим синонимы (на случай, если папка изменилась)
         ChatCore.loadSynonymsAndStopwords(this, folderUri, synonymsMap, stopwords)
+
         if (folderUri == null) {
             loadFallbackTemplates()
             rebuildInvertedIndex()
             computeTokenWeights()
-            updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
+            updateAutoComplete()
             return
         }
-        try {
-            val dir = DocumentFile.fromTreeUri(this, folderUri!!) ?: run {
-                loadFallbackTemplates()
-                rebuildInvertedIndex()
-                computeTokenWeights()
-                updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
-                return
-            }
-            val file = dir.findFile(filename)
-            if (file == null || !file.exists()) {
-                loadFallbackTemplates()
-                rebuildInvertedIndex()
-                computeTokenWeights()
-                updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
-                return
-            }
-            contentResolver.openInputStream(file.uri)?.bufferedReader()?.use { reader ->
-                reader.forEachLine { raw ->
-                    val l = raw.trim()
-                    if (l.isEmpty()) return@forEachLine
-                    if (filename == "base.txt" && l.startsWith(":") && l.endsWith(":")) {
-                        val contextLine = l.substring(1, l.length - 1)
-                        if (contextLine.contains("=")) {
-                            val parts = contextLine.split("=", limit = 2)
-                            if (parts.size == 2) {
-                                val keyword = parts[0].trim().lowercase(Locale.ROOT)
-                                val contextFile = parts[1].trim()
-                                if (keyword.isNotEmpty() && contextFile.isNotEmpty()) contextMap[keyword] = contextFile
-                            }
-                        }
-                        return@forEachLine
-                    }
-                    if (l.startsWith("-")) {
-                        val keywordLine = l.substring(1)
-                        if (keywordLine.contains("=")) {
-                            val parts = keywordLine.split("=", limit = 2)
-                            if (parts.size == 2) {
-                                val keyword = parts[0].trim().lowercase(Locale.ROOT)
-                                val responses = parts[1].split("|")
-                                val responseList = responses.mapNotNull { it.trim().takeIf { s -> s.isNotEmpty() } }.toMutableList()
-                                if (keyword.isNotEmpty() && responseList.isNotEmpty()) keywordResponses[keyword] = responseList
-                            }
-                        }
-                        return@forEachLine
-                    }
-                    if (!l.contains("=")) return@forEachLine
-                    val parts = l.split("=", limit = 2)
-                    if (parts.size == 2) {
-                        val triggerRaw = parts[0].trim()
-                        val trigger = normalizeText(triggerRaw)
-                        val triggerFiltered = filterStopwordsAndMapSynonyms(trigger).second
-                        val responses = parts[1].split("|")
-                        val responseList = responses.mapNotNull { it.trim().takeIf { s -> s.isNotEmpty() } }.toMutableList()
-                        if (triggerFiltered.isNotEmpty() && responseList.isNotEmpty()) templatesMap[triggerFiltered] = responseList
-                    }
-                }
-            }
-            val metadataFilename = filename.replace(".txt", "_metadata.txt")
-            val metadataFile = dir.findFile(metadataFilename)
-            if (metadataFile != null && metadataFile.exists()) {
-                contentResolver.openInputStream(metadataFile.uri)?.bufferedReader()?.use { reader ->
-                    reader.forEachLine { raw ->
-                        val line = raw.trim()
-                        when {
-                            line.startsWith("mascot_list=") -> {
-                                val mascots = line.substring("mascot_list=".length).split("|")
-                                for (mascot in mascots) {
-                                    val parts = mascot.split(":")
-                                    if (parts.size == 4) {
-                                        val mascotData = mapOf(
-                                            "name" to parts[0].trim(),
-                                            "icon" to parts[1].trim(),
-                                            "color" to parts[2].trim(),
-                                            "background" to parts[3].trim()
-                                        )
-                                        mascotList.add(mascotData)
-                                    }
-                                }
-                            }
-                            line.startsWith("mascot_name=") -> currentMascotName = line.substring("mascot_name=".length).trim()
-                            line.startsWith("mascot_icon=") -> currentMascotIcon = line.substring("mascot_icon=".length).trim()
-                            line.startsWith("theme_color=") -> currentThemeColor = line.substring("theme_color=".length).trim()
-                            line.startsWith("theme_background=") -> currentThemeBackground = line.substring("theme_background=".length).trim()
-                        }
-                    }
-                }
-            }
-            if (filename == "base.txt" && mascotList.isNotEmpty()) {
-                val selected = mascotList.random()
-                selected["name"]?.let { currentMascotName = it }
-                selected["icon"]?.let { currentMascotIcon = it }
-                selected["color"]?.let { currentThemeColor = it }
-                selected["background"]?.let { currentThemeBackground = it }
-            }
-            rebuildInvertedIndex()
-            computeTokenWeights()
-            updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
-        } catch (e: Exception) {
-            Log.e("ChatActivity", "Error loading templates from $filename", e)
-            showCustomToast("Ошибка чтения файла: ${e.message}")
+
+        val metadataOut = mutableMapOf<String, String>()
+        val (ok, err) = ChatCore.loadTemplatesFromFile(
+            this,
+            folderUri,
+            filename,
+            templatesMap,
+            keywordResponses,
+            mascotList,
+            contextMap,
+            synonymsMap,
+            stopwords,
+            metadataOut
+        )
+        if (!ok) {
+            Log.e("ChatActivity", "Error loading templates: $err")
+            showCustomToast("Ошибка чтения файла: ${err ?: "unknown"}")
             loadFallbackTemplates()
-            rebuildInvertedIndex()
-            computeTokenWeights()
-            updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
+        } else {
+            metadataOut["mascot_name"]?.let { currentMascotName = it }
+            metadataOut["mascot_icon"]?.let { currentMascotIcon = it }
+            metadataOut["theme_color"]?.let { currentThemeColor = it }
+            metadataOut["theme_background"]?.let { currentThemeBackground = it }
         }
+
+        rebuildInvertedIndex()
+        computeTokenWeights()
+        updateAutoComplete()
+        updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
     }
 
     private fun loadFallbackTemplates() {
