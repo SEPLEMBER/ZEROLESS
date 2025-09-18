@@ -80,7 +80,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     // Data structures
     private val fallback = arrayOf("Привет", "Как дела?", "Расскажи о себе", "Выход")
     private val templatesMap = HashMap<String, MutableList<String>>()
-    private val contextMap = HashMap<String, String>()
+    private val contextMap = HashMap<String, String>() // keyword -> filename (parsed from base.txt lines like :золото=resourcesmoney.txt:)
     private val keywordResponses = HashMap<String, MutableList<String>>()
     private val antiSpamResponses = mutableListOf<String>()
     private val mascotList = mutableListOf<Map<String, String>>()
@@ -223,6 +223,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             updateAutoComplete()
             addChatMessage(currentMascotName, "Добро пожаловать!")
         } else {
+            // currentContext по умолчанию "base.txt" — загрузим его, чтобы заполнить contextMap
             loadTemplatesFromFile(currentContext)
             rebuildInvertedIndex()
             computeTokenWeights()
@@ -441,6 +442,11 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                         reader.forEachLine { raw ->
                             val l = raw.trim()
                             if (l.isEmpty()) return@forEachLine
+                            // preserve same parsing rules as loadTemplatesFromFile (but do not alter global maps)
+                            if (filename == "base.txt" && l.startsWith(":") && l.endsWith(":")) {
+                                // context mapping lines are handled in loadTemplatesFromFile; skip here
+                                return@forEachLine
+                            }
                             if (l.startsWith("-")) {
                                 val keywordLine = l.substring(1)
                                 if (keywordLine.contains("=")) {
@@ -472,7 +478,68 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 return Pair(localTemplates, localKeywords)
             }
 
-            // --- New: detect "что такое" pattern and answer per term using base.txt templates + synonims
+            // helper: check if a response string looks like a file-redirect (contains .txt)
+            fun looksLikeFilename(resp: String): Boolean {
+                val t = resp.trim().lowercase(Locale.getDefault())
+                return t.contains(".txt")
+            }
+
+            // recursive resolver: try to find a response for lookupKey inside filename (depth-limited)
+            suspend fun resolveInFile(filename: String, lookupKey: String, depth: Int = 0): String? {
+                if (depth > 3) return null
+                val (fileTemplates, fileKeywords) = parseTemplatesFromFile(filename)
+                // 1) exact in fileTemplates
+                fileTemplates[lookupKey]?.let { list ->
+                    if (list.isNotEmpty()) {
+                        val candidate = list.random()
+                        // if candidate is a redirect to another file, follow it
+                        if (looksLikeFilename(candidate)) {
+                            // extract filename (strip surrounding colons if any)
+                            val f = candidate.replace(":", "").trim()
+                            return resolveInFile(f, lookupKey, depth + 1) ?: candidate
+                        }
+                        return candidate
+                    }
+                }
+                // 2) exact in fileKeywords
+                fileKeywords[lookupKey]?.let { list ->
+                    if (list.isNotEmpty()) {
+                        val candidate = list.random()
+                        if (looksLikeFilename(candidate)) {
+                            val f = candidate.replace(":", "").trim()
+                            return resolveInFile(f, lookupKey, depth + 1) ?: candidate
+                        }
+                        return candidate
+                    }
+                }
+                // 3) fuzzy over fileTemplates keys
+                if (fileTemplates.isNotEmpty()) {
+                    val qSet = filterStopwordsAndMapSynonymsLocal(lookupKey).first.toSet()
+                    var bestK: String? = null
+                    var bestJ = 0.0
+                    val jaccardThresholdLocal = getJaccardThreshold(lookupKey)
+                    for (k in fileTemplates.keys) {
+                        val ktoks = filterStopwordsAndMapSynonymsLocal(k).first.toSet()
+                        if (ktoks.isEmpty()) continue
+                        val wj = weightedJaccard(qSet, ktoks)
+                        if (wj > bestJ) { bestJ = wj; bestK = k }
+                    }
+                    if (bestK != null && bestJ >= jaccardThresholdLocal) {
+                        val list = fileTemplates[bestK]
+                        if (!list.isNullOrEmpty()) {
+                            val candidate = list.random()
+                            if (looksLikeFilename(candidate)) {
+                                val f = candidate.replace(":", "").trim()
+                                return resolveInFile(f, lookupKey, depth + 1) ?: candidate
+                            }
+                            return candidate
+                        }
+                    }
+                }
+                return null
+            }
+
+            // --- Improved: detect "что такое" pattern and answer per term using contextMap + base.txt + referenced files
             val normalizedOrig = normalizeLocal(qOrigRaw)
             if (normalizedOrig.startsWith("что такое")) {
                 val after = normalizedOrig.removePrefix("что такое").trim()
@@ -480,16 +547,13 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     // Split terms by 'и', commas or semicolons
                     val termParts = after.split(Regex("\\s*(?:и|,|;)\\s*")).map { it.trim() }.filter { it.isNotEmpty() }
                     if (termParts.isNotEmpty()) {
-                        // Parse base.txt templates/keywords (so behaviour comes from base.txt)
-                        val (baseTemplates, baseKeywords) = parseTemplatesFromFile("base.txt")
-
-                        // If synonyms/stopwords loaded, we can canonicalize terms
+                        // canonicalize terms via synonyms/stopwords
                         val canonicalTerms = termParts.map { tp ->
                             val mapped = filterStopwordsAndMapSynonymsLocal(tp).second
                             if (mapped.isNotEmpty()) mapped else tp
                         }
 
-                        // Remember first canonical topic for context recall
+                        // remember first canonical topic for context recall
                         val firstTopic = canonicalTerms.firstOrNull()
                         if (!firstTopic.isNullOrEmpty()) {
                             lastTopic = firstTopic
@@ -499,47 +563,50 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                             var respToSend: String? = null
                             val lookupKey = rawTerm
 
-                            // 1) exact match in baseTemplates
-                            baseTemplates[lookupKey]?.let { list ->
+                            // 1) try current templates (templatesSnapshot)
+                            templatesSnapshot[lookupKey]?.let { list ->
                                 if (list.isNotEmpty()) respToSend = list.random()
                             }
-
-                            // 2) exact match in baseKeywords
                             if (respToSend == null) {
-                                baseKeywords[lookupKey]?.let { list ->
+                                keywordResponsesSnapshot[lookupKey]?.let { list ->
                                     if (list.isNotEmpty()) respToSend = list.random()
                                 }
                             }
 
-                            // 3) try fuzzy match over baseTemplates keys (weighted Jaccard, synonyms-aware)
-                            if (respToSend == null && baseTemplates.isNotEmpty()) {
+                            // 2) if not found in current, consult contextMap (from base.txt). If contextMap has mapping, open that file and search inside it.
+                            if (respToSend == null) {
+                                val mappedContextFile = contextMapSnapshot[lookupKey]
+                                if (mappedContextFile != null) {
+                                    // mappedContextFile may be e.g. resourcesmoney.txt (without colons)
+                                    val candidate = resolveInFile(mappedContextFile, lookupKey)
+                                    if (!candidate.isNullOrEmpty()) respToSend = candidate
+                                }
+                            }
+
+                            // 3) If still not found, try to resolve directly in base.txt (some projects keep definitions there)
+                            if (respToSend == null) {
+                                val candidate = resolveInFile("base.txt", lookupKey)
+                                if (!candidate.isNullOrEmpty()) respToSend = candidate
+                            }
+
+                            // 4) fallback: try fuzzy in global templates
+                            if (respToSend == null) {
                                 val qSet = filterStopwordsAndMapSynonymsLocal(lookupKey).first.toSet()
                                 var bestK: String? = null
                                 var bestJ = 0.0
                                 val jaccardThresholdLocal = getJaccardThreshold(lookupKey)
-                                for (k in baseTemplates.keys) {
+                                for (k in templatesSnapshot.keys) {
                                     val ktoks = filterStopwordsAndMapSynonymsLocal(k).first.toSet()
                                     if (ktoks.isEmpty()) continue
                                     val wj = weightedJaccard(qSet, ktoks)
                                     if (wj > bestJ) { bestJ = wj; bestK = k }
                                 }
                                 if (bestK != null && bestJ >= jaccardThresholdLocal) {
-                                    baseTemplates[bestK]?.let { list -> if (list.isNotEmpty()) respToSend = list.random() }
+                                    templatesSnapshot[bestK]?.let { list -> if (list.isNotEmpty()) respToSend = list.random() }
                                 }
                             }
 
-                            // 4) fallback: try templatesMap (global) as last resort (existing behavior)
-                            if (respToSend == null) {
-                                templatesSnapshot[lookupKey]?.let { list ->
-                                    if (list.isNotEmpty()) respToSend = list.random()
-                                }
-                                if (respToSend == null) {
-                                    keywordResponsesSnapshot[lookupKey]?.let { list ->
-                                        if (list.isNotEmpty()) respToSend = list.random()
-                                    }
-                                }
-                            }
-
+                            // final fallback message
                             if (respToSend == null) respToSend = "Не знаю подробно про $rawTerm, но могу поискать в шаблонах."
 
                             withContext(Dispatchers.Main) {
