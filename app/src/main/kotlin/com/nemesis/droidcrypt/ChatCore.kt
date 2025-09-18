@@ -277,7 +277,7 @@ object ChatCore {
                 var bestKey: String? = null
                 var bestDist = Int.MAX_VALUE
                 val candidates = coreTemplates.keys.filter { kotlin.math.abs(it.length - qFiltered.length) <= engine.getFuzzyDistance(qFiltered) }
-                    .take(7)
+                    .take(engine.MAX_CANDIDATES_FOR_LEV)
                 for (key in candidates) {
                     val maxDist = engine.getFuzzyDistance(qFiltered)
                     if (kotlin.math.abs(key.length - qFiltered.length) > maxDist + 1) continue
