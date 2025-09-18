@@ -26,6 +26,7 @@ import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.delay
 import java.util.*
 import kotlin.math.abs
 import kotlin.math.log10
@@ -75,7 +76,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     // TTS
     private var tts: TextToSpeech? = null
-    
+
     // Data structures
     private val fallback = arrayOf("Привет", "Как дела?", "Расскажи о себе", "Выход")
     private val templatesMap = HashMap<String, MutableList<String>>()
@@ -108,6 +109,10 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
     }
     private val tokenWeights = HashMap<String, Double>()
+
+    // New: user variables and last topic for context
+    private val userVariables = HashMap<String, String>()
+    private var lastTopic: String? = null
 
     init {
         antiSpamResponses.addAll(
@@ -209,7 +214,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         // Инициализация TTS
         tts = TextToSpeech(this, this)
-        
+
         if (folderUri == null) {
             showCustomToast("Папка не выбрана! Открой настройки и выбери папку.")
             loadFallbackTemplates()
@@ -324,13 +329,40 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
     }
 
-    private fun processUserQuery(userInput: String) {
+    // processUserQuery now supports optional splitting control (allowSplit)
+    private fun processUserQuery(userInput: String, allowSplit: Boolean = true) {
         if (userInput.startsWith("/")) {
             handleCommand(userInput.trim())
             return
         }
 
-        val qOrigRaw = userInput.trim()
+        val rawInput = userInput.trim()
+        // Split compound queries early (commas/semicolons). Keep changes minimal: schedule subqueries.
+        if (allowSplit) {
+            val parts = rawInput.split(Regex("[,;]")).map { it.trim() }.filter { it.isNotEmpty() }
+            if (parts.size > 1) {
+                // Show single user message and schedule subqueries
+                addChatMessage("You", rawInput)
+                showTypingIndicator()
+                for ((idx, part) in parts.withIndex()) {
+                    val delayMs = idx * SUBQUERY_RESPONSE_DELAY
+                    Handler(Looper.getMainLooper()).postDelayed({
+                        processUserQuery(part, false)
+                    }, delayMs)
+                }
+                return
+            }
+        }
+
+        // Resolve pronouns 'оно/она/он' to lastTopic (context recall)
+        var processedInput = rawInput
+        lastTopic?.let { topic ->
+            if (processedInput.contains(Regex("\\b(оно|она|он)\\b", RegexOption.IGNORE_CASE))) {
+                processedInput = processedInput.replace(Regex("\\b(оно|она|он)\\b", RegexOption.IGNORE_CASE), topic)
+            }
+        }
+
+        val qOrigRaw = processedInput
         val qOrig = normalizeText(qOrigRaw)
         val (qTokensFiltered, qFiltered) = filterStopwordsAndMapSynonyms(qOrig)
         val qKeyForCount = qFiltered
@@ -339,7 +371,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         // Кэш: проверка на повторный запрос
         queryCache[qKeyForCount]?.let { cachedResponse ->
-            addChatMessage(currentMascotName, cachedResponse)
+            addChatMessage(currentMascotName, applyVariables(cachedResponse))
             startIdleTimer()
             return
         }
@@ -440,6 +472,83 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 return Pair(localTemplates, localKeywords)
             }
 
+            // --- New: detect "что такое" pattern and answer per term (with context remembered)
+            val normalizedOrig = normalizeLocal(qOrigRaw)
+            if (normalizedOrig.startsWith("что такое")) {
+                val after = normalizedOrig.removePrefix("что такое").trim()
+                if (after.isNotEmpty()) {
+                    // Split terms by 'и', commas or semicolons
+                    val termParts = after.split(Regex("\\s*(?:и|,|;)\\s*")).map { it.trim() }.filter { it.isNotEmpty() }
+                    if (termParts.isNotEmpty()) {
+                        // remember first topic for context resolution
+                        val firstTermRaw = termParts.first()
+                        val mappedFirst = filterStopwordsAndMapSynonymsLocal(firstTermRaw).second
+                        if (mappedFirst.isNotEmpty()) {
+                            lastTopic = mappedFirst // store canonicalized topic
+                        } else {
+                            lastTopic = filterStopwordsAndMapSynonymsLocal(firstTermRaw).first.firstOrNull()
+                        }
+
+                        for ((idx, term) in termParts.withIndex()) {
+                            val keyForLookup = filterStopwordsAndMapSynonymsLocal(term).second.ifEmpty { term }
+                            // try templates global
+                            var respToSend: String? = null
+                            templatesSnapshot[keyForLookup]?.let { list ->
+                                if (list.isNotEmpty()) respToSend = list.random()
+                            }
+                            if (respToSend == null) {
+                                keywordResponsesSnapshot[keyForLookup]?.let { list ->
+                                    if (list.isNotEmpty()) respToSend = list.random()
+                                }
+                            }
+                            if (respToSend == null) {
+                                // fallback: try fuzzy matching on templates keys
+                                val qSet = filterStopwordsAndMapSynonymsLocal(keyForLookup).first.toSet()
+                                var bestK: String? = null; var bestJ = 0.0
+                                for (k in templatesSnapshot.keys) {
+                                    val ktoks = filterStopwordsAndMapSynonymsLocal(k).first.toSet()
+                                    if (ktoks.isEmpty()) continue
+                                    val wj = weightedJaccard(qSet, ktoks)
+                                    if (wj > bestJ) { bestJ = wj; bestK = k }
+                                }
+                                if (bestK != null && bestJ >= getJaccardThreshold(keyForLookup)) {
+                                    templatesSnapshot[bestK]?.let { list -> if (list.isNotEmpty()) respToSend = list.random() }
+                                }
+                            }
+                            if (respToSend == null) respToSend = "Не знаю подробно про $term, но могу поискать в шаблонах."
+
+                            withContext(Dispatchers.Main) {
+                                addChatMessage(currentMascotName, applyVariables(respToSend!!))
+                                startIdleTimer()
+                            }
+                            // space between replies if multiple terms
+                            if (idx < termParts.size - 1) delay(SUBQUERY_RESPONSE_DELAY)
+                        }
+                        return@launch
+                    }
+                }
+            }
+            // --- End "что такое" handling
+
+            // Save name if user introduced themselves: "меня зовут <Name>"
+            val lowerRaw = qOrigRaw.lowercase(Locale.getDefault())
+            if (lowerRaw.contains("меня зовут")) {
+                try {
+                    val afterPhrase = qOrigRaw.substringAfter(Regex("меня зовут"), "").trim()
+                    val nameCandidate = afterPhrase.split(Regex("\\s+")).firstOrNull()?.trim()?.replace(Regex("[^\\p{L}\\-]"), "") ?: ""
+                    if (nameCandidate.isNotEmpty()) {
+                        val cleanName = nameCandidate.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }
+                        userVariables["name"] = cleanName
+                        // polite reply
+                        withContext(Dispatchers.Main) {
+                            addChatMessage(currentMascotName, applyVariables("Приятно, \$name!"))
+                            startIdleTimer()
+                        }
+                        return@launch
+                    }
+                } catch (_: Exception) { /* non-fatal */ }
+            }
+
             var answered = false
             val subqueryResponses = mutableListOf<String>()
             val processedSubqueries = mutableSetOf<String>()
@@ -490,7 +599,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             if (subqueryResponses.isNotEmpty()) {
                 val combined = subqueryResponses.joinToString(". ")
                 withContext(Dispatchers.Main) {
-                    addChatMessage(currentMascotName, combined)
+                    addChatMessage(currentMascotName, applyVariables(combined))
                     startIdleTimer()
                 }
                 return@launch
@@ -499,7 +608,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             for ((keyword, responses) in keywordResponsesSnapshot) {
                 if (qFiltered.contains(keyword) && responses.isNotEmpty()) {
                     withContext(Dispatchers.Main) {
-                        addChatMessage(currentMascotName, responses.random())
+                        addChatMessage(currentMascotName, applyVariables(responses.random()))
                         startIdleTimer()
                     }
                     return@launch
@@ -544,7 +653,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 if (!possible.isNullOrEmpty()) {
                     val response = possible.random()
                     withContext(Dispatchers.Main) {
-                        addChatMessage(currentMascotName, response)
+                        addChatMessage(currentMascotName, applyVariables(response))
                         startIdleTimer()
                         cacheResponse(qKeyForCount, response)
                     }
@@ -570,7 +679,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 if (!possible.isNullOrEmpty()) {
                     val response = possible.random()
                     withContext(Dispatchers.Main) {
-                        addChatMessage(currentMascotName, response)
+                        addChatMessage(currentMascotName, applyVariables(response))
                         startIdleTimer()
                         cacheResponse(qKeyForCount, response)
                     }
@@ -595,7 +704,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     if (possible.isNotEmpty()) {
                         val response = possible.random()
                         withContext(Dispatchers.Main) {
-                            addChatMessage(currentMascotName, response)
+                            addChatMessage(currentMascotName, applyVariables(response))
                             startIdleTimer()
                             cacheResponse(qKeyForCount, response)
                         }
@@ -645,7 +754,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     if (!possible.isNullOrEmpty()) {
                         val response = possible.random()
                         withContext(Dispatchers.Main) {
-                            addChatMessage(currentMascotName, response)
+                            addChatMessage(currentMascotName, applyVariables(response))
                             startIdleTimer()
                             cacheResponse(qKeyForCount, response)
                         }
@@ -669,7 +778,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     if (!possible.isNullOrEmpty()) {
                         val response = possible.random()
                         withContext(Dispatchers.Main) {
-                            addChatMessage(currentMascotName, response)
+                            addChatMessage(currentMascotName, applyVariables(response))
                             startIdleTimer()
                             cacheResponse(qKeyForCount, response)
                         }
@@ -678,7 +787,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 }
                 val dummy = getDummyResponse(qOrig)
                 withContext(Dispatchers.Main) {
-                    addChatMessage(currentMascotName, dummy)
+                    addChatMessage(currentMascotName, applyVariables(dummy))
                     startIdleTimer()
                     cacheResponse(qKeyForCount, dummy)
                 }
@@ -687,7 +796,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
             val dummy = getDummyResponse(qOrig)
             withContext(Dispatchers.Main) {
-                addChatMessage(currentMascotName, dummy)
+                addChatMessage(currentMascotName, applyVariables(dummy))
                 startIdleTimer()
                 cacheResponse(qKeyForCount, dummy)
             }
@@ -1009,7 +1118,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     val responses = allText.split("|").map { it.trim() }.filter { it.isNotEmpty() }
                     if (responses.isNotEmpty()) {
                         val randomResponse = responses.random()
-                        addChatMessage(mascot, randomResponse)
+                        addChatMessage(mascot, applyVariables(randomResponse))
                     }
                 }
             }
@@ -1353,6 +1462,25 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             dialogHandler.postDelayed(it, 5000)
         }
     }
+
+    // --- New helper: apply user variables into response text (supports $name or ${name})
+    private fun applyVariables(text: String): String {
+        var out = text
+        // replace ${var} patterns
+        val braceRegex = Regex("\\$\\{([a-zA-Z0-9_]+)\\}")
+        out = out.replace(braceRegex) { mr ->
+            val key = mr.groupValues[1]
+            userVariables[key] ?: mr.value
+        }
+        // replace $var patterns
+        val simpleRegex = Regex("\\$([a-zA-Z0-9_]+)")
+        out = out.replace(simpleRegex) { mr ->
+            val key = mr.groupValues[1]
+            userVariables[key] ?: mr.value
+        }
+        return out
+    }
+    // --- end helpers
 
     private fun runOnUiThread(block: () -> Unit) {
         if (Looper.myLooper() == Looper.getMainLooper()) block()
