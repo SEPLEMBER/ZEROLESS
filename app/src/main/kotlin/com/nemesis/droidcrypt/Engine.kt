@@ -1,14 +1,10 @@
 package com.nemesis.droidcrypt
 
-import kotlin.math.abs
-import kotlin.math.min
-import kotlin.math.log10
 import java.util.*
-import kotlin.math.roundToInt
-import kotlin.math.max
-import kotlin.math.pow
-import kotlin.math.sqrt
 import kotlin.collections.HashMap
+import kotlin.math.abs
+import kotlin.math.log10
+import kotlin.math.min
 
 /**
  * Engine — чистая логика обработки текста/шаблонов.
@@ -22,6 +18,27 @@ class Engine(
     val stopwords: MutableSet<String>
 ) {
 
+    companion object {
+        // Перенесённые константы (раньше в ChatActivity.companion)
+        const val MAX_CONTEXT_SWITCH = 6
+        const val MAX_MESSAGES = 250
+        const val CANDIDATE_TOKEN_THRESHOLD = 2
+        const val MAX_SUBQUERY_RESPONSES = 3
+        const val SUBQUERY_RESPONSE_DELAY = 1500L
+        const val MAX_CANDIDATES_FOR_LEV = 7
+        const val JACCARD_THRESHOLD = 0.75
+        const val SEND_DEBOUNCE_MS = 400L
+        const val IDLE_TIMEOUT_MS = 30000L
+        const val MAX_CACHE_SIZE = 100
+        const val SPAM_WINDOW_MS = 60000L
+        const val MAX_TOKENS_PER_INDEX = 50
+        const val MIN_TOKEN_LENGTH = 3
+        const val MAX_TEMPLATES_SIZE = 5000
+    }
+
+    /**
+     * tokenWeights — доступно извне (ChatActivity синхронизирует отображение при необходимости).
+     */
     val tokenWeights: MutableMap<String, Double> = HashMap()
 
     /**
@@ -107,7 +124,7 @@ class Engine(
         return when {
             query.length <= 10 -> 0.3
             query.length <= 20 -> 0.4
-            else -> 0.75
+            else -> JACCARD_THRESHOLD
         }
     }
 
@@ -152,12 +169,12 @@ class Engine(
      *  - maxTokensPerIndex: максимально элементов в списке по токену (обрезается)
      */
     fun rebuildInvertedIndex(
-        minTokenLength: Int = 3,
-        maxTokensPerIndex: Int = 50
+        minTokenLength: Int = MIN_TOKEN_LENGTH,
+        maxTokensPerIndex: Int = MAX_TOKENS_PER_INDEX
     ): MutableMap<String, MutableList<String>> {
         val invertedIndex = HashMap<String, MutableList<String>>()
         for (key in templatesMap.keys) {
-            val toks = filterStopwordsAndMapSynonyms(key).first.filter { it.length >= minTokenLength }
+            val toks = filterStopwordsAndMapSynonyms(key).first.filter { it.length >= minTokenLength || /* keep keyword tokens */ false }
             for (t in toks) {
                 val list = invertedIndex.getOrPut(t) { mutableListOf() }
                 if (!list.contains(key)) list.add(key)
