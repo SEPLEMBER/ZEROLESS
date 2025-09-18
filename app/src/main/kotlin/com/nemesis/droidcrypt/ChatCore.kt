@@ -8,12 +8,35 @@ import java.util.*
 import kotlin.collections.HashMap
 
 /**
- * ChatCore — утилиты для работы с файловой системой: загрузка синонимов/стопслов, парсинг шаблонов, core-файлы.
+ * ChatCore — утилиты для работы с файловой системой и невизуальной логикой:
+ * - загрузка synonims/stopwords
+ * - парсинг шаблонов (templates / keywords)
+ * - поиск по core-файлам
+ * - встроенные fallback ответы и anti-spam строки
+ * - простые вспомогательные функции (detectContext, loadOuchMessage и т.д.)
  *
- * Все методы работают с переданными mutable коллекциями и context/uri, не зависят от UI.
+ * ВСЕ функции не используют UI и принимают Context/Uri и mutable коллекции извне.
  */
 object ChatCore {
     private const val TAG = "ChatCore"
+
+    // Вшитые ответы (перенесены из Activity)
+    val antiSpamResponses: List<String> = listOf(
+        "Ты надоел, давай что-то новенького!",
+        "Спамить нехорошо, попробуй другой запрос.",
+        "Я устал от твоих повторений!",
+        "Хватит спамить, придумай что-то интересное.",
+        "Эй, не зацикливайся, попробуй другой вопрос!",
+        "Повторяешь одно и то же? Давай разнообразие!",
+        "Слишком много повторов, я же не робот... ну, почти.",
+        "Не спамь, пожалуйста, задай новый вопрос!",
+        "Пять раз одно и то же? Попробуй что-то другое.",
+        "Я уже ответил, давай новый запрос!"
+    )
+
+    val fallbackReplies: List<String> = listOf("Привет", "Как дела?", "Расскажи о себе", "Выход")
+
+    fun getAntiSpamResponse(): String = antiSpamResponses.random()
 
     /**
      * Загружает synonims.txt и stopwords.txt в переданные коллекции (очищая их).
@@ -293,8 +316,6 @@ object ChatCore {
      *  - "mascot_icon"
      *  - "theme_color"
      *  - "theme_background"
-     *
-     * synonymsSnapshot/stopwordsSnapshot используются для фильтрации триггеров (та же логика, что раньше).
      */
     fun loadTemplatesFromFile(
         context: Context,
@@ -440,5 +461,110 @@ object ChatCore {
             Log.e(TAG, "Error loading templates from $filename", e)
             return Pair(false, e.message)
         }
+    }
+
+    /**
+     * Заполнить структуры дефолтными (встроенными) шаблонами.
+     * Используется, когда папка не выбрана или файл не найден.
+     */
+    fun loadFallbackTemplates(
+        templatesMap: MutableMap<String, MutableList<String>>,
+        keywordResponses: MutableMap<String, MutableList<String>>,
+        mascotList: MutableList<Map<String, String>>,
+        contextMap: MutableMap<String, String>
+    ) {
+        templatesMap.clear()
+        contextMap.clear()
+        keywordResponses.clear()
+        mascotList.clear()
+
+        val t1 = normalizeTextLocal("привет")
+        templatesMap[t1] = mutableListOf("Привет! Чем могу помочь?", "Здравствуй!")
+        val t2 = normalizeTextLocal("как дела")
+        templatesMap[t2] = mutableListOf("Всё отлично, а у тебя?", "Нормально, как дела?")
+        keywordResponses["спасибо"] = mutableListOf("Рад, что помог!", "Всегда пожалуйста!")
+    }
+
+    /**
+     * Простая заглушка-ответ (раньше в Activity).
+     */
+    fun getDummyResponse(query: String): String {
+        val lower = query.lowercase(Locale.getDefault())
+        return when {
+            lower.contains("привет") -> "Привет! Чем могу помочь?"
+            lower.contains("как дела") -> "Всё отлично, а у тебя?"
+            else -> "Не понял запрос. Попробуй другой вариант."
+        }
+    }
+
+    /**
+     * Попытка загрузить "ouch" файл для маскота: <mascot>.txt или ouch.txt.
+     * Возвращает случайную реплику или null.
+     */
+    fun loadOuchMessage(context: Context, folderUri: Uri?, mascot: String): String? {
+        val uri = folderUri ?: return null
+        try {
+            val dir = DocumentFile.fromTreeUri(context, uri) ?: return null
+            val mascotFile = dir.findFile("${mascot.lowercase(Locale.getDefault())}.txt") ?: dir.findFile("ouch.txt")
+            if (mascotFile != null && mascotFile.exists()) {
+                context.contentResolver.openInputStream(mascotFile.uri)?.bufferedReader()?.use { reader ->
+                    val allText = reader.readText()
+                    val responses = allText.split("|").map { it.trim() }.filter { it.isNotEmpty() }
+                    if (responses.isNotEmpty()) return responses.random()
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error loading ouch message", e)
+        }
+        return null
+    }
+
+    /**
+     * Прочитать metadata для маскота (<mascot>_metadata.txt) и записать в metadataOut.
+     * Возвращает Pair(success, errorMessage).
+     */
+    fun loadMascotMetadata(
+        context: Context,
+        folderUri: Uri?,
+        mascotName: String,
+        metadataOut: MutableMap<String, String>
+    ): Pair<Boolean, String?> {
+        val uri = folderUri ?: return Pair(false, "folderUri == null")
+        try {
+            val dir = DocumentFile.fromTreeUri(context, uri) ?: return Pair(false, "cannot open dir")
+            val metadataFilename = "${mascotName.lowercase(Locale.getDefault())}_metadata.txt"
+            val metadataFile = dir.findFile(metadataFilename) ?: return Pair(false, "file not found")
+            if (!metadataFile.exists()) return Pair(false, "file not exists")
+            context.contentResolver.openInputStream(metadataFile.uri)?.bufferedReader()?.use { reader ->
+                reader.forEachLine { raw ->
+                    val line = raw.trim()
+                    when {
+                        line.startsWith("mascot_name=") -> metadataOut["mascot_name"] = line.substring("mascot_name=".length).trim()
+                        line.startsWith("mascot_icon=") -> metadataOut["mascot_icon"] = line.substring("mascot_icon=".length).trim()
+                        line.startsWith("theme_color=") -> metadataOut["theme_color"] = line.substring("theme_color=".length).trim()
+                        line.startsWith("theme_background=") -> metadataOut["theme_background"] = line.substring("theme_background=".length).trim()
+                    }
+                }
+            }
+            return Pair(true, null)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error loading mascot metadata", e)
+            return Pair(false, e.message)
+        }
+    }
+
+    /**
+     * Определение контекста: получает токены через engine.tokenize и сравнивает с contextMap.
+     * Возвращает ключ (имя файла контекста) или null.
+     */
+    fun detectContext(input: String, contextMap: Map<String, String>, engine: Engine): String? {
+        val tokens = engine.tokenize(input)
+        val contextScores = HashMap<String, Int>()
+        for ((keyword, value) in contextMap) {
+            val keywordTokens = engine.tokenize(keyword)
+            val matches = tokens.count { it in keywordTokens }
+            if (matches > 0) contextScores[value] = contextScores.getOrDefault(value, 0) + matches
+        }
+        return contextScores.maxByOrNull { it.value }?.key
     }
 }
