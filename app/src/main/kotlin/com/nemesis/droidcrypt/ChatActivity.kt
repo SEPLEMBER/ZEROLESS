@@ -12,8 +12,6 @@ import android.os.Handler
 import android.os.Looper
 import android.preference.PreferenceManager
 import android.speech.tts.TextToSpeech
-import android.speech.tts.UtteranceProgressListener
-import android.text.format.DateFormat
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
@@ -27,7 +25,6 @@ import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.text.SimpleDateFormat
 import java.util.*
 import kotlin.math.abs
 import kotlin.math.min
@@ -316,36 +313,6 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         lastUserInputTime = System.currentTimeMillis()
         userActivityCount++
-
-        val calendar = Calendar.getInstance()
-        val hour = calendar.get(Calendar.HOUR_OF_DAY)
-        val minute = calendar.get(Calendar.MINUTE)
-        // расширенная логика: если поздно (23:00-06:00), предложить лечь спать при втором вводе
-        if ((hour >= 23 || hour < 6) && userActivityCount == 2) {
-            val sleepResponse = loadTimeToSleepResponse()
-            if (sleepResponse != null) {
-                addChatMessage("You", userInput)
-                showTypingIndicator()
-                addChatMessage(currentMascotName, sleepResponse)
-                startIdleTimer()
-                return
-            }
-        }
-
-        val dateKeywords = listOf("какое сегодня число", "какой сегодня день", "какой сейчас день", "какой сейчас год")
-        val lowerInput = qOrig.lowercase(Locale.getDefault())
-        var dateResponse: String? = null
-        if (dateKeywords.any { lowerInput.contains(it) }) {
-            dateResponse = processDateTimeQuery(lowerInput)
-        }
-
-        if (dateResponse != null) {
-            addChatMessage("You", userInput)
-            showTypingIndicator()
-            addChatMessage(currentMascotName, dateResponse)
-            startIdleTimer()
-            return
-        }
 
         addChatMessage("You", userInput)
         showTypingIndicator()
@@ -729,9 +696,9 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     }
 
     private fun showTypingIndicator() {
-        runOnUi {
+        runOnUiThread {
             val existing = messagesContainer.findViewWithTag<View>("typingView")
-            if (existing != null) return@runOnUi
+            if (existing != null) return@runOnUiThread
             val typingView = TextView(this).apply {
                 text = "печатает..."
                 textSize = 14f
@@ -750,7 +717,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             messagesContainer.addView(typingView)
             scrollView.post { scrollView.smoothScrollTo(0, messagesContainer.bottom) }
             Handler(Looper.getMainLooper()).postDelayed({
-                runOnUi {
+                runOnUiThread {
                     messagesContainer.findViewWithTag<View>("typingView")?.let { messagesContainer.removeView(it) }
                 }
             }, (1000..3000).random().toLong())
@@ -758,7 +725,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     }
 
     private fun clearChat() {
-        runOnUi {
+        runOnUiThread {
             messagesContainer.removeAllViews()
             queryCountMap.clear()
             lastQuery = ""
@@ -888,7 +855,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     }
 
     private fun addChatMessage(sender: String, text: String) {
-        runOnUi {
+        runOnUiThread {
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 val pad = dpToPx(6)
@@ -1258,7 +1225,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     }
 
     private fun updateUI(mascotName: String, mascotIcon: String, themeColor: String, themeBackground: String) {
-        runOnUi {
+        runOnUiThread {
             title = "Pawstribe - $mascotName"
             try {
                 messagesContainer.setBackgroundColor(Color.parseColor(themeBackground))
@@ -1292,75 +1259,5 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private fun runOnUi(block: () -> Unit) {
         if (Looper.myLooper() == Looper.getMainLooper()) block()
         else runOnUiThread(block)
-    }
-
-    private fun loadTimeToSleepResponse(): String? {
-        val uri = folderUri ?: return null
-        try {
-            val dir = DocumentFile.fromTreeUri(this, uri) ?: return null
-            val file = dir.findFile("sleeptime.txt")
-            if (file != null && file.exists()) {
-                contentResolver.openInputStream(file.uri)?.bufferedReader()?.use { reader ->
-                    val allText = reader.readText()
-                    val responses = allText.split("|").map { it.trim() }.filter { it.isNotEmpty() }
-                    if (responses.isNotEmpty()) return responses.random()
-                }
-            }
-        } catch (e: Exception) {}
-        return null
-    }
-
-    private fun processDateTimeQuery(input: String): String? {
-        val calendar = Calendar.getInstance()
-        val dayOfWeek = calendar.getDisplayName(Calendar.DAY_OF_WEEK, Calendar.LONG, Locale("ru", "RU"))
-        val dayOfMonth = calendar.get(Calendar.DAY_OF_MONTH)
-        val month = calendar.getDisplayName(Calendar.MONTH, Calendar.LONG, Locale("ru", "RU"))
-        val year = calendar.get(Calendar.YEAR)
-        val hour = calendar.get(Calendar.HOUR_OF_DAY)
-        val minute = calendar.get(Calendar.MINUTE)
-
-        val timeFormat = if (DateFormat.is24HourFormat(this)) {
-            "HH:mm"
-        } else {
-            "h:mm a"
-        }
-        val sdf = SimpleDateFormat(timeFormat, Locale.getDefault())
-        val currentTime = sdf.format(calendar.time)
-
-        return when {
-            input.contains("число") || input.contains("дата") -> "Сегодня $dayOfMonth $month $year года."
-            input.contains("день") -> "Сегодня $dayOfWeek, $dayOfMonth $month."
-            input.contains("время") -> "Сейчас $currentTime."
-            input.contains("год") -> "Сейчас $year год."
-            else -> null
-        }
-    }
-}
-
-    private fun startTimeUpdater() {
-        stopTimeUpdater()
-        timeUpdaterRunnable = object : Runnable {
-            override fun run() {
-                val now = Date()
-                val is24Hour = DateFormat.is24HourFormat(this@ChatActivity)
-                val fmt = if (is24Hour) {
-                    SimpleDateFormat("HH:mm", Locale.getDefault())
-                } else {
-                    SimpleDateFormat("hh:mm a", Locale.getDefault())
-                }
-                val s = fmt.format(now)
-                runOnUi {
-                    timeTextView?.text = s
-                }
-                val delay = 60000L
-                timeHandler.postDelayed(this, delay)
-            }
-        }
-        timeHandler.post(timeUpdaterRunnable!!)
-    }
-
-    private fun stopTimeUpdater() {
-        timeUpdaterRunnable?.let { timeHandler.removeCallbacks(it) }
-        timeUpdaterRunnable = null
     }
 }
