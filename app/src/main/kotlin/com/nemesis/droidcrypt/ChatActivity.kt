@@ -28,9 +28,10 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.*
 import kotlin.math.abs
-import kotlin.math.log10
-import kotlin.math.min
 import kotlin.math.roundToInt
+
+// импорт Engine
+import com.nemesis.droidcrypt.Engine
 
 class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
@@ -43,7 +44,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         private const val MAX_SUBQUERY_RESPONSES = 3
         private const val SUBQUERY_RESPONSE_DELAY = 1500L
         private const val MAX_CANDIDATES_FOR_LEV = 7
-        private const val JACCARD_THRESHOLD = 0.79
+        private const val JACCARD_THRESHOLD = 0.75
         private const val SEND_DEBOUNCE_MS = 400L
         private const val IDLE_TIMEOUT_MS = 30000L
         private const val MAX_CACHE_SIZE = 100
@@ -53,14 +54,8 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         private const val MAX_TEMPLATES_SIZE = 5000
     }
 
-    private fun getFuzzyDistance(word: String): Int {
-        return when {
-            word.length <= 4 -> 0
-            word.length <= 6 -> 1
-            word.length <= 8 -> 2
-            else -> 3
-        }
-    }
+    // Engine instance (инициализируется в onCreate после загрузки synonyms/stopwords)
+    private lateinit var engine: Engine
 
     // UI
     private var folderUri: Uri? = null
@@ -76,7 +71,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     // TTS
     private var tts: TextToSpeech? = null
-    
+
     // Data structures
     private val fallback = arrayOf("Привет", "Как дела?", "Расскажи о себе", "Выход")
     private val templatesMap = HashMap<String, MutableList<String>>()
@@ -162,7 +157,16 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             Log.e("ChatActivity", "Error loading folder URI", e)
         }
 
+        // Загрузка синонимов/стоп-слов — нужно до инициализации engine
         loadSynonymsAndStopwords()
+
+        // Инициализация Engine (передаём mutable структуры)
+        engine = Engine(templatesMap, synonymsMap, stopwords)
+        // Рассчитать веса (синхронизируем tokenWeights)
+        engine.computeTokenWeights()
+        tokenWeights.clear()
+        tokenWeights.putAll(engine.tokenWeights)
+
         try {
             val prefs = PreferenceManager.getDefaultSharedPreferences(this)
             val disable = prefs.getBoolean(PREF_KEY_DISABLE_SCREENSHOTS, false)
@@ -210,7 +214,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         // Инициализация TTS
         tts = TextToSpeech(this, this)
-        
+
         if (folderUri == null) {
             showCustomToast("Папка не выбрана! Открой настройки и выбери папку.")
             loadFallbackTemplates()
@@ -332,8 +336,8 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
 
         val qOrigRaw = userInput.trim()
-        val qOrig = normalizeText(qOrigRaw)
-        val (qTokensFiltered, qFiltered) = filterStopwordsAndMapSynonyms(qOrig)
+        val qOrig = engine.normalizeText(qOrigRaw)
+        val (qTokensFiltered, qFiltered) = engine.filterStopwordsAndMapSynonyms(qOrig)
         val qKeyForCount = qFiltered
 
         if (qFiltered.isEmpty()) return
@@ -498,7 +502,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                         for (key in coreTemplates.keys) {
                             val keyTokens = filterStopwordsAndMapSynonymsLocal(key).first.toSet()
                             if (keyTokens.isEmpty()) continue
-                            val weightedJ = weightedJaccard(qSet, keyTokens)
+                            val weightedJ = engine.weightedJaccard(qSet, keyTokens)
                             if (weightedJ > bestJaccard) {
                                 bestJaccard = weightedJ
                                 bestByJaccard = key
@@ -515,13 +519,13 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                         // Levenshtein поиск
                         var bestKey: String? = null
                         var bestDist = Int.MAX_VALUE
-                        val candidates = coreTemplates.keys.filter { abs(it.length - qFiltered.length) <= getFuzzyDistance(qFiltered) }
+                        val candidates = coreTemplates.keys.filter { abs(it.length - qFiltered.length) <= engine.getFuzzyDistance(qFiltered) }
                             .take(MAX_CANDIDATES_FOR_LEV)
 
                         for (key in candidates) {
-                            val maxDist = getFuzzyDistance(qFiltered)
+                            val maxDist = engine.getFuzzyDistance(qFiltered)
                             if (abs(key.length - qFiltered.length) > maxDist + 1) continue
-                            val d = levenshtein(qFiltered, key, qFiltered)
+                            val d = engine.levenshtein(qFiltered, key, qFiltered)
                             if (d < bestDist) {
                                 bestDist = d
                                 bestKey = key
@@ -529,7 +533,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                             if (bestDist == 0) break
                         }
 
-                        if (bestKey != null && bestDist <= getFuzzyDistance(qFiltered)) {
+                        if (bestKey != null && bestDist <= engine.getFuzzyDistance(qFiltered)) {
                             val possible = coreTemplates[bestKey]
                             if (!possible.isNullOrEmpty()) {
                                 val chosen = possible.random()
@@ -627,7 +631,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     .map { it.key }
                     .take(MAX_CANDIDATES_FOR_LEV)
             } else {
-                val maxDist = getFuzzyDistance(qFiltered)
+                val maxDist = engine.getFuzzyDistance(qFiltered)
                 templatesSnapshot.keys.filter { abs(it.length - qFiltered.length) <= maxDist }
                     .take(MAX_CANDIDATES_FOR_LEV)
             }
@@ -635,11 +639,11 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             var bestByJaccard: String? = null
             var bestJaccard = 0.0
             val qSet = qTokens.toSet()
-            val jaccardThreshold = getJaccardThreshold(qFiltered)
+            val jaccardThreshold = engine.getJaccardThreshold(qFiltered)
             for (key in candidates) {
                 val keyTokens = filterStopwordsAndMapSynonymsLocal(key).first.toSet()
                 if (keyTokens.isEmpty()) continue
-                val weightedJ = weightedJaccard(qSet, keyTokens)
+                val weightedJ = engine.weightedJaccard(qSet, keyTokens)
                 if (weightedJ > bestJaccard) {
                     bestJaccard = weightedJ
                     bestByJaccard = key
@@ -661,16 +665,16 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             var bestKey: String? = null
             var bestDist = Int.MAX_VALUE
             for (key in candidates) {
-                val maxDist = getFuzzyDistance(qFiltered)
+                val maxDist = engine.getFuzzyDistance(qFiltered)
                 if (abs(key.length - qFiltered.length) > maxDist + 1) continue
-                val d = levenshtein(qFiltered, key, qFiltered)
+                val d = engine.levenshtein(qFiltered, key, qFiltered)
                 if (d < bestDist) {
                     bestDist = d
                     bestKey = key
                 }
                 if (bestDist == 0) break
             }
-            val maxDistLocal = getFuzzyDistance(qFiltered)
+            val maxDistLocal = engine.getFuzzyDistance(qFiltered)
             if (bestKey != null && bestDist <= maxDistLocal) {
                 val possible = templatesSnapshot[bestKey]
                 if (!possible.isNullOrEmpty()) {
@@ -684,6 +688,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 }
             }
 
+            // далее — код поиска контекста и core-файлов (использует engine там, где нужно)
             val lower = normalizeLocal(qFiltered)
             val detectedContext = detectContext(lower)
             if (detectedContext != null) {
@@ -730,7 +735,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                         .map { it.key }
                         .take(MAX_CANDIDATES_FOR_LEV)
                 } else {
-                    val md = getFuzzyDistance(qFiltered)
+                    val md = engine.getFuzzyDistance(qFiltered)
                     localTemplates.keys.filter { abs(it.length - qFiltered.length) <= md }
                         .take(MAX_CANDIDATES_FOR_LEV)
                 }
@@ -740,7 +745,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 for (key in localCandidates) {
                     val keyTokens = filterStopwordsAndMapSynonymsLocal(key).first.toSet()
                     if (keyTokens.isEmpty()) continue
-                    val weightedJ = weightedJaccard(qSetLocal, keyTokens)
+                    val weightedJ = engine.weightedJaccard(qSetLocal, keyTokens)
                     if (weightedJ > bestLocalJ) {
                         bestLocalJ = weightedJ
                         bestLocal = key
@@ -761,16 +766,16 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 var bestLocalKey: String? = null
                 var bestLocalDist = Int.MAX_VALUE
                 for (key in localCandidates) {
-                    val maxD = getFuzzyDistance(qFiltered)
+                    val maxD = engine.getFuzzyDistance(qFiltered)
                     if (abs(key.length - qFiltered.length) > maxD + 1) continue
-                    val d = levenshtein(qFiltered, key, qFiltered)
+                    val d = engine.levenshtein(qFiltered, key, qFiltered)
                     if (d < bestLocalDist) {
                         bestLocalDist = d
                         bestLocalKey = key
                     }
                     if (bestLocalDist == 0) break
                 }
-                if (bestLocalKey != null && bestLocalDist <= getFuzzyDistance(qFiltered)) {
+                if (bestLocalKey != null && bestLocalDist <= engine.getFuzzyDistance(qFiltered)) {
                     val possible = localTemplates[bestLocalKey]
                     if (!possible.isNullOrEmpty()) {
                         val response = possible.random()
@@ -823,36 +828,20 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
     }
 
+    // --- Делегирующие/адаптирующие методы, чтобы не менять остальной код ---
+
     private fun getJaccardThreshold(query: String): Double {
-        return when {
-            query.length <= 10 -> 0.3
-            query.length <= 20 -> 0.4
-            else -> JACCARD_THRESHOLD
-        }
+        return engine.getJaccardThreshold(query)
     }
 
     private fun computeTokenWeights() {
+        engine.computeTokenWeights()
         tokenWeights.clear()
-        val tokenCounts = HashMap<String, Int>()
-        var totalTokens = 0
-        for (key in templatesMap.keys) {
-            val tokens = filterStopwordsAndMapSynonyms(key).first
-            for (token in tokens) {
-                tokenCounts[token] = tokenCounts.getOrDefault(token, 0) + 1
-                totalTokens++
-            }
-        }
-        tokenCounts.forEach { (token, count) ->
-            tokenWeights[token] = if (totalTokens == 0) 1.0 else log10(totalTokens.toDouble() / count).coerceAtLeast(1.0)
-        }
+        tokenWeights.putAll(engine.tokenWeights)
     }
 
     private fun weightedJaccard(qSet: Set<String>, keyTokens: Set<String>): Double {
-        val intersection = qSet.intersect(keyTokens)
-        val union = qSet.union(keyTokens)
-        val interWeight = intersection.sumOf { tokenWeights.getOrDefault(it, 1.0) }
-        val unionWeight = union.sumOf { tokenWeights.getOrDefault(it, 1.0) }
-        return if (unionWeight == 0.0) 0.0 else interWeight / unionWeight
+        return engine.weightedJaccard(qSet, keyTokens)
     }
 
     private fun cacheResponse(qKey: String, response: String) {
@@ -860,10 +849,10 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     }
 
     private fun detectContext(input: String): String? {
-        val tokens = tokenize(input)
+        val tokens = engine.tokenize(input)
         val contextScores = HashMap<String, Int>()
         for ((keyword, value) in contextMap) {
-            val keywordTokens = tokenize(keyword)
+            val keywordTokens = engine.tokenize(keyword)
             val matches = tokens.count { it in keywordTokens }
             if (matches > 0) contextScores[value] = contextScores.getOrDefault(value, 0) + matches
         }
@@ -950,67 +939,12 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
     }
 
-    private fun normalizeText(s: String): String {
-        val lower = s.lowercase(Locale.getDefault())
-        val cleaned = lower.replace(Regex("[^\\p{L}\\p{Nd}\\s]"), " ")
-        val collapsed = cleaned.replace(Regex("\\s+"), " ").trim()
-        return collapsed
-    }
-
-    private fun tokenize(s: String): List<String> {
-        if (s.isBlank()) return emptyList()
-        return s.split(Regex("\\s+")).map { it.trim() }.filter { it.isNotEmpty() }
-    }
-
-    private fun loadSynonymsAndStopwords() {
-        synonymsMap.clear()
-        stopwords.clear()
-        val uri = folderUri ?: return
-        try {
-            val dir = DocumentFile.fromTreeUri(this, uri) ?: return
-            val synFile = dir.findFile("synonims.txt")
-            if (synFile != null && synFile.exists()) {
-                contentResolver.openInputStream(synFile.uri)?.bufferedReader()?.use { reader ->
-                    reader.forEachLine { raw ->
-                        var l = raw.trim()
-                        if (l.isEmpty()) return@forEachLine
-                        if (l.startsWith("*") && l.endsWith("*") && l.length > 1) {
-                            l = l.substring(1, l.length - 1)
-                        }
-                        val parts = l.split(";").map { normalizeText(it).trim() }.filter { it.isNotEmpty() }
-                        if (parts.isEmpty()) return@forEachLine
-                        val canonical = parts.last()
-                        for (p in parts) {
-                            synonymsMap[p] = canonical
-                        }
-                    }
-                }
-            }
-            val stopFile = dir.findFile("stopwords.txt")
-            if (stopFile != null && stopFile.exists()) {
-                contentResolver.openInputStream(stopFile.uri)?.bufferedReader()?.use { reader ->
-                    val all = reader.readText()
-                    if (all.isNotEmpty()) {
-                        val parts = all.split("^").map { normalizeText(it).trim() }.filter { it.isNotEmpty() }
-                        for (p in parts) stopwords.add(p)
-                    }
-                }
-            }
-        } catch (e: Exception) {
-            Log.e("ChatActivity", "Error loading synonyms/stopwords", e)
-        }
-    }
-
-    private fun filterStopwordsAndMapSynonyms(input: String): Pair<List<String>, String> {
-        val toks = tokenize(input)
-        val mapped = toks.map { tok ->
-            val n = normalizeText(tok)
-            val s = synonymsMap[n] ?: n
-            s
-        }.filter { it.isNotEmpty() && !stopwords.contains(it) }
-        val joined = mapped.joinToString(" ")
-        return Pair(mapped, joined)
-    }
+    // Делегируем normalize/tokenize/filter к engine, чтобы не менять много вызовов по коду
+    private fun normalizeText(s: String): String = engine.normalizeText(s)
+    private fun tokenize(s: String): List<String> = engine.tokenize(s)
+    private fun filterStopwordsAndMapSynonyms(input: String): Pair<List<String>, String> = engine.filterStopwordsAndMapSynonyms(input)
+    private fun getFuzzyDistance(word: String): Int = engine.getFuzzyDistance(word)
+    private fun levenshtein(s: String, t: String, qFiltered: String): Int = engine.levenshtein(s, t, qFiltered)
 
     private fun rebuildInvertedIndex() {
         invertedIndex.clear()
@@ -1036,35 +970,6 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             leastUsed.forEach { templatesMap.remove(it) }
             Log.d("ChatActivity", "Trimmed templatesMap to $MAX_TEMPLATES_SIZE entries")
         }
-    }
-
-    private fun levenshtein(s: String, t: String, qFiltered: String): Int {
-        if (s == t) return 0
-        val n = s.length
-        val m = t.length
-        if (n == 0) return m
-        if (m == 0) return n
-        val maxDist = getFuzzyDistance(qFiltered)
-        if (abs(n - m) > maxDist + 2) return Int.MAX_VALUE / 2
-        val prev = IntArray(m + 1) { it }
-        val curr = IntArray(m + 1)
-        for (i in 1..n) {
-            curr[0] = i
-            var minInRow = curr[0]
-            val si = s[i - 1]
-            for (j in 1..m) {
-                val cost = if (si == t[j - 1]) 0 else 1
-                val deletion = prev[j] + 1
-                val insertion = curr[j - 1] + 1
-                val substitution = prev[j - 1] + cost
-                curr[j] = min(min(deletion, insertion), substitution)
-                if (curr[j] < minInRow) minInRow = curr[j]
-            }
-            val maxDistRow = getFuzzyDistance(qFiltered)
-            if (minInRow > maxDistRow + 2) return Int.MAX_VALUE / 2
-            for (k in 0..m) prev[k] = curr[k]
-        }
-        return prev[m]
     }
 
     private fun addChatMessage(sender: String, text: String) {
@@ -1390,9 +1295,9 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         contextMap.clear()
         keywordResponses.clear()
         mascotList.clear()
-        val t1 = normalizeText("привет")
+        val t1 = engine.normalizeText("привет")
         templatesMap[t1] = mutableListOf("Привет! Чем могу помочь?", "Здравствуй!")
-        val t2 = normalizeText("как дела")
+        val t2 = engine.normalizeText("как дела")
         templatesMap[t2] = mutableListOf("Всё отлично, а у тебя?", "Нормально, как дела?")
         keywordResponses["спасибо"] = mutableListOf("Рад, что помог!", "Всегда пожалуйста!")
     }
@@ -1401,7 +1306,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         val suggestions = mutableListOf<String>()
         suggestions.addAll(templatesMap.keys)
         for (s in fallback) {
-            val low = normalizeText(s)
+            val low = engine.normalizeText(s)
             if (!suggestions.contains(low)) suggestions.add(low)
         }
         if (adapter == null) {
