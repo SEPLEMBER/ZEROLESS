@@ -13,6 +13,7 @@ import android.os.Looper
 import android.preference.PreferenceManager
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
+import android.text.format.DateFormat
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
@@ -62,7 +63,6 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private lateinit var scrollView: ScrollView
     private lateinit var queryInput: AutoCompleteTextView
     private var envelopeInputButton: ImageButton? = null
-    private var mascotTopImage: ImageView? = null
     private var btnLock: ImageButton? = null
     private var btnTrash: ImageButton? = null
     private var btnEnvelopeTop: ImageButton? = null
@@ -98,8 +98,6 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private val random = Random()
     private val queryCountMap = HashMap<String, Int>()
     private var lastSendTime = 0L
-    private val timeHandler = Handler(Looper.getMainLooper())
-    private var timeUpdaterRunnable: Runnable? = null
 
     init {
         antiSpamResponses.addAll(
@@ -223,9 +221,6 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             }
         }
         idleCheckRunnable?.let { dialogHandler.postDelayed(it, 5000) }
-
-        loadMascotTopImage()
-        mascotTopImage?.visibility = View.GONE
     }
 
     override fun onInit(status: Int) {
@@ -242,23 +237,6 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         leftLayout.removeAllViews()
         leftLayout.orientation = LinearLayout.HORIZONTAL
         leftLayout.gravity = Gravity.CENTER_VERTICAL
-
-        val spacerIndex = 1
-        val spacer = topBar.getChildAt(spacerIndex)
-        topBar.removeViewAt(spacerIndex)
-        timeTextView = TextView(this).apply {
-            text = "--:--"
-            textSize = 20f
-            setTextColor(Color.parseColor("#FFA500"))
-            gravity = Gravity.CENTER
-            val lp = LinearLayout.LayoutParams(
-                0,
-                dpToPx(56),
-                1f
-            )
-            layoutParams = lp
-        }
-        topBar.addView(timeTextView, spacerIndex)
     }
 
     override fun onResume() {
@@ -271,19 +249,16 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             dialogHandler.postDelayed(it, 5000)
         }
         loadToolbarIcons()
-        startTimeUpdater()
     }
 
     override fun onPause() {
         super.onPause()
         dialogHandler.removeCallbacksAndMessages(null)
-        stopTimeUpdater()
     }
 
     override fun onDestroy() {
         super.onDestroy()
         dialogHandler.removeCallbacksAndMessages(null)
-        stopTimeUpdater()
         tts?.shutdown()
         tts = null
     }
@@ -324,37 +299,6 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         } catch (e: Exception) {
             e.printStackTrace()
         }
-    }
-
-    private fun loadMascotTopImage() {
-        val uri = folderUri ?: return
-        try {
-            val dir = DocumentFile.fromTreeUri(this, uri) ?: return
-            val candidates = listOf("${currentMascotName.lowercase(Locale.getDefault())}.png", "mascot_top.png", currentMascotIcon)
-            for (name in candidates) {
-                val file = dir.findFile(name)
-                if (file != null && file.exists()) {
-                    contentResolver.openInputStream(file.uri)?.use { ins ->
-                        val bmp = BitmapFactory.decodeStream(ins)
-                        if (mascotTopImage == null) {
-                            mascotTopImage = ImageView(this).apply {
-                                val size = dpToPx(120)
-                                layoutParams = LinearLayout.LayoutParams(size, size).apply {
-                                    gravity = Gravity.CENTER_HORIZONTAL
-                                    topMargin = dpToPx(8)
-                                }
-                                scaleType = ImageView.ScaleType.CENTER_CROP
-                                adjustViewBounds = true
-                            }
-                            val root = findViewById<ViewGroup>(android.R.id.content)
-                            root.addView(mascotTopImage, 0)
-                        }
-                        mascotTopImage?.setImageBitmap(bmp)
-                        return
-                    }
-                }
-            }
-        } catch (_: Exception) {}
     }
 
     private fun processUserQuery(userInput: String) {
@@ -550,18 +494,20 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
             if (subqueryResponses.isNotEmpty()) {
                 val combined = subqueryResponses.joinToString(". ")
-                return@launch withContext(Dispatchers.Main) {
+                withContext(Dispatchers.Main) {
                     addChatMessage(currentMascotName, combined)
                     startIdleTimer()
                 }
+                return@launch
             }
 
             for ((keyword, responses) in keywordResponsesSnapshot) {
                 if (qFiltered.contains(keyword) && responses.isNotEmpty()) {
-                    return@launch withContext(Dispatchers.Main) {
+                    withContext(Dispatchers.Main) {
                         addChatMessage(currentMascotName, responses.random())
                         startIdleTimer()
                     }
+                    return@launch
                 }
             }
 
@@ -604,10 +550,11 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             if (bestByJaccard != null && bestJaccard >= JACCARD_THRESHOLD) {
                 val possible = templatesSnapshot[bestByJaccard]
                 if (!possible.isNullOrEmpty()) {
-                    return@launch withContext(Dispatchers.Main) {
+                    withContext(Dispatchers.Main) {
                         addChatMessage(currentMascotName, possible.random())
                         startIdleTimer()
                     }
+                    return@launch
                 }
             }
 
@@ -624,14 +571,15 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 }
                 if (bestDist == 0) break
             }
-            val maxDist = getFuzzyDistance(qFiltered)
-            if (bestKey != null && bestDist <= maxDist) {
+            val maxDistLocal = getFuzzyDistance(qFiltered)
+            if (bestKey != null && bestDist <= maxDistLocal) {
                 val possible = templatesSnapshot[bestKey]
                 if (!possible.isNullOrEmpty()) {
-                    return@launch withContext(Dispatchers.Main) {
+                    withContext(Dispatchers.Main) {
                         addChatMessage(currentMascotName, possible.random())
                         startIdleTimer()
                     }
+                    return@launch
                 }
             }
 
@@ -639,7 +587,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             val lower = normalizeLocal(qFiltered)
             for ((keyword, value) in contextMapSnapshot) {
                 if (lower.contains(keyword)) {
-                    return@launch withContext(Dispatchers.Main) {
+                    withContext(Dispatchers.Main) {
                         // если надо — переключаем глобальный контекст (UI thread)
                         if (value != currentContext) {
                             currentContext = value
@@ -647,102 +595,105 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                             rebuildInvertedIndex()
                             updateAutoComplete()
                         }
-                    }.let {
-                        // после переключения — в background проверим тематический файл на совпадения
-                        val (localTemplates, localKeywords) = parseTemplatesFromFile(value)
-                        // сначала точное совпадение в тематическом файле
-                        localTemplates[ qFiltered ]?.let { possible ->
-                            if (possible.isNotEmpty()) {
-                                return@launch withContext(Dispatchers.Main) {
-                                    addChatMessage(currentMascotName, possible.random())
-                                    startIdleTimer()
-                                }
+                    }
+                    // после переключения — в background проверим тематический файл на совпадения
+                    val (localTemplates, localKeywords) = parseTemplatesFromFile(value)
+                    // сначала точное совпадение в тематическом файле
+                    localTemplates[qFiltered]?.let { possible ->
+                        if (possible.isNotEmpty()) {
+                            withContext(Dispatchers.Main) {
+                                addChatMessage(currentMascotName, possible.random())
+                                startIdleTimer()
                             }
-                        }
-                        // построим локальный inverted index для тематического файла
-                        val localInverted = HashMap<String, MutableList<String>>()
-                        for ((k, v) in localTemplates) {
-                            val toks = filterStopwordsAndMapSynonymsLocal(k).first
-                            for (t in toks) {
-                                val list = localInverted.getOrPut(t) { mutableListOf() }
-                                if (!list.contains(k)) list.add(k)
-                            }
-                        }
-                        // кандидаты из локального inverted
-                        val localCandidateCounts = HashMap<String, Int>()
-                        val tokens = qTokens
-                        for (tok in tokens) {
-                            localInverted[tok]?.forEach { trig ->
-                                localCandidateCounts[trig] = localCandidateCounts.getOrDefault(trig, 0) + 1
-                            }
-                        }
-                        val localCandidates: List<String> = if (localCandidateCounts.isNotEmpty()) {
-                            localCandidateCounts.entries
-                                .filter { it.value >= CANDIDATE_TOKEN_THRESHOLD }
-                                .sortedByDescending { it.value }
-                                .map { it.key }
-                                .take(MAX_CANDIDATES_FOR_LEV)
-                        } else {
-                            val md = getFuzzyDistance(qFiltered)
-                            localTemplates.keys.filter { abs(it.length - qFiltered.length) <= md }
-                                .take(MAX_CANDIDATES_FOR_LEV)
-                        }
-                        // Jaccard local
-                        var bestLocal: String? = null
-                        var bestLocalJ = 0.0
-                        val qSetLocal = tokens.toSet()
-                        for (key in localCandidates) {
-                            val keyTokens = filterStopwordsAndMapSynonymsLocal(key).first.toSet()
-                            if (keyTokens.isEmpty()) continue
-                            val inter = qSetLocal.intersect(keyTokens).size.toDouble()
-                            val union = qSetLocal.union(keyTokens).size.toDouble()
-                            val j = if (union == 0.0) 0.0 else inter / union
-                            if (j > bestLocalJ) {
-                                bestLocalJ = j
-                                bestLocal = key
-                            }
-                        }
-                        if (bestLocal != null && bestLocalJ >= JACCARD_THRESHOLD) {
-                            val possible = localTemplates[bestLocal]
-                            if (!possible.isNullOrEmpty()) {
-                                return@launch withContext(Dispatchers.Main) {
-                                    addChatMessage(currentMascotName, possible.random())
-                                    startIdleTimer()
-                                }
-                            }
-                        }
-                        // Levenshtein local
-                        var bestLocalKey: String? = null
-                        var bestLocalDist = Int.MAX_VALUE
-                        for (key in localCandidates) {
-                            val maxD = getFuzzyDistance(qFiltered)
-                            if (abs(key.length - qFiltered.length) > maxD + 1) continue
-                            val d = levenshtein(qFiltered, key, qFiltered)
-                            if (d < bestLocalDist) {
-                                bestLocalDist = d
-                                bestLocalKey = key
-                            }
-                            if (bestLocalDist == 0) break
-                        }
-                        if (bestLocalKey != null && bestLocalDist <= getFuzzyDistance(qFiltered)) {
-                            val possible = localTemplates[bestLocalKey]
-                            if (!possible.isNullOrEmpty()) {
-                                return@launch withContext(Dispatchers.Main) {
-                                    addChatMessage(currentMascotName, possible.random())
-                                    startIdleTimer()
-                                }
-                            }
-                        }
-                        // если ничего не нашлось — вернём дефолтный ответ
-                        return@launch withContext(Dispatchers.Main) {
-                            addChatMessage(currentMascotName, getDummyResponse(qOrig))
-                            startIdleTimer()
+                            return@launch
                         }
                     }
+                    // построим локальный inverted index для тематического файла
+                    val localInverted = HashMap<String, MutableList<String>>()
+                    for ((k, v) in localTemplates) {
+                        val toks = filterStopwordsAndMapSynonymsLocal(k).first
+                        for (t in toks) {
+                            val list = localInverted.getOrPut(t) { mutableListOf() }
+                            if (!list.contains(k)) list.add(k)
+                        }
+                    }
+                    // кандидаты из локального inverted
+                    val localCandidateCounts = HashMap<String, Int>()
+                    val tokensLocal = qTokens
+                    for (tok in tokensLocal) {
+                        localInverted[tok]?.forEach { trig ->
+                            localCandidateCounts[trig] = localCandidateCounts.getOrDefault(trig, 0) + 1
+                        }
+                    }
+                    val localCandidates: List<String> = if (localCandidateCounts.isNotEmpty()) {
+                        localCandidateCounts.entries
+                            .filter { it.value >= CANDIDATE_TOKEN_THRESHOLD }
+                            .sortedByDescending { it.value }
+                            .map { it.key }
+                            .take(MAX_CANDIDATES_FOR_LEV)
+                    } else {
+                        val md = getFuzzyDistance(qFiltered)
+                        localTemplates.keys.filter { abs(it.length - qFiltered.length) <= md }
+                            .take(MAX_CANDIDATES_FOR_LEV)
+                    }
+                    // Jaccard local
+                    var bestLocal: String? = null
+                    var bestLocalJ = 0.0
+                    val qSetLocal = tokensLocal.toSet()
+                    for (key in localCandidates) {
+                        val keyTokens = filterStopwordsAndMapSynonymsLocal(key).first.toSet()
+                        if (keyTokens.isEmpty()) continue
+                        val inter = qSetLocal.intersect(keyTokens).size.toDouble()
+                        val union = qSetLocal.union(keyTokens).size.toDouble()
+                        val j = if (union == 0.0) 0.0 else inter / union
+                        if (j > bestLocalJ) {
+                            bestLocalJ = j
+                            bestLocal = key
+                        }
+                    }
+                    if (bestLocal != null && bestLocalJ >= JACCARD_THRESHOLD) {
+                        val possible = localTemplates[bestLocal]
+                        if (!possible.isNullOrEmpty()) {
+                            withContext(Dispatchers.Main) {
+                                addChatMessage(currentMascotName, possible.random())
+                                startIdleTimer()
+                            }
+                            return@launch
+                        }
+                    }
+                    // Levenshtein local
+                    var bestLocalKey: String? = null
+                    var bestLocalDist = Int.MAX_VALUE
+                    for (key in localCandidates) {
+                        val maxD = getFuzzyDistance(qFiltered)
+                        if (abs(key.length - qFiltered.length) > maxD + 1) continue
+                        val d = levenshtein(qFiltered, key, qFiltered)
+                        if (d < bestLocalDist) {
+                            bestLocalDist = d
+                            bestLocalKey = key
+                        }
+                        if (bestLocalDist == 0) break
+                    }
+                    if (bestLocalKey != null && bestLocalDist <= getFuzzyDistance(qFiltered)) {
+                        val possible = localTemplates[bestLocalKey]
+                        if (!possible.isNullOrEmpty()) {
+                            withContext(Dispatchers.Main) {
+                                addChatMessage(currentMascotName, possible.random())
+                                startIdleTimer()
+                            }
+                            return@launch
+                        }
+                    }
+                    // если ничего не нашлось — вернём дефолтный ответ
+                    withContext(Dispatchers.Main) {
+                        addChatMessage(currentMascotName, getDummyResponse(qOrig))
+                        startIdleTimer()
+                    }
+                    return@launch
                 }
             }
 
-            return@launch withContext(Dispatchers.Main) {
+            withContext(Dispatchers.Main) {
                 addChatMessage(currentMascotName, getDummyResponse(qOrig))
                 startIdleTimer()
             }
@@ -995,13 +946,13 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private fun speakText(text: String) {
         tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "message_${System.currentTimeMillis()}")
-  }
+    }
 
     private fun loadAndSendOuchMessage(mascot: String) {
         val uri = folderUri ?: return
         try {
             val dir = DocumentFile.fromTreeUri(this, uri) ?: return
-            val mascotOuch = dir.findFile("${mascot.lowercase(Locale.getDefault())}.txt") ?:                     dir.findFile("ouch.txt")
+            val mascotOuch = dir.findFile("${mascot.lowercase(Locale.getDefault())}.txt") ?: dir.findFile("ouch.txt")
             if (mascotOuch != null && mascotOuch.exists()) {
                 contentResolver.openInputStream(mascotOuch.uri)?.bufferedReader()?.use { reader ->
                     val allText = reader.readText()
@@ -1067,7 +1018,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             } catch (_: Exception) {
                 setTextColor(Color.WHITE)
             }
-                setOnClickListener { speakText(text) }
+            setOnClickListener { speakText(text) }
         }
         container.addView(tvSender)
         container.addView(tv)
@@ -1309,8 +1260,6 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private fun updateUI(mascotName: String, mascotIcon: String, themeColor: String, themeBackground: String) {
         runOnUi {
             title = "Pawstribe - $mascotName"
-            loadMascotTopImage()
-            mascotTopImage?.visibility = View.GONE
             try {
                 messagesContainer.setBackgroundColor(Color.parseColor(themeBackground))
             } catch (_: Exception) {}
@@ -1343,30 +1292,6 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private fun runOnUi(block: () -> Unit) {
         if (Looper.myLooper() == Looper.getMainLooper()) block()
         else runOnUiThread(block)
-    }
-
-    private var timeTextView: TextView? = null
-
-    private fun startTimeUpdater() {
-        timeUpdaterRunnable = object : Runnable {
-            override fun run() {
-                val now = Calendar.getInstance()
-                val timeFormat = if (DateFormat.is24HourFormat(this@ChatActivity)) {
-                    "HH:mm"
-                } else {
-                    "h:mm a"
-                }
-                val sdf = SimpleDateFormat(timeFormat, Locale.getDefault())
-                timeTextView?.text = sdf.format(now.time)
-                timeHandler.postDelayed(this, 60000) // Update every minute
-            }
-        }
-        timeUpdaterRunnable?.let { timeHandler.post(it) }
-    }
-
-    private fun stopTimeUpdater() {
-        timeUpdaterRunnable?.let { timeHandler.removeCallbacks(it) }
-        timeUpdaterRunnable = null
     }
 
     private fun loadTimeToSleepResponse(): String? {
@@ -1411,68 +1336,6 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
     }
 }
-
-    private fun loadTimeToSleepResponse(): String? {
-        val uri = folderUri ?: return null
-        try {
-            val dir = DocumentFile.fromTreeUri(this, uri) ?: return null
-            val sleepFile = dir.findFile("timetosleep.txt")
-            if (sleepFile != null && sleepFile.exists()) {
-                contentResolver.openInputStream(sleepFile.uri)?.bufferedReader()?.use { reader ->
-                    val allText = reader.readText()
-                    val responses = allText.split("|").map { it.trim() }.filter { it.isNotEmpty() }
-                    if (responses.isNotEmpty()) {
-                        return responses.random()
-                    }
-                }
-            }
-        } catch (e: Exception) {
-            showCustomToast("Ошибка загрузки timetosleep.txt: ${e.message}")
-        }
-        return null
-    }
-
-    private fun processDateTimeQuery(query: String): String? {
-        val calendar = Calendar.getInstance()
-        val dateFormat = SimpleDateFormat("dd MMMM yyyy", Locale("ru"))
-        val dayFormat = SimpleDateFormat("EEEE", Locale("ru"))
-        val yearFormat = SimpleDateFormat("yyyy", Locale("ru"))
-        val currentDate = dateFormat.format(calendar.time)
-        val currentDay = dayFormat.format(calendar.time)
-        val currentYear = yearFormat.format(calendar.time)
-        val uri = folderUri ?: return getDefaultDateTimeResponse(query, currentDate, currentDay, currentYear)
-        try {
-            val dir = DocumentFile.fromTreeUri(this, uri) ?: return getDefaultDateTimeResponse(query, currentDate, currentDay, currentYear)
-            val cldsysFile = dir.findFile("cldsys.txt")
-            if (cldsysFile != null && cldsysFile.exists()) {
-                contentResolver.openInputStream(cldsysFile.uri)?.bufferedReader()?.use { reader ->
-                    val allText = reader.readText()
-                    val responses = allText.split("|").map { it.trim() }.filter { it.isNotEmpty() }
-                    if (responses.isNotEmpty()) {
-                        val response = responses.random()
-                        return when {
-                            query.contains("число") -> response.replace("{date}", currentDate)
-                            query.contains("день") -> response.replace("{day}", currentDay)
-                            query.contains("год") -> response.replace("{year}", currentYear)
-                            else -> response.replace("{date}", currentDate)
-                        }
-                    }
-                }
-            }
-        } catch (e: Exception) {
-            showCustomToast("Ошибка загрузки cldsys.txt: ${e.message}")
-        }
-        return getDefaultDateTimeResponse(query, currentDate, currentDay, currentYear)
-    }
-
-    private fun getDefaultDateTimeResponse(query: String, date: String, day: String, year: String): String {
-        return when {
-            query.contains("число") -> "Сегодня $date."
-            query.contains("день") -> "Сегодня $day."
-            query.contains("год") -> "Сейчас $year год."
-            else -> "Сегодня $date, $day."
-        }
-    }
 
     private fun startTimeUpdater() {
         stopTimeUpdater()
