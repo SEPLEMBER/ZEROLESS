@@ -440,6 +440,87 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 return Pair(localTemplates, localKeywords)
             }
 
+            // --- Добавлена локальная функция поиска по core файлам ---
+            fun searchInCoreFiles(qFiltered: String, qTokens: List<String>, qSet: Set<String>, jaccardThreshold: Double): String? {
+                val uriLocal = folderUri ?: return null
+                try {
+                    val dir = DocumentFile.fromTreeUri(this@ChatActivity, uriLocal) ?: return null
+                    
+                    // Поиск по core1.txt - core9.txt
+                    for (i in 1..9) {
+                        val filename = "core$i.txt"
+                        val file = dir.findFile(filename) ?: continue
+                        if (!file.exists()) continue
+                        
+                        val (coreTemplates, coreKeywords) = parseTemplatesFromFile(filename)
+                        if (coreTemplates.isEmpty() && coreKeywords.isEmpty()) continue
+                        
+                        // Точный поиск
+                        coreTemplates[qFiltered]?.let { possible ->
+                            if (possible.isNotEmpty()) {
+                                return possible.random()
+                            }
+                        }
+                        
+                        // Поиск по ключевым словам
+                        for ((keyword, responses) in coreKeywords) {
+                            if (qFiltered.contains(keyword) && responses.isNotEmpty()) {
+                                return responses.random()
+                            }
+                        }
+                        
+                        // Jaccard поиск
+                        var bestByJaccard: String? = null
+                        var bestJaccard = 0.0
+                        for (key in coreTemplates.keys) {
+                            val keyTokens = filterStopwordsAndMapSynonymsLocal(key).first.toSet()
+                            if (keyTokens.isEmpty()) continue
+                            val weightedJ = weightedJaccard(qSet, keyTokens)
+                            if (weightedJ > bestJaccard) {
+                                bestJaccard = weightedJ
+                                bestByJaccard = key
+                            }
+                        }
+                        if (bestByJaccard != null && bestJaccard >= jaccardThreshold) {
+                            val possible = coreTemplates[bestByJaccard]
+                            if (!possible.isNullOrEmpty()) {
+                                return possible.random()
+                            }
+                        }
+                        
+                        // Levenshtein поиск
+                        var bestKey: String? = null
+                        var bestDist = Int.MAX_VALUE
+                        val candidates = coreTemplates.keys.filter { abs(it.length - qFiltered.length) <= getFuzzyDistance(qFiltered) }
+                            .take(MAX_CANDIDATES_FOR_LEV)
+                        
+                        for (key in candidates) {
+                            val maxDist = getFuzzyDistance(qFiltered)
+                            if (abs(key.length - qFiltered.length) > maxDist + 1) continue
+                            val d = levenshtein(qFiltered, key, qFiltered)
+                            if (d < bestDist) {
+                                bestDist = d
+                                bestKey = key
+                            }
+                            if (bestDist == 0) break
+                        }
+                        
+                        if (bestKey != null && bestDist <= getFuzzyDistance(qFiltered)) {
+                            val possible = coreTemplates[bestKey]
+                            if (!possible.isNullOrEmpty()) {
+                                return possible.random()
+                            }
+                        }
+                    }
+                    
+                    return null
+                } catch (e: Exception) {
+                    Log.e("ChatActivity", "Error searching in core files", e)
+                    return null
+                }
+            }
+            // --- конец searchInCoreFiles ---
+
             var answered = false
             val subqueryResponses = mutableListOf<String>()
             val processedSubqueries = mutableSetOf<String>()
@@ -676,11 +757,34 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                         return@launch
                     }
                 }
+
+                // --- ЗАМЕНА: перед dummy — поиск по core файлам в контексте ---
+                val coreResult = searchInCoreFiles(qFiltered, tokensLocal, qSetLocal, jaccardThreshold)
+                if (coreResult != null) {
+                    withContext(Dispatchers.Main) {
+                        addChatMessage(currentMascotName, coreResult)
+                        startIdleTimer()
+                        cacheResponse(qKeyForCount, coreResult)
+                    }
+                    return@launch
+                }
+
                 val dummy = getDummyResponse(qOrig)
                 withContext(Dispatchers.Main) {
                     addChatMessage(currentMascotName, dummy)
                     startIdleTimer()
                     cacheResponse(qKeyForCount, dummy)
+                }
+                return@launch
+            }
+
+            // --- ЗАМЕНА: перед глобальным dummy — поиск по core файлам (если не найдено в base) ---
+            val coreResult = searchInCoreFiles(qFiltered, qTokens, qSet, jaccardThreshold)
+            if (coreResult != null) {
+                withContext(Dispatchers.Main) {
+                    addChatMessage(currentMascotName, coreResult)
+                    startIdleTimer()
+                    cacheResponse(qKeyForCount, coreResult)
                 }
                 return@launch
             }
