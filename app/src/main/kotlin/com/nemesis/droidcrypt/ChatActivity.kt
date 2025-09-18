@@ -472,7 +472,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 return Pair(localTemplates, localKeywords)
             }
 
-            // --- New: detect "что такое" pattern and answer per term (with context remembered)
+            // --- New: detect "что такое" pattern and answer per term using base.txt templates + synonims
             val normalizedOrig = normalizeLocal(qOrigRaw)
             if (normalizedOrig.startsWith("что такое")) {
                 val after = normalizedOrig.removePrefix("что такое").trim()
@@ -480,49 +480,74 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     // Split terms by 'и', commas or semicolons
                     val termParts = after.split(Regex("\\s*(?:и|,|;)\\s*")).map { it.trim() }.filter { it.isNotEmpty() }
                     if (termParts.isNotEmpty()) {
-                        // remember first topic for context resolution
-                        val firstTermRaw = termParts.first()
-                        val mappedFirst = filterStopwordsAndMapSynonymsLocal(firstTermRaw).second
-                        if (mappedFirst.isNotEmpty()) {
-                            lastTopic = mappedFirst // store canonicalized topic
-                        } else {
-                            lastTopic = filterStopwordsAndMapSynonymsLocal(firstTermRaw).first.firstOrNull()
+                        // Parse base.txt templates/keywords (so behaviour comes from base.txt)
+                        val (baseTemplates, baseKeywords) = parseTemplatesFromFile("base.txt")
+
+                        // If synonyms/stopwords loaded, we can canonicalize terms
+                        val canonicalTerms = termParts.map { tp ->
+                            val mapped = filterStopwordsAndMapSynonymsLocal(tp).second
+                            if (mapped.isNotEmpty()) mapped else tp
                         }
 
-                        for ((idx, term) in termParts.withIndex()) {
-                            val keyForLookup = filterStopwordsAndMapSynonymsLocal(term).second.ifEmpty { term }
-                            // try templates global
+                        // Remember first canonical topic for context recall
+                        val firstTopic = canonicalTerms.firstOrNull()
+                        if (!firstTopic.isNullOrEmpty()) {
+                            lastTopic = firstTopic
+                        }
+
+                        for ((idx, rawTerm) in canonicalTerms.withIndex()) {
                             var respToSend: String? = null
-                            templatesSnapshot[keyForLookup]?.let { list ->
+                            val lookupKey = rawTerm
+
+                            // 1) exact match in baseTemplates
+                            baseTemplates[lookupKey]?.let { list ->
                                 if (list.isNotEmpty()) respToSend = list.random()
                             }
+
+                            // 2) exact match in baseKeywords
                             if (respToSend == null) {
-                                keywordResponsesSnapshot[keyForLookup]?.let { list ->
+                                baseKeywords[lookupKey]?.let { list ->
                                     if (list.isNotEmpty()) respToSend = list.random()
                                 }
                             }
-                            if (respToSend == null) {
-                                // fallback: try fuzzy matching on templates keys
-                                val qSet = filterStopwordsAndMapSynonymsLocal(keyForLookup).first.toSet()
-                                var bestK: String? = null; var bestJ = 0.0
-                                for (k in templatesSnapshot.keys) {
+
+                            // 3) try fuzzy match over baseTemplates keys (weighted Jaccard, synonyms-aware)
+                            if (respToSend == null && baseTemplates.isNotEmpty()) {
+                                val qSet = filterStopwordsAndMapSynonymsLocal(lookupKey).first.toSet()
+                                var bestK: String? = null
+                                var bestJ = 0.0
+                                val jaccardThresholdLocal = getJaccardThreshold(lookupKey)
+                                for (k in baseTemplates.keys) {
                                     val ktoks = filterStopwordsAndMapSynonymsLocal(k).first.toSet()
                                     if (ktoks.isEmpty()) continue
                                     val wj = weightedJaccard(qSet, ktoks)
                                     if (wj > bestJ) { bestJ = wj; bestK = k }
                                 }
-                                if (bestK != null && bestJ >= getJaccardThreshold(keyForLookup)) {
-                                    templatesSnapshot[bestK]?.let { list -> if (list.isNotEmpty()) respToSend = list.random() }
+                                if (bestK != null && bestJ >= jaccardThresholdLocal) {
+                                    baseTemplates[bestK]?.let { list -> if (list.isNotEmpty()) respToSend = list.random() }
                                 }
                             }
-                            if (respToSend == null) respToSend = "Не знаю подробно про $term, но могу поискать в шаблонах."
+
+                            // 4) fallback: try templatesMap (global) as last resort (existing behavior)
+                            if (respToSend == null) {
+                                templatesSnapshot[lookupKey]?.let { list ->
+                                    if (list.isNotEmpty()) respToSend = list.random()
+                                }
+                                if (respToSend == null) {
+                                    keywordResponsesSnapshot[lookupKey]?.let { list ->
+                                        if (list.isNotEmpty()) respToSend = list.random()
+                                    }
+                                }
+                            }
+
+                            if (respToSend == null) respToSend = "Не знаю подробно про $rawTerm, но могу поискать в шаблонах."
 
                             withContext(Dispatchers.Main) {
                                 addChatMessage(currentMascotName, applyVariables(respToSend!!))
                                 startIdleTimer()
                             }
                             // space between replies if multiple terms
-                            if (idx < termParts.size - 1) delay(SUBQUERY_RESPONSE_DELAY)
+                            if (idx < canonicalTerms.size - 1) delay(SUBQUERY_RESPONSE_DELAY)
                         }
                         return@launch
                     }
@@ -534,7 +559,9 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             val lowerRaw = qOrigRaw.lowercase(Locale.getDefault())
             if (lowerRaw.contains("меня зовут")) {
                 try {
-                    val afterPhrase = qOrigRaw.substringAfter(Regex("меня зовут"), "").trim()
+                    val marker = "меня зовут"
+                    val idx = lowerRaw.indexOf(marker)
+                    val afterPhrase = if (idx >= 0) qOrigRaw.substring(idx + marker.length).trim() else ""
                     val nameCandidate = afterPhrase.split(Regex("\\s+")).firstOrNull()?.trim()?.replace(Regex("[^\\p{L}\\-]"), "") ?: ""
                     if (nameCandidate.isNotEmpty()) {
                         val cleanName = nameCandidate.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }
