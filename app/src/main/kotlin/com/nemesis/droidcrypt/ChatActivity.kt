@@ -37,22 +37,20 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     companion object {
         private const val PREF_KEY_FOLDER_URI = "pref_folder_uri"
         private const val PREF_KEY_DISABLE_SCREENSHOTS = "pref_disable_screenshots"
-        private const val MAX_CONTEXT_SWITCH = 6 // Note: This is now unused due to logic simplification
+        private const val MAX_CONTEXT_SWITCH = 6
         private const val MAX_MESSAGES = 250
-        private const val CANDIDATE_TOKEN_THRESHOLD = 2 // минимальное число общих токенов для кандидата
-        private const val MAX_SUBQUERY_RESPONSES = 3 // Ограничение на количество подответов
-        private const val SUBQUERY_RESPONSE_DELAY = 1500L // Задержка для индикатора "печатает..."
-        private const val MAX_CANDIDATES_FOR_LEV = 25 // ограничение числа кандидатов для Levenshtein
+        private const val CANDIDATE_TOKEN_THRESHOLD = 2
+        private const val MAX_SUBQUERY_RESPONSES = 3
+        private const val SUBQUERY_RESPONSE_DELAY = 1500L
+        private const val MAX_CANDIDATES_FOR_LEV = 25
         private const val JACCARD_THRESHOLD = 0.50
-
-        // Debounce for send button
         private const val SEND_DEBOUNCE_MS = 400L
-        private const val IDLE_TIMEOUT_MS = 30000L // Таймаут для idle-сообщения
-        private const val MAX_CACHE_SIZE = 100 // Размер кэша запросов
-        private const val SPAM_WINDOW_MS = 60000L // Окно для антиспама (1 минута)
-        private const val MAX_TOKENS_PER_INDEX = 50 // Ограничение кандидатов в индексе
-        private const val MIN_TOKEN_LENGTH = 3 // Минимальная длина токена для индекса
-        private const val MAX_TEMPLATES_SIZE = 5000 // Максимальный размер templatesMap
+        private const val IDLE_TIMEOUT_MS = 30000L
+        private const val MAX_CACHE_SIZE = 100
+        private const val SPAM_WINDOW_MS = 60000L
+        private const val MAX_TOKENS_PER_INDEX = 50
+        private const val MIN_TOKEN_LENGTH = 3
+        private const val MAX_TEMPLATES_SIZE = 5000
     }
 
     private fun getFuzzyDistance(word: String): Int {
@@ -102,10 +100,13 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private var lastUserInputTime = System.currentTimeMillis()
     private val random = Random()
     private val queryCountMap = HashMap<String, Int>()
-    private val queryTimestamps = HashMap<String, MutableList<Long>>() // Для временного окна антиспама
-    private var lastSendTime = 0L
-    private val queryCache = LinkedHashMap<String, String>(MAX_CACHE_SIZE, 0.75f, true) { _, _ -> removeOldest() } // LRU-кэш
-    private val tokenWeights = HashMap<String, Double>() // Веса токенов для Jaccard
+    private val queryTimestamps = HashMap<String, MutableList<Long>>()
+    private val queryCache = object : LinkedHashMap<String, String>(MAX_CACHE_SIZE, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, String>?): Boolean {
+            return size > MAX_CACHE_SIZE
+        }
+    }
+    private val tokenWeights = HashMap<String, Double>()
 
     init {
         antiSpamResponses.addAll(
@@ -740,13 +741,6 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private fun cacheResponse(qKey: String, response: String) {
         queryCache[qKey] = response
-    }
-
-    private fun removeOldest() {
-        // Автоматическое удаление старой записи при переполнении LRU
-        if (queryCache.size > MAX_CACHE_SIZE) {
-            queryCache.remove(queryCache.keys.first())
-        }
     }
 
     private fun detectContext(input: String): String? {
