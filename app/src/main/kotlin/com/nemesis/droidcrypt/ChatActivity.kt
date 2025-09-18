@@ -1,5 +1,3 @@
-package com.nemesis.droidcrypt
-
 import android.animation.ObjectAnimator
 import android.content.*
 import android.graphics.*
@@ -440,35 +438,57 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 return Pair(localTemplates, localKeywords)
             }
 
-            // --- Добавлена локальная функция поиска по core файлам ---
+            // --- Исправленная функция поиска по core-файлам (разрешает ответы, указывающие на .txt) ---
             fun searchInCoreFiles(qFiltered: String, qTokens: List<String>, qSet: Set<String>, jaccardThreshold: Double): String? {
                 val uriLocal = folderUri ?: return null
                 try {
                     val dir = DocumentFile.fromTreeUri(this@ChatActivity, uriLocal) ?: return null
-                    
+
+                    // Вспомогательная утилита: если строка выглядит как имя .txt файла — открыть его и взять ответы оттуда
+                    fun resolvePotentialFileResponse(respRaw: String): String {
+                        val respTrim = respRaw.trim()
+                        val resp = respTrim.removeSuffix(":").trim()
+                        if (resp.contains(".txt", ignoreCase = true)) {
+                            // Оставляем только имя файла (после последнего '/')
+                            val filename = resp.substringAfterLast('/').trim()
+                            if (filename.isNotEmpty()) {
+                                val (tpls, keywords) = parseTemplatesFromFile(filename)
+                                val allResponses = mutableListOf<String>()
+                                for (lst in tpls.values) allResponses.addAll(lst)
+                                for (lst in keywords.values) allResponses.addAll(lst)
+                                if (allResponses.isNotEmpty()) return allResponses.random()
+                                // если файл парсируется, но пуст — пробуем вернуть исходную строк без расширения
+                                return respTrim
+                            }
+                        }
+                        return respRaw // fallback — вернуть исходную строку
+                    }
+
                     // Поиск по core1.txt - core9.txt
                     for (i in 1..9) {
                         val filename = "core$i.txt"
                         val file = dir.findFile(filename) ?: continue
                         if (!file.exists()) continue
-                        
+
                         val (coreTemplates, coreKeywords) = parseTemplatesFromFile(filename)
                         if (coreTemplates.isEmpty() && coreKeywords.isEmpty()) continue
-                        
+
                         // Точный поиск
                         coreTemplates[qFiltered]?.let { possible ->
                             if (possible.isNotEmpty()) {
-                                return possible.random()
+                                val chosen = possible.random()
+                                return resolvePotentialFileResponse(chosen)
                             }
                         }
-                        
+
                         // Поиск по ключевым словам
                         for ((keyword, responses) in coreKeywords) {
                             if (qFiltered.contains(keyword) && responses.isNotEmpty()) {
-                                return responses.random()
+                                val chosen = responses.random()
+                                return resolvePotentialFileResponse(chosen)
                             }
                         }
-                        
+
                         // Jaccard поиск
                         var bestByJaccard: String? = null
                         var bestJaccard = 0.0
@@ -484,16 +504,17 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                         if (bestByJaccard != null && bestJaccard >= jaccardThreshold) {
                             val possible = coreTemplates[bestByJaccard]
                             if (!possible.isNullOrEmpty()) {
-                                return possible.random()
+                                val chosen = possible.random()
+                                return resolvePotentialFileResponse(chosen)
                             }
                         }
-                        
+
                         // Levenshtein поиск
                         var bestKey: String? = null
                         var bestDist = Int.MAX_VALUE
                         val candidates = coreTemplates.keys.filter { abs(it.length - qFiltered.length) <= getFuzzyDistance(qFiltered) }
                             .take(MAX_CANDIDATES_FOR_LEV)
-                        
+
                         for (key in candidates) {
                             val maxDist = getFuzzyDistance(qFiltered)
                             if (abs(key.length - qFiltered.length) > maxDist + 1) continue
@@ -504,15 +525,16 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                             }
                             if (bestDist == 0) break
                         }
-                        
+
                         if (bestKey != null && bestDist <= getFuzzyDistance(qFiltered)) {
                             val possible = coreTemplates[bestKey]
                             if (!possible.isNullOrEmpty()) {
-                                return possible.random()
+                                val chosen = possible.random()
+                                return resolvePotentialFileResponse(chosen)
                             }
                         }
                     }
-                    
+
                     return null
                 } catch (e: Exception) {
                     Log.e("ChatActivity", "Error searching in core files", e)
@@ -758,7 +780,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     }
                 }
 
-                // --- ЗАМЕНА: перед dummy — поиск по core файлам в контексте ---
+                // Поиск по core файлам если не найдено в контексте
                 val coreResult = searchInCoreFiles(qFiltered, tokensLocal, qSetLocal, jaccardThreshold)
                 if (coreResult != null) {
                     withContext(Dispatchers.Main) {
@@ -778,7 +800,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 return@launch
             }
 
-            // --- ЗАМЕНА: перед глобальным dummy — поиск по core файлам (если не найдено в base) ---
+            // Поиск по core файлам если не найдено в base
             val coreResult = searchInCoreFiles(qFiltered, qTokens, qSet, jaccardThreshold)
             if (coreResult != null) {
                 withContext(Dispatchers.Main) {
