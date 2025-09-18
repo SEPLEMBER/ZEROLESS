@@ -564,7 +564,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 var bestByJaccard: String? = null
                 var bestJaccard = 0.0
                 val qSet = qTokens.toSet()
-                val jaccardThreshold = getJaccardThreshold(qFiltered)
+                val jaccardThreshold = getJaccardThreshold(qFiltered) // Define jaccardThreshold here
                 for (key in candidates) {
                     val keyTokens = filterStopwordsAndMapSynonymsLocal(key).first.toSet()
                     if (keyTokens.isEmpty()) continue
@@ -665,6 +665,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 var bestLocal: String? = null
                 var bestLocalJ = 0.0
                 val qSetLocal = tokensLocal.toSet()
+                val jaccardThreshold = getJaccardThreshold(qFiltered) // Define jaccardThreshold here
                 for (key in localCandidates) {
                     val keyTokens = filterStopwordsAndMapSynonymsLocal(key).first.toSet()
                     if (keyTokens.isEmpty()) continue
