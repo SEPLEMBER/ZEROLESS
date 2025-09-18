@@ -1,10 +1,15 @@
 package com.nemesis.droidcrypt
 
-import java.util.*
-import kotlin.collections.HashMap
 import kotlin.math.abs
-import kotlin.math.log10
 import kotlin.math.min
+import kotlin.math.log10
+import java.util.*
+import kotlin.math.roundToInt
+import kotlin.math.max
+import kotlin.math.pow
+import kotlin.math.sqrt
+import kotlin.collections.HashMap
+import java.util.Locale
 
 /**
  * Engine — чистая логика обработки текста/шаблонов.
@@ -19,7 +24,7 @@ class Engine(
 ) {
 
     companion object {
-        // Перенесённые константы (раньше в ChatActivity.companion)
+        // Константы общего назначения (раньше были в Activity)
         const val MAX_CONTEXT_SWITCH = 6
         const val MAX_MESSAGES = 250
         const val CANDIDATE_TOKEN_THRESHOLD = 2
@@ -36,9 +41,6 @@ class Engine(
         const val MAX_TEMPLATES_SIZE = 5000
     }
 
-    /**
-     * tokenWeights — доступно извне (ChatActivity синхронизирует отображение при необходимости).
-     */
     val tokenWeights: MutableMap<String, Double> = HashMap()
 
     /**
@@ -124,7 +126,7 @@ class Engine(
         return when {
             query.length <= 10 -> 0.3
             query.length <= 20 -> 0.4
-            else -> JACCARD_THRESHOLD
+            else -> 0.75
         }
     }
 
@@ -174,7 +176,7 @@ class Engine(
     ): MutableMap<String, MutableList<String>> {
         val invertedIndex = HashMap<String, MutableList<String>>()
         for (key in templatesMap.keys) {
-            val toks = filterStopwordsAndMapSynonyms(key).first.filter { it.length >= minTokenLength || /* keep keyword tokens */ false }
+            val toks = filterStopwordsAndMapSynonyms(key).first.filter { it.length >= minTokenLength }
             for (t in toks) {
                 val list = invertedIndex.getOrPut(t) { mutableListOf() }
                 if (!list.contains(key)) list.add(key)
@@ -191,7 +193,7 @@ class Engine(
      * Утилита: trimming templatesMap до желаемого размера, по наименьшей частоте в queryCountMap.
      * Возвращает список удалённых ключей.
      */
-    fun trimTemplatesMap(maxTemplatesSize: Int, queryCountMap: Map<String, Int>): List<String> {
+    fun trimTemplatesMap(maxTemplatesSize: Int = MAX_TEMPLATES_SIZE, queryCountMap: Map<String, Int>): List<String> {
         val removed = mutableListOf<String>()
         if (templatesMap.size > maxTemplatesSize) {
             val leastUsed = templatesMap.keys.sortedBy { queryCountMap.getOrDefault(it, 0) }.take(templatesMap.size - maxTemplatesSize)
