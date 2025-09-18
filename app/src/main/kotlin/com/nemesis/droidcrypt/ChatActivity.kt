@@ -158,10 +158,11 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
 
         // Загрузка синонимов/стоп-слов — нужно до инициализации engine
-        loadSynonymsAndStopwords()
+ChatCore.loadSynonymsAndStopwords(this, folderUri, synonymsMap, stopwords)
 
-        // Инициализация Engine (передаём mutable структуры)
-        engine = Engine(templatesMap, synonymsMap, stopwords)
+// Инициализация Engine ...
+engine = Engine(templatesMap, synonymsMap, stopwords)
+
         // Рассчитать веса (синхронизируем tokenWeights)
         engine.computeTokenWeights()
         tokenWeights.clear()
@@ -1175,7 +1176,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         currentMascotIcon = "raccoon_icon.png"
         currentThemeColor = "#00FF00"
         currentThemeBackground = "#000000"
-        loadSynonymsAndStopwords()
+        ChatCore.loadSynonymsAndStopwords(this, folderUri, synonymsMap, stopwords)
         if (folderUri == null) {
             loadFallbackTemplates()
             rebuildInvertedIndex()
