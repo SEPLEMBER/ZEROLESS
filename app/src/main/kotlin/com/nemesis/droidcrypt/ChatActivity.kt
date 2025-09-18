@@ -42,8 +42,8 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         private const val CANDIDATE_TOKEN_THRESHOLD = 2
         private const val MAX_SUBQUERY_RESPONSES = 3
         private const val SUBQUERY_RESPONSE_DELAY = 1500L
-        private const val MAX_CANDIDATES_FOR_LEV = 12
-        private const val JACCARD_THRESHOLD = 0.70
+        private const val MAX_CANDIDATES_FOR_LEV = 8
+        private const val JACCARD_THRESHOLD = 0.75
         private const val SEND_DEBOUNCE_MS = 400L
         private const val IDLE_TIMEOUT_MS = 30000L
         private const val MAX_CACHE_SIZE = 100
