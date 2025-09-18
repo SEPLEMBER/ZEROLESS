@@ -7,12 +7,10 @@ import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.ColorDrawable
 import android.media.MediaPlayer
 import android.net.Uri
-import android.os.BatteryManager
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.preference.PreferenceManager
-import android.provider.Settings
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import android.view.Gravity
@@ -33,11 +31,6 @@ import java.util.*
 import kotlin.math.abs
 import kotlin.math.min
 import kotlin.math.roundToInt
-import android.bluetooth.BluetoothAdapter
-import android.net.ConnectivityManager
-import android.net.NetworkCapabilities
-import android.text.format.DateFormat
-import android.net.wifi.WifiManager
 
 class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
@@ -74,19 +67,10 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private var btnTrash: ImageButton? = null
     private var btnEnvelopeTop: ImageButton? = null
     private var btnSettings: ImageButton? = null
-    private var btnCharging: ImageButton? = null
     private lateinit var messagesContainer: LinearLayout
     private var adapter: ArrayAdapter<String>? = null
 
-    // Added UI elements (status bar overlay)
-    private var batteryImageView: ImageView? = null
-    private var batteryPercentView: TextView? = null
-    private var wifiImageView: ImageView? = null
-    private var bluetoothImageView: ImageView? = null
-    private var timeTextView: TextView? = null
-    private var infoIconButton: ImageButton? = null // оставляем поле, но не добавляем в тулбар
-
-     // TTS
+    // TTS
     private var tts: TextToSpeech? = null
     
     // Data structures
@@ -114,10 +98,6 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private val random = Random()
     private val queryCountMap = HashMap<String, Int>()
     private var lastSendTime = 0L
-    private var lastBatteryWarningStage = Int.MAX_VALUE
-    private var batteryReceiver: BroadcastReceiver? = null
-    private var networkReceiver: BroadcastReceiver? = null
-    private var bluetoothReceiver: BroadcastReceiver? = null
     private val timeHandler = Handler(Looper.getMainLooper())
     private var timeUpdaterRunnable: Runnable? = null
 
@@ -186,15 +166,11 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         setupIconTouchEffect(btnEnvelopeTop)
         setupIconTouchEffect(btnSettings)
         setupIconTouchEffect(envelopeInputButton)
-        // убрал setupIconTouchEffect(infoIconButton) — кнопка info не добавляется в тулбар
-        setupIconTouchEffect(btnCharging)
 
         btnLock?.setOnClickListener { finish() }
         btnTrash?.setOnClickListener { clearChat() }
         btnSettings?.setOnClickListener { startActivity(Intent(this, SettingsActivity::class.java)) }
         btnEnvelopeTop?.setOnClickListener { startActivity(Intent(this, PostsActivity::class.java)) }
-        // infoIconButton не добавляем; btnCharging оставляем
-        btnCharging?.setOnClickListener { startActivity(Intent(this, PostsActivity::class.java)) }
 
         envelopeInputButton?.setOnClickListener {
             val now = System.currentTimeMillis()
@@ -267,48 +243,6 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         leftLayout.orientation = LinearLayout.HORIZONTAL
         leftLayout.gravity = Gravity.CENTER_VERTICAL
 
-        bluetoothImageView = ImageView(this).apply {
-            val iconSize = dpToPx(56)
-            layoutParams = LinearLayout.LayoutParams(iconSize, iconSize)
-            scaleType = ImageView.ScaleType.CENTER_CROP
-            adjustViewBounds = true
-            visibility = View.GONE
-        }
-        leftLayout.addView(bluetoothImageView)
-
-        wifiImageView = ImageView(this).apply {
-            val iconSize = dpToPx(56)
-            layoutParams = LinearLayout.LayoutParams(iconSize, iconSize).apply {
-                marginStart = dpToPx(6)
-            }
-            scaleType = ImageView.ScaleType.CENTER_CROP
-            adjustViewBounds = true
-        }
-        leftLayout.addView(wifiImageView)
-
-        batteryImageView = ImageView(this).apply {
-            val iconSize = dpToPx(56)
-            layoutParams = LinearLayout.LayoutParams(iconSize, iconSize).apply {
-                marginStart = dpToPx(6)
-            }
-            scaleType = ImageView.ScaleType.CENTER_CROP
-            adjustViewBounds = true
-        }
-        batteryPercentView = TextView(this).apply {
-            text = "--%"
-            textSize = 16f
-            setTextColor(Color.parseColor("#00BFFF"))
-            val lp = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply {
-                marginStart = dpToPx(8)
-            }
-            layoutParams = lp
-        }
-        leftLayout.addView(batteryImageView)
-        leftLayout.addView(batteryPercentView)
-
         val spacerIndex = 1
         val spacer = topBar.getChildAt(spacerIndex)
         topBar.removeViewAt(spacerIndex)
@@ -325,20 +259,6 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             layoutParams = lp
         }
         topBar.addView(timeTextView, spacerIndex)
-
-        // убираем infoIconButton из тулбара — перенесём в настройки позже
-        // оставляем место для других кнопок, но info не добавляем
-
-        btnCharging = ImageButton(this).apply {
-            background = null
-            val iconSize = dpToPx(56)
-            val lp = LinearLayout.LayoutParams(iconSize, iconSize)
-            layoutParams = lp
-            scaleType = ImageView.ScaleType.CENTER_CROP
-            adjustViewBounds = true
-            visibility = View.GONE
-        }
-        topBar.addView(btnCharging)
     }
 
     override fun onResume() {
@@ -351,27 +271,18 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             dialogHandler.postDelayed(it, 5000)
         }
         loadToolbarIcons()
-        registerBatteryReceiver()
-        registerNetworkReceiver()
-        registerBluetoothReceiver()
         startTimeUpdater()
     }
 
     override fun onPause() {
         super.onPause()
         dialogHandler.removeCallbacksAndMessages(null)
-        unregisterBatteryReceiver()
-        unregisterNetworkReceiver()
-        unregisterBluetoothReceiver()
         stopTimeUpdater()
     }
 
     override fun onDestroy() {
         super.onDestroy()
         dialogHandler.removeCallbacksAndMessages(null)
-        unregisterBatteryReceiver()
-        unregisterNetworkReceiver()
-        unregisterBluetoothReceiver()
         stopTimeUpdater()
         tts?.shutdown()
         tts = null
@@ -405,31 +316,11 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 } catch (_: Exception) {}
             }
 
-            fun tryLoadToImageView(name: String, target: ImageView?) {
-                if (target == null) return
-                try {
-                    val file = dir.findFile(name)
-                    if (file != null && file.exists()) {
-                        contentResolver.openInputStream(file.uri)?.use { ins ->
-                            val bmp = BitmapFactory.decodeStream(ins)
-                            target.setImageBitmap(bmp)
-                        }
-                    }
-                } catch (_: Exception) {}
-            }
-
-            // infoIconButton — больше не заполняем
             tryLoadToImageButton("lock.png", btnLock)
             tryLoadToImageButton("trash.png", btnTrash)
             tryLoadToImageButton("envelope.png", btnEnvelopeTop)
             tryLoadToImageButton("settings.png", btnSettings)
-            tryLoadToImageButton("charging.png", btnCharging)
             tryLoadToImageButton("send.png", envelopeInputButton)
-            tryLoadToImageView("battery_5.png", batteryImageView)
-            tryLoadToImageView("wifi.png", wifiImageView)
-            tryLoadToImageView("bluetooth.png", bluetoothImageView)
-            // mobile icon may be named mobile.png
-            tryLoadToImageView("mobile.png", null) // just ensure file exists if needed; loaded dynamically in updateNetworkUI
         } catch (e: Exception) {
             e.printStackTrace()
         }
@@ -1454,210 +1345,72 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         else runOnUiThread(block)
     }
 
-    private fun registerBatteryReceiver() {
-        if (batteryReceiver != null) return
-        batteryReceiver = object : BroadcastReceiver() {
-            override fun onReceive(context: Context?, intent: Intent?) {
-                if (intent == null) return
-                val level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
-                val scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, -1)
-                val plugged = intent.getIntExtra(BatteryManager.EXTRA_PLUGGED, -1)
-                val percent = if (level >= 0 && scale > 0) ((level * 100) / scale) else -1
-                if (percent >= 0) {
-                    updateBatteryUI(percent, plugged)
+    private var timeTextView: TextView? = null
+
+    private fun startTimeUpdater() {
+        timeUpdaterRunnable = object : Runnable {
+            override fun run() {
+                val now = Calendar.getInstance()
+                val timeFormat = if (DateFormat.is24HourFormat(this@ChatActivity)) {
+                    "HH:mm"
+                } else {
+                    "h:mm a"
                 }
+                val sdf = SimpleDateFormat(timeFormat, Locale.getDefault())
+                timeTextView?.text = sdf.format(now.time)
+                timeHandler.postDelayed(this, 60000) // Update every minute
             }
         }
-        registerReceiver(batteryReceiver, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
-        val sticky = registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
-        sticky?.let {
-            val level = it.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
-            val scale = it.getIntExtra(BatteryManager.EXTRA_SCALE, -1)
-            val plugged = it.getIntExtra(BatteryManager.EXTRA_PLUGGED, -1)
-            val percent = if (level >= 0 && scale > 0) ((level * 100) / scale) else -1
-            if (percent >= 0) updateBatteryUI(percent, plugged)
-        }
+        timeUpdaterRunnable?.let { timeHandler.post(it) }
     }
 
-    private fun unregisterBatteryReceiver() {
-        try {
-            batteryReceiver?.let { unregisterReceiver(it) }
-        } catch (_: Exception) {}
-        batteryReceiver = null
+    private fun stopTimeUpdater() {
+        timeUpdaterRunnable?.let { timeHandler.removeCallbacks(it) }
+        timeUpdaterRunnable = null
     }
 
-    private fun updateBatteryUI(percent: Int, plugged: Int) {
-        runOnUi {
-            batteryPercentView?.text = "$percent%"
-            val lowThreshold = 25
-            val warningThreshold = 15
-            val urgentThreshold = 5
-            val normalBlue = Color.parseColor("#00BFFF")
-            val red = Color.RED
-            val textColor = if (percent <= lowThreshold) red else normalBlue
-            batteryPercentView?.setTextColor(textColor)
-            val iconIndex = when {
-                percent >= 80 -> 5
-                percent >= 60 -> 4
-                percent >= 40 -> 3
-                percent >= 20 -> 2
-                else -> 1
-            }
-            val loaded = tryLoadBitmapFromFolder("battery_$iconIndex.png")
-            if (loaded != null) {
-                batteryImageView?.setImageBitmap(loaded)
-            } else {
-                tryLoadBitmapFromFolder("battery.png")?.let { batteryImageView?.setImageBitmap(it) }
-            }
-            // клик по батарее — фиксированное сообщение из batterycare.txt (без рандома)
-            batteryImageView?.setOnClickListener {
-                lifecycleScope.launch(Dispatchers.IO) {
-                    val resp = loadBatteryCareResponse()
-                    if (!resp.isNullOrBlank()) {
-                        withContext(Dispatchers.Main) {
-                            addChatMessage(currentMascotName, resp)
-                        }
-                    }
-                }
-            }
-            if (plugged > 0) {
-                btnCharging?.visibility = View.VISIBLE
-            } else {
-                btnCharging?.visibility = View.GONE
-            }
-            if (percent <= urgentThreshold && lastBatteryWarningStage > urgentThreshold) {
-                addChatMessage(currentMascotName, "Это не шутки. Поставь на зарядку.")
-            } else if (percent <= warningThreshold && lastBatteryWarningStage > warningThreshold) {
-                val variants = listOf(
-                    "Пожалуйста, поставь устройство на зарядку — батарейка почти села.",
-                    "Аккумулятор низкий, лучше подключить зарядку.",
-                    "Осталось немного заряда, поставь телефон на заряд."
-                )
-                addChatMessage(currentMascotName, variants.random())
-            }
-            lastBatteryWarningStage = percent
-        }
-    }
-
-    private fun loadBatteryCareResponse(): String? {
+    private fun loadTimeToSleepResponse(): String? {
         val uri = folderUri ?: return null
         try {
             val dir = DocumentFile.fromTreeUri(this, uri) ?: return null
-            val file = dir.findFile("batterycare.txt")
+            val file = dir.findFile("sleeptime.txt")
             if (file != null && file.exists()) {
                 contentResolver.openInputStream(file.uri)?.bufferedReader()?.use { reader ->
-                    val allText = reader.readText().trim()
-                    // не используем рандом — отправляем как единое сообщение
-                    if (allText.isNotEmpty()) return allText
+                    val allText = reader.readText()
+                    val responses = allText.split("|").map { it.trim() }.filter { it.isNotEmpty() }
+                    if (responses.isNotEmpty()) return responses.random()
                 }
             }
-        } catch (e: Exception) {
-            // не крашить — покажем тост
-            showCustomToast("Ошибка загрузки batterycare.txt: ${e.message}")
-        }
+        } catch (e: Exception) {}
         return null
     }
 
-    private fun tryLoadBitmapFromFolder(name: String): Bitmap? {
-        val uri = folderUri ?: return null
-        return try {
-            val dir = DocumentFile.fromTreeUri(this, uri) ?: return null
-            val f = dir.findFile(name) ?: return null
-            if (!f.exists()) return null
-            contentResolver.openInputStream(f.uri)?.use { ins ->
-                BitmapFactory.decodeStream(ins)
-            }
-        } catch (e: Exception) {
-            null
+    private fun processDateTimeQuery(input: String): String? {
+        val calendar = Calendar.getInstance()
+        val dayOfWeek = calendar.getDisplayName(Calendar.DAY_OF_WEEK, Calendar.LONG, Locale("ru", "RU"))
+        val dayOfMonth = calendar.get(Calendar.DAY_OF_MONTH)
+        val month = calendar.getDisplayName(Calendar.MONTH, Calendar.LONG, Locale("ru", "RU"))
+        val year = calendar.get(Calendar.YEAR)
+        val hour = calendar.get(Calendar.HOUR_OF_DAY)
+        val minute = calendar.get(Calendar.MINUTE)
+
+        val timeFormat = if (DateFormat.is24HourFormat(this)) {
+            "HH:mm"
+        } else {
+            "h:mm a"
+        }
+        val sdf = SimpleDateFormat(timeFormat, Locale.getDefault())
+        val currentTime = sdf.format(calendar.time)
+
+        return when {
+            input.contains("число") || input.contains("дата") -> "Сегодня $dayOfMonth $month $year года."
+            input.contains("день") -> "Сегодня $dayOfWeek, $dayOfMonth $month."
+            input.contains("время") -> "Сейчас $currentTime."
+            input.contains("год") -> "Сейчас $year год."
+            else -> null
         }
     }
-
-    private fun registerNetworkReceiver() {
-        if (networkReceiver != null) return
-        networkReceiver = object : BroadcastReceiver() {
-            override fun onReceive(context: Context?, intent: Intent?) {
-                updateNetworkUI()
-            }
-        }
-        val filter = IntentFilter().apply {
-            addAction(ConnectivityManager.CONNECTIVITY_ACTION)
-            addAction("android.intent.action.AIRPLANE_MODE")
-            addAction(WifiManager.WIFI_STATE_CHANGED_ACTION)
-        }
-        registerReceiver(networkReceiver, filter)
-        updateNetworkUI()
-    }
-
-    private fun registerBluetoothReceiver() {
-        if (bluetoothReceiver != null) return
-        bluetoothReceiver = object : BroadcastReceiver() {
-            override fun onReceive(context: Context?, intent: Intent?) {
-                updateBluetoothUI()
-            }
-        }
-        registerReceiver(bluetoothReceiver, IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED))
-        updateBluetoothUI()
-    }
-
-    private fun unregisterNetworkReceiver() {
-        try {
-            networkReceiver?.let { unregisterReceiver(it) }
-        } catch (_: Exception) {}
-        networkReceiver = null
-    }
-
-    private fun unregisterBluetoothReceiver() {
-        try {
-            bluetoothReceiver?.let { unregisterReceiver(it) }
-        } catch (_: Exception) {}
-        bluetoothReceiver = null
-    }
-
-    private fun updateNetworkUI() {
-        runOnUi {
-            try {
-                val connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-                val airplaneMode = Settings.Global.getInt(contentResolver,
-                    Settings.Global.AIRPLANE_MODE_ON, 0) != 0
-                val network = connectivityManager.activeNetwork
-                val caps = connectivityManager.getNetworkCapabilities(network)
-                val hasWifi = caps?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
-                val hasCell = caps?.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) == true
-                val isConnected = caps != null && (hasWifi || hasCell || caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET))
-
-                // Три состояния: WiFi, Mobile, "airplane" (нет подключений). AirplaneMode OR !isConnected => offline state.
-                if (airplaneMode || !isConnected) {
-                    // используем airplane.png для состояния "все соединения отключены"
-                    tryLoadBitmapFromFolder("airplane.png")?.let { wifiImageView?.setImageBitmap(it) }
-                } else if (hasWifi) {
-                    tryLoadBitmapFromFolder("wifi.png")?.let { wifiImageView?.setImageBitmap(it) }
-                } else if (hasCell) {
-                    // mobile network icon (mobile.png)
-                    tryLoadBitmapFromFolder("mobile.png")?.let { wifiImageView?.setImageBitmap(it) }
-                } else {
-                    // fallback — если нет ни wifi ни mobile, показываем airplane
-                    tryLoadBitmapFromFolder("airplane.png")?.let { wifiImageView?.setImageBitmap(it) }
-                }
-            } catch (_: Exception) {
-                // silently ignore
-            }
-        }
-    }
-
-    private fun updateBluetoothUI() {
-        runOnUi {
-            val bluetoothAdapter = BluetoothAdapter.getDefaultAdapter()
-            val isBluetoothEnabled = bluetoothAdapter?.isEnabled == true
-            if (isBluetoothEnabled) {
-                tryLoadBitmapFromFolder("bluetooth.png")?.let {
-                    bluetoothImageView?.setImageBitmap(it)
-                    bluetoothImageView?.visibility = View.VISIBLE
-                }
-            } else {
-                bluetoothImageView?.visibility = View.GONE
-            }
-        }
-    }
+}
 
     private fun loadTimeToSleepResponse(): String? {
         val uri = folderUri ?: return null
