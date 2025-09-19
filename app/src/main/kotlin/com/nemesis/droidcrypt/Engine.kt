@@ -11,7 +11,6 @@ import java.util.*
 import kotlin.math.pow
 import kotlin.math.sqrt
 
-
 class Engine(
     val templatesMap: MutableMap<String, MutableList<String>>,
     val synonymsMap: MutableMap<String, String>,
