@@ -79,21 +79,27 @@ object ChatCore {
         filename: String,
         synonymsSnapshot: Map<String, String>,
         stopwordsSnapshot: Set<String>
-    ): Pair<HashMap<String, MutableList<String>>, HashMap<String, MutableList<String>>> {
+    ): Triple<HashMap<String, MutableList<String>>, HashMap<String, MutableList<String>>, HashMap<String, MutableList<String>>> {
         val templates = HashMap<String, MutableList<String>>()
         val keywords = HashMap<String, MutableList<String>>()
-        val uriLocal = folderUri ?: return Pair(templates, keywords)
+        val strictTemplates = HashMap<String, MutableList<String>>() // Для ">>"
+        val uriLocal = folderUri ?: return Triple(templates, keywords, strictTemplates)
         try {
-            val dir = DocumentFile.fromTreeUri(context, uriLocal) ?: return Pair(templates, keywords)
-            val file = dir.findFile(filename) ?: return Pair(templates, keywords)
-            if (!file.exists()) return Pair(templates, keywords)
+            val dir = DocumentFile.fromTreeUri(context, uriLocal) ?: return Triple(templates, keywords, strictTemplates)
+            val file = dir.findFile(filename) ?: return Triple(templates, keywords, strictTemplates)
+            if (!file.exists()) return Triple(templates, keywords, strictTemplates)
 
             context.contentResolver.openInputStream(file.uri)?.bufferedReader()?.useLines { lines ->
                 lines.forEach { raw ->
                     val l = raw.trim()
                     if (l.isEmpty()) return@forEach
 
-                    if (l.startsWith("-")) {
+                    if (l.startsWith(">>")) {
+                        val (trigger, respRaw) = l.substring(2).split("=", limit = 2).map { it.trim() }
+                        val triggerMapped = Engine.normalizeText(trigger).lowercase(Locale.ROOT)
+                        val responses = respRaw.split("|").map { it.trim() }.filter { it.isNotEmpty() }
+                        if (triggerMapped.isNotEmpty() && responses.isNotEmpty()) strictTemplates[triggerMapped] = responses.toMutableList()
+                    } else if (l.startsWith("-")) {
                         val (key, respRaw) = l.substring(1).split("=", limit = 2).map { it.trim() }
                         val keyMapped = Engine.normalizeText(key).lowercase(Locale.ROOT)
                         val responses = respRaw.split("|").map { it.trim() }.filter { it.isNotEmpty() }
@@ -109,7 +115,7 @@ object ChatCore {
         } catch (e: Exception) {
             Log.e(TAG, "Error parsing templates from $filename", e)
         }
-        return Pair(templates, keywords)
+        return Triple(templates, keywords, strictTemplates)
     }
 
     // --- Поиск ---
@@ -128,6 +134,7 @@ object ChatCore {
             val dir = DocumentFile.fromTreeUri(context, uriLocal) ?: return null
             val (qMappedTokens, qMapped) = Engine.filterStopwordsAndMapSynonymsStatic(qFiltered, synonymsSnapshot, stopwordsSnapshot)
             val qSet = qMappedTokens.toSet()
+            val qTokensList = qMappedTokens
 
             fun resolvePotentialFileResponse(respRaw: String): String {
                 val respTrim = respRaw.trim()
@@ -135,10 +142,10 @@ object ChatCore {
                 if (resp.contains(".txt", ignoreCase = true)) {
                     val filename = resp.substringAfterLast('/').trim()
                     if (filename.isNotEmpty()) {
-                        val (tpls, keywords) = parseTemplatesFromFile(context, folderUri, filename, synonymsSnapshot, stopwordsSnapshot)
+                        val (tpls, kws, _) = parseTemplatesFromFile(context, folderUri, filename, synonymsSnapshot, stopwordsSnapshot)
                         val allResponses = mutableListOf<String>()
                         tpls.values.forEach { allResponses.addAll(it) }
-                        keywords.values.forEach { allResponses.addAll(it) }
+                        kws.values.forEach { allResponses.addAll(it) }
                         if (allResponses.isNotEmpty()) return allResponses.random()
                     }
                 }
@@ -149,18 +156,21 @@ object ChatCore {
                 val filename = "core$i.txt"
                 val file = dir.findFile(filename) ?: continue
                 if (!file.exists()) continue
-                val (templates, keywords) = parseTemplatesFromFile(context, folderUri, filename, synonymsSnapshot, stopwordsSnapshot)
+                val (templates, keywords, strictTemplates) = parseTemplatesFromFile(context, folderUri, filename, synonymsSnapshot, stopwordsSnapshot)
+
+                // Сначала strict match
+                strictTemplates[qMapped.lowercase(Locale.ROOT)]?.let { return it.random() }
 
                 templates[qMapped]?.let { return resolvePotentialFileResponse(it.random()) }
                 for ((k, v) in keywords) {
-                    if (qMapped.contains(k)) return resolvePotentialFileResponse(v.random())
+                    if (qMapped.lowercase(Locale.ROOT).contains(k)) return resolvePotentialFileResponse(v.random())
                 }
 
                 var best: String? = null
                 var bestScore = 0.0
                 for (key in templates.keys) {
-                    val keyTokens = key.split(" ").toSet()
-                    val score = engine.weightedJaccard(qSet, keyTokens)
+                    val keyTokensList = Engine.filterStopwordsAndMapSynonymsStatic(key, synonymsSnapshot, stopwordsSnapshot).first
+                    val score = engine.weightedJaccard(qTokensList, keyTokensList)
                     if (score > bestScore) {
                         bestScore = score
                         best = key
@@ -173,7 +183,7 @@ object ChatCore {
                 var bestLev: String? = null
                 var bestDist = Int.MAX_VALUE
                 for (key in templates.keys.take(20)) {
-                    val d = engine.levenshtein(qMapped, key, qFiltered)
+                    val d = engine.damerauLevenshtein(qMapped, key, qFiltered)
                     if (d < bestDist) {
                         bestDist = d
                         bestLev = key
