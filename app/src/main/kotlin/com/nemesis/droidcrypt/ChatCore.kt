@@ -78,8 +78,7 @@ object ChatCore {
         folderUri: Uri?,
         filename: String,
         synonymsSnapshot: Map<String, String>,
-        stopwordsSnapshot: Set<String>,
-        contextMap: MutableMap<String, String>? = null
+        stopwordsSnapshot: Set<String>
     ): Pair<HashMap<String, MutableList<String>>, HashMap<String, MutableList<String>>> {
         val templates = HashMap<String, MutableList<String>>()
         val keywords = HashMap<String, MutableList<String>>()
@@ -87,48 +86,23 @@ object ChatCore {
         try {
             val dir = DocumentFile.fromTreeUri(context, uriLocal) ?: return Pair(templates, keywords)
             val file = dir.findFile(filename) ?: return Pair(templates, keywords)
-            if (!file.exists()) {
-                Log.w(TAG, "File $filename does not exist")
-                return Pair(templates, keywords)
-            }
+            if (!file.exists()) return Pair(templates, keywords)
 
             context.contentResolver.openInputStream(file.uri)?.bufferedReader()?.useLines { lines ->
                 lines.forEach { raw ->
                     val l = raw.trim()
                     if (l.isEmpty()) return@forEach
 
-                    if (contextMap != null && l.startsWith(":") && l.endsWith(":")) {
-                        val contextLine = l.substring(1, l.length - 1)
-                        if (contextLine.contains("=")) {
-                            val (key, fileTarget) = contextLine.split("=", limit = 2).map { it.trim() }
-                            val keyLower = key.lowercase(Locale.ROOT)
-                            if (keyLower.isNotEmpty() && fileTarget.isNotEmpty()) {
-                                contextMap[keyLower] = fileTarget
-                                Log.d(TAG, "Parsed context mapping: $keyLower -> $fileTarget")
-                            }
-                        }
-                        return@forEach
-                    }
-
                     if (l.startsWith("-")) {
-                        val keywordLine = l.substring(1)
-                        if (keywordLine.contains("=")) {
-                            val (key, respRaw) = keywordLine.split("=", limit = 2).map { it.trim() }
-                            val (mappedTokens, keyMapped) = Engine.filterStopwordsAndMapSynonymsStatic(key, synonymsSnapshot, stopwordsSnapshot)
-                            val responses = respRaw.split("|").map { it.trim() }.filter { it.isNotEmpty() }
-                            if (keyMapped.isNotEmpty() && responses.isNotEmpty()) {
-                                keywords[keyMapped] = responses.toMutableList()
-                                Log.d(TAG, "Parsed keyword: $keyMapped -> $responses")
-                            }
-                        }
+                        val (key, respRaw) = l.substring(1).split("=", limit = 2).map { it.trim() }
+                        val keyMapped = Engine.normalizeText(key).lowercase(Locale.ROOT)
+                        val responses = respRaw.split("|").map { it.trim() }.filter { it.isNotEmpty() }
+                        if (keyMapped.isNotEmpty() && responses.isNotEmpty()) keywords[keyMapped] = responses.toMutableList()
                     } else if (l.contains("=")) {
                         val (trigger, respRaw) = l.split("=", limit = 2).map { it.trim() }
-                        val (mappedTokens, triggerMapped) = Engine.filterStopwordsAndMapSynonymsStatic(trigger, synonymsSnapshot, stopwordsSnapshot)
+                        val triggerMapped = Engine.filterStopwordsAndMapSynonymsStatic(trigger, synonymsSnapshot, stopwordsSnapshot).second
                         val responses = respRaw.split("|").map { it.trim() }.filter { it.isNotEmpty() }
-                        if (triggerMapped.isNotEmpty() && responses.isNotEmpty()) {
-                            templates[triggerMapped] = responses.toMutableList()
-                            Log.d(TAG, "Parsed template: $triggerMapped -> $responses")
-                        }
+                        if (triggerMapped.isNotEmpty() && responses.isNotEmpty()) templates[triggerMapped] = responses.toMutableList()
                     }
                 }
             }
@@ -138,7 +112,7 @@ object ChatCore {
         return Pair(templates, keywords)
     }
 
-    // --- Поиск в core-файлах ---
+    // --- Поиск ---
     fun searchInCoreFiles(
         context: Context,
         folderUri: Uri?,
@@ -152,85 +126,40 @@ object ChatCore {
         val uriLocal = folderUri ?: return null
         try {
             val dir = DocumentFile.fromTreeUri(context, uriLocal) ?: return null
-            val qSet = qTokens.toSet()
+            val (qMappedTokens, qMapped) = Engine.filterStopwordsAndMapSynonymsStatic(qFiltered, synonymsSnapshot, stopwordsSnapshot)
+            val qSet = qMappedTokens.toSet()
 
-            fun resolvePotentialFileResponse(respRaw: String, context: Context): String {
-                var respTrim = respRaw.trim()
-                Log.d(TAG, "Resolving response: '$respRaw'")
-
-                // Удаляем завершающее двоеточие, если есть
-                if (respTrim.endsWith(":")) {
-                    respTrim = respTrim.dropLast(1).trim()
-                    Log.d(TAG, "Removed trailing colon: '$respTrim'")
-                }
-
-                // Проверяем, выглядит ли ответ как имя файла (.txt)
-                if (respTrim.contains(".txt", ignoreCase = true)) {
-                    // Извлекаем имя файла (после последнего /, если есть)
-                    val filename = respTrim.substringAfterLast('/', respTrim).trim()
-                    Log.d(TAG, "Detected potential file: '$filename'")
-
+            fun resolvePotentialFileResponse(respRaw: String): String {
+                val respTrim = respRaw.trim()
+                val resp = respTrim.removeSuffix(":").trim()
+                if (resp.contains(".txt", ignoreCase = true)) {
+                    val filename = resp.substringAfterLast('/').trim()
                     if (filename.isNotEmpty()) {
-                        // Проверяем существование файла
-                        val file = dir.findFile(filename)
-                        if (file != null && file.exists()) {
-                            Log.d(TAG, "File $filename exists, parsing...")
-                            val (tpls, kws) = parseTemplatesFromFile(context, folderUri, filename, synonymsSnapshot, stopwordsSnapshot)
-                            val allResponses = mutableListOf<String>()
-                            tpls.values.forEach { allResponses.addAll(it) }
-                            kws.values.forEach { allResponses.addAll(it) }
-                            if (allResponses.isNotEmpty()) {
-                                val selectedResponse = allResponses.random()
-                                Log.d(TAG, "Selected response from $filename: '$selectedResponse'")
-                                return selectedResponse
-                            } else {
-                                Log.w(TAG, "File $filename parsed but no responses found")
-                            }
-                        } else {
-                            Log.w(TAG, "File $filename does not exist")
-                        }
+                        val (tpls, keywords) = parseTemplatesFromFile(context, folderUri, filename, synonymsSnapshot, stopwordsSnapshot)
+                        val allResponses = mutableListOf<String>()
+                        tpls.values.forEach { allResponses.addAll(it) }
+                        keywords.values.forEach { allResponses.addAll(it) }
+                        if (allResponses.isNotEmpty()) return allResponses.random()
                     }
                 }
-                // Fallback: возвращаем исходный ответ
-                Log.d(TAG, "Returning raw response as fallback: '$respRaw'")
                 return respRaw
             }
 
             for (i in 1..9) {
                 val filename = "core$i.txt"
-                val file = dir.findFile(filename)
-                if (file == null || !file.exists()) {
-                    Log.d(TAG, "Core file $filename not found or does not exist")
-                    continue
-                }
-                Log.d(TAG, "Processing core file: $filename")
-
+                val file = dir.findFile(filename) ?: continue
+                if (!file.exists()) continue
                 val (templates, keywords) = parseTemplatesFromFile(context, folderUri, filename, synonymsSnapshot, stopwordsSnapshot)
 
-                // Точное совпадение
-                templates[qFiltered]?.let { possible ->
-                    if (possible.isNotEmpty()) {
-                        val response = possible.random()
-                        Log.d(TAG, "Exact match found in $filename: $qFiltered -> $response")
-                        return resolvePotentialFileResponse(response, context)
-                    }
-                }
-
-                // Поиск по ключевым словам
+                templates[qMapped]?.let { return resolvePotentialFileResponse(it.random()) }
                 for ((k, v) in keywords) {
-                    if (qFiltered.contains(k)) {
-                        val response = v.random()
-                        Log.d(TAG, "Keyword match found in $filename: $k -> $response")
-                        return resolvePotentialFileResponse(response, context)
-                    }
+                    if (qMapped.contains(k)) return resolvePotentialFileResponse(v.random())
                 }
 
-                // Jaccard
                 var best: String? = null
                 var bestScore = 0.0
                 for (key in templates.keys) {
-                    val keyTokens = Engine.filterStopwordsAndMapSynonymsStatic(key, synonymsSnapshot, stopwordsSnapshot).first.toSet()
-                    if (keyTokens.isEmpty()) continue
+                    val keyTokens = key.split(" ").toSet()
                     val score = engine.weightedJaccard(qSet, keyTokens)
                     if (score > bestScore) {
                         bestScore = score
@@ -238,31 +167,25 @@ object ChatCore {
                     }
                 }
                 if (best != null && bestScore >= jaccardThreshold) {
-                    val response = templates[best]?.random() ?: ""
-                    Log.d(TAG, "Jaccard match found in $filename: $best (score=$bestScore) -> $response")
-                    return resolvePotentialFileResponse(response, context)
+                    return resolvePotentialFileResponse(templates[best]?.random() ?: "")
                 }
 
-                // Levenshtein
                 var bestLev: String? = null
                 var bestDist = Int.MAX_VALUE
                 for (key in templates.keys.take(20)) {
-                    val d = engine.levenshtein(qFiltered, key, qFiltered)
+                    val d = engine.levenshtein(qMapped, key, qFiltered)
                     if (d < bestDist) {
                         bestDist = d
                         bestLev = key
                     }
                 }
                 if (bestLev != null && bestDist <= engine.getFuzzyDistance(qFiltered)) {
-                    val response = templates[bestLev]?.random() ?: ""
-                    Log.d(TAG, "Levenshtein match found in $filename: $bestLev (dist=$bestDist) -> $response")
-                    return resolvePotentialFileResponse(response, context)
+                    return resolvePotentialFileResponse(templates[bestLev]?.random() ?: "")
                 }
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error searching in core files", e)
         }
-        Log.d(TAG, "No match found in core files")
         return null
     }
 
@@ -309,38 +232,15 @@ object ChatCore {
                 folderUri,
                 filename,
                 synonymsMap,
-                stopwords,
-                if (filename == "base.txt") mutableMapOf() else null
+                stopwords
             )
             templatesMap.clear()
             templatesMap.putAll(parsedTemplates)
             keywords.clear()
             keywords.putAll(parsedKeywords)
-            // Парсинг метаданных
-            val uri = folderUri ?: return true to (parsedTemplates.size + parsedKeywords.size)
-            val dir = DocumentFile.fromTreeUri(context, uri) ?: return true to (parsedTemplates.size + parsedKeywords.size)
-            val metadataFile = dir.findFile(filename.replace(".txt", "_metadata.txt"))
-            if (metadataFile != null && metadataFile.exists()) {
-                context.contentResolver.openInputStream(metadataFile.uri)?.bufferedReader()?.useLines { lines ->
-                    lines.forEach { raw ->
-                        val line = raw.trim()
-                        when {
-                            line.startsWith("mascot_name=") -> metadataOut["mascot_name"] = line.substringAfter("mascot_name=").trim()
-                            line.startsWith("mascot_icon=") -> metadataOut["mascot_icon"] = line.substringAfter("mascot_icon=").trim()
-                            line.startsWith("theme_color=") -> metadataOut["theme_color"] = line.substringAfter("theme_color=").trim()
-                            line.startsWith("theme_background=") -> metadataOut["theme_background"] = line.substringAfter("theme_background=").trim()
-                            line.startsWith("mascot_list=") -> {
-                                val mascots = line.substringAfter("mascot_list=").split("|")
-                                metadataOut["mascot_list"] = mascots.joinToString("|")
-                            }
-                        }
-                    }
-                }
-            }
-            Log.d(TAG, "Loaded templates from $filename: ${parsedTemplates.size} templates, ${parsedKeywords.size} keywords")
             true to (parsedTemplates.size + parsedKeywords.size)
         } catch (e: Exception) {
-            Log.e(TAG, "Error loading templates from $filename", e)
+            Log.e(TAG, "Error loading templates", e)
             false to 0
         }
     }
@@ -352,14 +252,10 @@ object ChatCore {
         mascotList: MutableList<Map<String, String>>,
         contextMap: MutableMap<String, String>
     ) {
-        templatesMap.clear()
-        keywordResponses.clear()
-        mascotList.clear()
-        contextMap.clear()
+        templatesMap.clear(); keywordResponses.clear(); mascotList.clear(); contextMap.clear()
         templatesMap[Engine.normalizeText("привет")] = mutableListOf("Привет! Чем могу помочь?", "Здравствуй!")
         templatesMap[Engine.normalizeText("как дела")] = mutableListOf("Всё отлично, а у тебя?", "Нормально, как дела?")
         keywordResponses[Engine.normalizeText("спасибо")] = mutableListOf("Рад, что помог!", "Всегда пожалуйста!")
-        Log.d(TAG, "Loaded fallback templates")
     }
 
     fun getDummyResponse(query: String): String =
