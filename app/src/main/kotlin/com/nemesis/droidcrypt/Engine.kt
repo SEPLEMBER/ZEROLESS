@@ -30,6 +30,10 @@ class Engine(
         const val MIN_TOKEN_LENGTH = 3
         const val MAX_TEMPLATES_SIZE = 5000
 
+        // memory & context tuning
+        const val MAX_MEMORY_QUERIES = 5
+        const val CONTEXT_BOOST = 0.35  // multiplicative bonus for context overlap
+        // END companion
         fun normalizeText(s: String): String {
             // Убираем BOM, NBSP, zero-width / format chars и остальное "мусорное"
             var str = s.replace("\uFEFF", "") // BOM
@@ -61,6 +65,36 @@ class Engine(
     }
 
     val tokenWeights: MutableMap<String, Double> = HashMap()
+
+    // --- short-term memory ---
+    private val lastUserQueries: ArrayDeque<Set<String>> = ArrayDeque()
+
+    /**
+     * Добавляем токены текущего запроса в память (FIFO, ограничение MAX_MEMORY_QUERIES)
+     */
+    fun updateMemory(tokens: List<String>) {
+        val set = tokens.toSet()
+        if (set.isEmpty()) return
+        if (lastUserQueries.size >= MAX_MEMORY_QUERIES) lastUserQueries.removeFirst()
+        lastUserQueries.addLast(set)
+    }
+
+    /**
+     * Возвращает объединённый набор токенов из short-term памяти
+     */
+    fun getContextTokens(): Set<String> {
+        val out = mutableSetOf<String>()
+        for (s in lastUserQueries) out.addAll(s)
+        return out
+    }
+
+    /**
+     * Очистить память (если нужно)
+     */
+    fun clearMemory() {
+        lastUserQueries.clear()
+    }
+    // --- end memory ---
 
     fun filterStopwordsAndMapSynonyms(input: String): Pair<List<String>, String> {
         return filterStopwordsAndMapSynonymsStatic(input, synonymsMap, stopwords)
