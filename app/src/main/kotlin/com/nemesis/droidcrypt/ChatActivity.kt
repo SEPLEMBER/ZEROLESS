@@ -28,9 +28,9 @@ import kotlinx.coroutines.withContext
 import java.util.*
 import kotlin.collections.ArrayList
 import kotlin.collections.HashMap
+import kotlin.math.roundToInt
 import com.nemesis.droidcrypt.Engine
 import com.nemesis.droidcrypt.ChatCore
-import kotlin.math.roundToInt
 
 class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
@@ -186,7 +186,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         // Загрузка шаблонов
         if (folderUri == null) {
             showCustomToast("Папка не выбрана! Открой настройки и выбери папку.")
-            ChatCore.loadFallbackTemplates(templatesMap, keywordResponses, mascotList, contextMap, synonymsMap, stopwords)
+            ChatCore.loadFallbackTemplates(templatesMap, keywordResponses, mascotList, contextMap)
             rebuildInvertedIndex()
             engine.computeTokenWeights()
             updateAutoComplete()
@@ -350,7 +350,6 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         lifecycleScope.launch(Dispatchers.Default) {
             // Попытки простых совпадений / subqueries
-            var answered = false
             val subqueryResponses = mutableListOf<String>()
             val processedSubqueries = mutableSetOf<String>()
 
@@ -358,7 +357,6 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             templatesSnapshot[qCanonical]?.let { possible ->
                 if (possible.isNotEmpty()) {
                     subqueryResponses.add(possible.random())
-                    answered = true
                     processedSubqueries.add(qCanonical)
                 }
             }
@@ -941,7 +939,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         ChatCore.loadSynonymsAndStopwords(this, folderUri, synonymsMap, stopwords)
 
         if (folderUri == null) {
-            ChatCore.loadFallbackTemplates(templatesMap, keywordResponses, mascotList, contextMap, synonymsMap, stopwords)
+            ChatCore.loadFallbackTemplates(templatesMap, keywordResponses, mascotList, contextMap)
             rebuildInvertedIndex()
             engine.computeTokenWeights()
             updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
@@ -949,7 +947,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
         try {
             val dir = DocumentFile.fromTreeUri(this, folderUri!!) ?: run {
-                ChatCore.loadFallbackTemplates(templatesMap, keywordResponses, mascotList, contextMap, synonymsMap, stopwords)
+                ChatCore.loadFallbackTemplates(templatesMap, keywordResponses, mascotList, contextMap)
                 rebuildInvertedIndex()
                 engine.computeTokenWeights()
                 updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
@@ -957,7 +955,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             }
             val file = dir.findFile(filename)
             if (file == null || !file.exists()) {
-                ChatCore.loadFallbackTemplates(templatesMap, keywordResponses, mascotList, contextMap, synonymsMap, stopwords)
+                ChatCore.loadFallbackTemplates(templatesMap, keywordResponses, mascotList, contextMap)
                 rebuildInvertedIndex()
                 engine.computeTokenWeights()
                 updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
@@ -1053,7 +1051,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         } catch (e: Exception) {
             Log.e("ChatActivity", "Error loading templates from $filename", e)
             showCustomToast("Ошибка чтения файла: ${e.message}")
-            ChatCore.loadFallbackTemplates(templatesMap, keywordResponses, mascotList, contextMap, synonymsMap, stopwords)
+            ChatCore.loadFallbackTemplates(templatesMap, keywordResponses, mascotList, contextMap)
             rebuildInvertedIndex()
             engine.computeTokenWeights()
             updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
