@@ -3,8 +3,8 @@ package com.nemesis.droidcrypt
 import android.animation.ObjectAnimator
 import android.content.*
 import android.graphics.*
-import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.ColorDrawable
+import android.graphics.drawable.GradientDrawable
 import android.media.MediaPlayer
 import android.net.Uri
 import android.os.Bundle
@@ -25,7 +25,6 @@ import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.lifecycleScope
 import java.util.*
 import kotlin.math.roundToInt
-import com.nemesis.droidcrypt.ChatManager
 
 interface ChatCallback {
     fun addChatMessage(sender: String, text: String)
@@ -133,7 +132,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener, ChatCallb
 
         envelopeInputButton?.setOnClickListener {
             val now = System.currentTimeMillis()
-            if (now - lastSendTime < chatManager.SEND_DEBOUNCE_MS) return@setOnClickListener
+            if (now - lastSendTime < ChatManager.SEND_DEBOUNCE_MS) return@setOnClickListener
             lastSendTime = now
             val input = queryInput.text.toString().trim()
             if (input.isNotEmpty()) {
@@ -144,7 +143,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener, ChatCallb
 
         queryInput.setOnEditorActionListener { _, _, _ ->
             val now = System.currentTimeMillis()
-            if (now - lastSendTime < chatManager.SEND_DEBOUNCE_MS) return@setOnEditorActionListener true
+            if (now - lastSendTime < ChatManager.SEND_DEBOUNCE_MS) return@setOnEditorActionListener true
             lastSendTime = now
             val input = queryInput.text.toString().trim()
             if (input.isNotEmpty()) {
@@ -154,7 +153,6 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener, ChatCallb
             true
         }
 
-        // Инициализация TTS
         tts = TextToSpeech(this, this)
         
         if (folderUri == null) {
@@ -181,7 +179,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener, ChatCallb
 
         idleCheckRunnable = object : Runnable {
             override fun run() {
-                if (System.currentTimeMillis() - lastUserInputTime > chatManager.IDLE_TIMEOUT_MS) {
+                if (System.currentTimeMillis() - lastUserInputTime > ChatManager.IDLE_TIMEOUT_MS) {
                     val idleMessage = listOf("Эй, ты здесь?", "Что-то тихо стало...", "Расскажи, о чём думаешь?").random()
                     addChatMessage(currentMascotName, idleMessage)
                 }
@@ -310,7 +308,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener, ChatCallb
         }
     }
 
-    private fun showTypingIndicator() {
+    override fun showTypingIndicator() {
         runOnUiThread {
             val existing = messagesContainer.findViewWithTag<View>("typingView")
             if (existing != null) return@runOnUiThread
@@ -399,8 +397,8 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener, ChatCallb
             }
             messagesContainer.addView(row)
             messagesContainer.findViewWithTag<View>("typingView")?.let { messagesContainer.removeView(it) }
-            if (messagesContainer.childCount > chatManager.MAX_MESSAGES) {
-                val removeCount = messagesContainer.childCount - chatManager.MAX_MESSAGES
+            if (messagesContainer.childCount > ChatManager.MAX_MESSAGES) {
+                val removeCount = messagesContainer.childCount - ChatManager.MAX_MESSAGES
                 repeat(removeCount) { messagesContainer.removeViewAt(0) }
             }
             scrollView.post { scrollView.smoothScrollTo(0, messagesContainer.bottom) }
