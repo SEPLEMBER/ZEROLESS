@@ -29,15 +29,6 @@ object ChatCore {
 
     fun getAntiSpamResponse(): String = antiSpamResponses.random()
 
-    // --- Универсальная нормализация ---
-    fun normalizeForIndex(s: String): String {
-        val lower = s.lowercase(Locale.getDefault())
-        val cleaned = lower.replace(Regex("[^\\p{L}\\p{Nd}\\s]"), " ")
-        return cleaned.replace(Regex("\\s+"), " ").trim()
-    }
-
-    fun normalizeToken(t: String): String = normalizeForIndex(t)
-
     // --- Загрузка синонимов и стоп-слов ---
     fun loadSynonymsAndStopwords(
         context: Context,
@@ -59,7 +50,7 @@ object ChatCore {
                         if (l.startsWith("*") && l.endsWith("*") && l.length > 1) {
                             l = l.substring(1, l.length - 1)
                         }
-                        val parts = l.split(";").map { normalizeForIndex(it) }.filter { it.isNotEmpty() }
+                        val parts = l.split(";").map { Engine.normalizeText(it) }.filter { it.isNotEmpty() }
                         if (parts.isNotEmpty()) {
                             val canonical = parts.last()
                             parts.forEach { p -> synonymsMap[p] = canonical }
@@ -71,7 +62,7 @@ object ChatCore {
             dir.findFile("stopwords.txt")?.takeIf { it.exists() }?.let { stopFile ->
                 context.contentResolver.openInputStream(stopFile.uri)?.bufferedReader()?.use { reader ->
                     val parts = reader.readText().split(Regex("[\\r\\n\\t,|^;]+"))
-                        .map { normalizeForIndex(it) }
+                        .map { Engine.normalizeText(it) }
                         .filter { it.isNotEmpty() }
                     stopwords.addAll(parts)
                 }
@@ -97,11 +88,6 @@ object ChatCore {
             val file = dir.findFile(filename) ?: return Pair(templates, keywords)
             if (!file.exists()) return Pair(templates, keywords)
 
-            fun filterAndMap(input: String): String {
-                val toks = input.split(Regex("\\s+")).map { normalizeForIndex(it) }
-                return toks.map { synonymsSnapshot[it] ?: it }.filter { it !in stopwordsSnapshot }.joinToString(" ")
-            }
-
             context.contentResolver.openInputStream(file.uri)?.bufferedReader()?.useLines { lines ->
                 lines.forEach { raw ->
                     val l = raw.trim()
@@ -109,12 +95,12 @@ object ChatCore {
 
                     if (l.startsWith("-")) {
                         val (key, respRaw) = l.substring(1).split("=", limit = 2).map { it.trim() }
-                        val keyMapped = filterAndMap(key)
+                        val (mappedTokens, keyMapped) = Engine.filterStopwordsAndMapSynonymsStatic(key, synonymsSnapshot, stopwordsSnapshot)
                         val responses = respRaw.split("|").map { it.trim() }.filter { it.isNotEmpty() }
                         if (keyMapped.isNotEmpty() && responses.isNotEmpty()) keywords[keyMapped] = responses.toMutableList()
                     } else {
                         val (trigger, respRaw) = l.split("=", limit = 2).map { it.trim() }
-                        val triggerMapped = filterAndMap(trigger)
+                        val (mappedTokens, triggerMapped) = Engine.filterStopwordsAndMapSynonymsStatic(trigger, synonymsSnapshot, stopwordsSnapshot)
                         val responses = respRaw.split("|").map { it.trim() }.filter { it.isNotEmpty() }
                         if (triggerMapped.isNotEmpty() && responses.isNotEmpty()) templates[triggerMapped] = responses.toMutableList()
                     }
@@ -140,12 +126,8 @@ object ChatCore {
         val uriLocal = folderUri ?: return null
         try {
             val dir = DocumentFile.fromTreeUri(context, uriLocal) ?: return null
-            fun filterAndMap(input: String): String {
-                val toks = input.split(Regex("\\s+")).map { normalizeForIndex(it) }
-                return toks.map { synonymsSnapshot[it] ?: it }.filter { it !in stopwordsSnapshot }.joinToString(" ")
-            }
-            val qMapped = filterAndMap(qFiltered)
-            val qSet = qMapped.split(" ").toSet()
+            val (qMappedTokens, qMapped) = Engine.filterStopwordsAndMapSynonymsStatic(qFiltered, synonymsSnapshot, stopwordsSnapshot)
+            val qSet = qMappedTokens.toSet()
 
             for (i in 1..9) {
                 val filename = "core$i.txt"
@@ -161,7 +143,8 @@ object ChatCore {
                 var best: String? = null
                 var bestScore = 0.0
                 for (key in templates.keys) {
-                    val keySet = key.split(" ").toSet()
+                    val keyTokens = key.split(" ")
+                    val keySet = keyTokens.toSet()
                     val score = engine.weightedJaccard(qSet, keySet)
                     if (score > bestScore) {
                         bestScore = score
@@ -175,13 +158,13 @@ object ChatCore {
                 var bestLev: String? = null
                 var bestDist = Int.MAX_VALUE
                 for (key in templates.keys.take(20)) {
-                    val d = engine.levenshtein(qMapped, key, qMapped)
+                    val d = engine.levenshtein(qMapped, key, qFiltered)
                     if (d < bestDist) {
                         bestDist = d
                         bestLev = key
                     }
                 }
-                if (bestLev != null && bestDist <= engine.getFuzzyDistance(qMapped)) {
+                if (bestLev != null && bestDist <= engine.getFuzzyDistance(qFiltered)) {
                     return templates[bestLev]?.random()
                 }
             }
@@ -199,8 +182,8 @@ object ChatCore {
         userInput: String,
         filename: String = "core1.txt"
     ): String {
-        val normalized = normalizeForIndex(userInput)
-        val tokens = normalized.split(" ").filter { it.isNotBlank() }
+        val normalized = Engine.normalizeText(userInput)
+        val tokens = Engine.tokenizeStatic(normalized)
 
         val resp = searchInCoreFiles(
             context,
@@ -210,7 +193,7 @@ object ChatCore {
             engine,
             engine.synonymsMap,
             engine.stopwords,
-            jaccardThreshold = 0.6
+            jaccardThreshold = Engine.JACCARD_THRESHOLD
         )
         return resp ?: getDummyResponse(userInput)
     }
@@ -220,8 +203,8 @@ object ChatCore {
         context: Context,
         folderUri: Uri?,
         filename: String,
-        templatesMap: MutableMap<String, String>,
-        keywords: MutableMap<String, String>,
+        templatesMap: MutableMap<String, MutableList<String>>,
+        keywords: MutableMap<String, MutableList<String>>,
         jaccardList: MutableList<Pair<String, Set<String>>>,
         levenshteinMap: MutableMap<String, String>,
         synonymsMap: MutableMap<String, String>,
@@ -237,9 +220,9 @@ object ChatCore {
                 stopwords
             )
             templatesMap.clear()
-            parsedTemplates.forEach { (k, v) -> templatesMap[k] = v.random() }
+            templatesMap.putAll(parsedTemplates)
             keywords.clear()
-            parsedKeywords.forEach { (k, v) -> keywords[k] = v.random() }
+            keywords.putAll(parsedKeywords)
             true to (parsedTemplates.size + parsedKeywords.size)
         } catch (e: Exception) {
             Log.e(TAG, "Error loading templates", e)
@@ -255,9 +238,9 @@ object ChatCore {
         contextMap: MutableMap<String, String>
     ) {
         templatesMap.clear(); keywordResponses.clear(); mascotList.clear(); contextMap.clear()
-        templatesMap[normalizeForIndex("привет")] = mutableListOf("Привет! Чем могу помочь?", "Здравствуй!")
-        templatesMap[normalizeForIndex("как дела")] = mutableListOf("Всё отлично, а у тебя?", "Нормально, как дела?")
-        keywordResponses[normalizeForIndex("спасибо")] = mutableListOf("Рад, что помог!", "Всегда пожалуйста!")
+        templatesMap[Engine.normalizeText("привет")] = mutableListOf("Привет! Чем могу помочь?", "Здравствуй!")
+        templatesMap[Engine.normalizeText("как дела")] = mutableListOf("Всё отлично, а у тебя?", "Нормально, как дела?")
+        keywordResponses[Engine.normalizeText("спасибо")] = mutableListOf("Рад, что помог!", "Всегда пожалуйста!")
     }
 
     fun getDummyResponse(query: String): String =
@@ -267,9 +250,9 @@ object ChatCore {
             "Не понял запрос. Попробуй другой вариант."
 
     fun detectContext(input: String, contextMap: Map<String, String>, engine: Engine): String? {
-        val tokens = engine.filterStopwordsAndMapSynonyms(input).first
+        val (tokens, _) = engine.filterStopwordsAndMapSynonyms(input)
         return contextMap.maxByOrNull { (k, _) ->
-            val kw = engine.filterStopwordsAndMapSynonyms(k).first
+            val (kw, _) = engine.filterStopwordsAndMapSynonyms(k)
             tokens.count { it in kw }
         }?.value
     }
