@@ -1,7 +1,5 @@
 package com.nemesis.droidcrypt
 
-import com.nemesis.droidcrypt.Engine
-import com.nemesis.droidcrypt.ChatCore
 import android.animation.ObjectAnimator
 import android.content.Intent
 import android.graphics.BitmapFactory
@@ -9,6 +7,7 @@ import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.GradientDrawable
 import android.media.MediaPlayer
+import android.net.Uri
 import android.os.*
 import android.speech.tts.TextToSpeech
 import android.util.Log
@@ -20,13 +19,16 @@ import android.view.WindowManager
 import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.graphics.ColorUtils
-import androidx.preference.PreferenceManager
 import androidx.documentfile.provider.DocumentFile
+import androidx.lifecycle.lifecycleScope
+import androidx.preference.PreferenceManager
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.*
 import kotlin.collections.ArrayList
 import kotlin.collections.HashMap
 import kotlin.math.roundToInt
-import kotlinx.coroutines.*
 
 class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
