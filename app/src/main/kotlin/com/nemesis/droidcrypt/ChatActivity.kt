@@ -289,14 +289,17 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         filename = filename,
         templatesMap = templatesMap,
         keywordResponses = keywordResponses,
+        mascotList = mutableListOf(),
+        contextMap = HashMap(),
         synonymsSnapshot = engine.synonymsMap,
-        stopwordsSnapshot = engine.stopwords
+        stopwordsSnapshot = engine.stopwords,
+        metadataOut = metadataOut
     )
 
     if (ok) {
         engine.templatesMap.clear()
         engine.templatesMap.putAll(templatesMap)
-        // Здесь можно при желании сохранить keywordResponses в движке, если нужно
+        // При желании можно сохранить keywordResponses в движке
         metadataOut["mascot_name"]?.let { currentMascotName = it }
         metadataOut["mascot_icon"]?.let { currentMascotIcon = it }
         metadataOut["theme_color"]?.let { currentThemeColor = it }
