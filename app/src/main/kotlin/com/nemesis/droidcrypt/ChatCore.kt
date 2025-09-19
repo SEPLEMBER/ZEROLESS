@@ -78,7 +78,8 @@ object ChatCore {
         folderUri: Uri?,
         filename: String,
         synonymsSnapshot: Map<String, String>,
-        stopwordsSnapshot: Set<String>
+        stopwordsSnapshot: Set<String>,
+        contextMap: MutableMap<String, String>? = null // Добавлен параметр для заполнения contextMap
     ): Pair<HashMap<String, MutableList<String>>, HashMap<String, MutableList<String>>> {
         val templates = HashMap<String, MutableList<String>>()
         val keywords = HashMap<String, MutableList<String>>()
@@ -91,18 +92,29 @@ object ChatCore {
             context.contentResolver.openInputStream(file.uri)?.bufferedReader()?.useLines { lines ->
                 lines.forEach { raw ->
                     val l = raw.trim()
-                    if (l.isEmpty() || !l.contains("=")) return@forEach
+                    if (l.isEmpty()) return@forEach
 
-                    if (l.startsWith("-")) {
-                        val (key, respRaw) = l.substring(1).split("=", limit = 2).map { it.trim() }
-                        val (mappedTokens, keyMapped) = Engine.filterStopwordsAndMapSynonymsStatic(key, synonymsSnapshot, stopwordsSnapshot)
-                        val responses = respRaw.split("|").map { it.trim() }.filter { it.isNotEmpty() }
-                        if (keyMapped.isNotEmpty() && responses.isNotEmpty()) keywords[keyMapped] = responses.toMutableList()
-                    } else {
-                        val (trigger, respRaw) = l.split("=", limit = 2).map { it.trim() }
-                        val (mappedTokens, triggerMapped) = Engine.filterStopwordsAndMapSynonymsStatic(trigger, synonymsSnapshot, stopwordsSnapshot)
-                        val responses = respRaw.split("|").map { it.trim() }.filter { it.isNotEmpty() }
-                        if (triggerMapped.isNotEmpty() && responses.isNotEmpty()) templates[triggerMapped] = responses.toMutableList()
+                    when {
+                        l.startsWith(":") && l.contains("=") -> {
+                            // Обработка :ключ=файл для contextMap
+                            val (key, fileTarget) = l.substring(1).split("=", limit = 2).map { it.trim() }
+                            val keyMapped = Engine.filterStopwordsAndMapSynonymsStatic(key, synonymsSnapshot, stopwordsSnapshot).second
+                            if (keyMapped.isNotEmpty() && fileTarget.isNotEmpty()) {
+                                contextMap?.put(keyMapped, fileTarget)
+                            }
+                        }
+                        l.startsWith("-") -> {
+                            val (key, respRaw) = l.substring(1).split("=", limit = 2).map { it.trim() }
+                            val (mappedTokens, keyMapped) = Engine.filterStopwordsAndMapSynonymsStatic(key, synonymsSnapshot, stopwordsSnapshot)
+                            val responses = respRaw.split("|").map { it.trim() }.filter { it.isNotEmpty() }
+                            if (keyMapped.isNotEmpty() && responses.isNotEmpty()) keywords[keyMapped] = responses.toMutableList()
+                        }
+                        l.contains("=") -> {
+                            val (trigger, respRaw) = l.split("=", limit = 2).map { it.trim() }
+                            val (mappedTokens, triggerMapped) = Engine.filterStopwordsAndMapSynonymsStatic(trigger, synonymsSnapshot, stopwordsSnapshot)
+                            val responses = respRaw.split("|").map { it.trim() }.filter { it.isNotEmpty() }
+                            if (triggerMapped.isNotEmpty() && responses.isNotEmpty()) templates[triggerMapped] = responses.toMutableList()
+                        }
                     }
                 }
             }
@@ -180,22 +192,78 @@ object ChatCore {
         folderUri: Uri?,
         engine: Engine,
         userInput: String,
-        filename: String = "core1.txt"
+        filename: String = "base.txt",
+        contextMap: Map<String, String> // Добавлен параметр для использования contextMap
     ): String {
         val normalized = Engine.normalizeText(userInput)
         val tokens = Engine.tokenizeStatic(normalized)
+        val (qTokensFiltered, qFiltered) = engine.filterStopwordsAndMapSynonyms(normalized)
 
-        val resp = searchInCoreFiles(
-            context,
-            folderUri,
-            normalized,
-            tokens,
-            engine,
-            engine.synonymsMap,
-            engine.stopwords,
-            jaccardThreshold = Engine.JACCARD_THRESHOLD
+        // Сначала ищем в текущем контексте
+        val currentContextResult = searchInCoreFiles(
+            context, folderUri, qFiltered, tokens, engine,
+            engine.synonymsMap, engine.stopwords, Engine.JACCARD_THRESHOLD
         )
-        return resp ?: getDummyResponse(userInput)
+        if (currentContextResult != null) return currentContextResult
+
+        // Проверяем base.txt для ключевых слов
+        val tempContextMap = HashMap<String, String>()
+        val (baseTemplates, baseKeywords) = parseTemplatesFromFile(
+            context, folderUri, "base.txt", engine.synonymsMap, engine.stopwords, tempContextMap
+        )
+        baseTemplates[qFiltered]?.let { return it.random() }
+        for ((k, v) in baseKeywords) {
+            if (qFiltered.contains(k)) return v.random()
+        }
+
+        // Проверяем contextMap для переключения контекста
+        val detectedContext = detectContext(normalized, contextMap, engine)
+        if (detectedContext != null && detectedContext != filename) {
+            // Переключаемся в новый контекст и ищем там
+            val (newTemplates, newKeywords) = parseTemplatesFromFile(
+                context, folderUri, detectedContext, engine.synonymsMap, engine.stopwords
+            )
+            newTemplates[qFiltered]?.let { return it.random() }
+            for ((k, v) in newKeywords) {
+                if (qFiltered.contains(k)) return v.random()
+            }
+
+            // Jaccard/Levenshtein в новом контексте
+            var best: String? = null
+            var bestScore = 0.0
+            val qSet = qTokensFiltered.toSet()
+            for (key in newTemplates.keys) {
+                val keyTokens = Engine.filterStopwordsAndMapSynonymsStatic(key, engine.synonymsMap, engine.stopwords).first.toSet()
+                val score = engine.weightedJaccard(qSet, keyTokens)
+                if (score > bestScore) {
+                    bestScore = score
+                    best = key
+                }
+            }
+            if (best != null && bestScore >= Engine.JACCARD_THRESHOLD) {
+                return newTemplates[best]?.random() ?: getDummyResponse(userInput)
+            }
+
+            var bestLev: String? = null
+            var bestDist = Int.MAX_VALUE
+            for (key in newTemplates.keys.take(20)) {
+                val d = engine.levenshtein(qFiltered, key, qFiltered)
+                if (d < bestDist) {
+                    bestDist = d
+                    bestLev = key
+                }
+            }
+            if (bestLev != null && bestDist <= engine.getFuzzyDistance(qFiltered)) {
+                return newTemplates[bestLev]?.random() ?: getDummyResponse(userInput)
+            }
+        }
+
+        // Если ничего не найдено, ищем в core1-core9
+        val coreResult = searchInCoreFiles(
+            context, folderUri, qFiltered, tokens, engine,
+            engine.synonymsMap, engine.stopwords, Engine.JACCARD_THRESHOLD
+        )
+        return coreResult ?: "Извините, ничего не нашел. Попробуйте другой запрос."
     }
 
     // --- loadTemplatesFromFile ---
@@ -209,7 +277,8 @@ object ChatCore {
         levenshteinMap: MutableMap<String, String>,
         synonymsMap: MutableMap<String, String>,
         stopwords: MutableSet<String>,
-        metadataOut: MutableMap<String, String>
+        metadataOut: MutableMap<String, String>,
+        contextMap: MutableMap<String, String>
     ): Pair<Boolean, Int> {
         return try {
             val (parsedTemplates, parsedKeywords) = parseTemplatesFromFile(
@@ -217,7 +286,8 @@ object ChatCore {
                 folderUri,
                 filename,
                 synonymsMap,
-                stopwords
+                stopwords,
+                contextMap // Передаём contextMap для заполнения
             )
             templatesMap.clear()
             templatesMap.putAll(parsedTemplates)
