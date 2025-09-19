@@ -31,8 +31,8 @@ import kotlin.math.abs
 import kotlin.math.log10
 import kotlin.math.min
 import kotlin.math.roundToInt
-import com.nemesis.droidcrypt.Engine
 import com.nemesis.droidcrypt.ChatCore
+import com.nemesis.droidcrypt.Engine
 
 class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
@@ -399,9 +399,10 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 return@launch
             }
 
-            // Ключевые ответы
+            // Ключевые ответы (без фильтра стоп-слов, lowercase)
+            val qFilteredLower = qFiltered.lowercase(Locale.ROOT)
             for ((keyword, responses) in keywordResponsesSnapshot) {
-                if (qFiltered.contains(keyword) && responses.isNotEmpty()) {
+                if (qFilteredLower.contains(keyword) && responses.isNotEmpty()) {
                     withContext(Dispatchers.Main) {
                         addChatMessage(currentMascotName, responses.random())
                         startIdleTimer()
@@ -434,12 +435,12 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             // Jaccard
             var bestByJaccard: String? = null
             var bestJaccard = 0.0
-            val qSet = qTokens.toSet()
+            val qTokensList = qTokens
             val jaccardThreshold = engine.getJaccardThreshold(qFiltered)
             for (key in candidates) {
-                val keyTokens = Engine.filterStopwordsAndMapSynonymsStatic(key, synonymsSnapshot, stopwordsSnapshot).first.toSet()
-                if (keyTokens.isEmpty()) continue
-                val weightedJ = engine.weightedJaccard(qSet, keyTokens)
+                val keyTokensList = Engine.filterStopwordsAndMapSynonymsStatic(key, synonymsSnapshot, stopwordsSnapshot).first
+                if (keyTokensList.isEmpty()) continue
+                val weightedJ = engine.weightedJaccard(qTokensList, keyTokensList)
                 if (weightedJ > bestJaccard) {
                     bestJaccard = weightedJ
                     bestByJaccard = key
@@ -458,13 +459,13 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 }
             }
 
-            // Levenshtein
+            // Damerau-Levenshtein
             var bestKey: String? = null
             var bestDist = Int.MAX_VALUE
             for (key in candidates) {
                 val maxDist = engine.getFuzzyDistance(qFiltered)
                 if (kotlin.math.abs(key.length - qFiltered.length) > maxDist + 1) continue
-                val d = engine.levenshtein(qFiltered, key, qFiltered)
+                val d = engine.damerauLevenshtein(qFiltered, key, qFiltered)
                 if (d < bestDist) {
                     bestDist = d
                     bestKey = key
@@ -546,10 +547,11 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 var bestLocal: String? = null
                 var bestLocalJ = 0.0
                 val qSetLocal = tokensLocal.toSet()
+                val qTokensLocalList = tokensLocal
                 for (key in localCandidates) {
-                    val keyTokens = Engine.filterStopwordsAndMapSynonymsStatic(key, synonymsSnapshot, stopwordsSnapshot).first.toSet()
-                    if (keyTokens.isEmpty()) continue
-                    val weightedJ = engine.weightedJaccard(qSetLocal, keyTokens)
+                    val keyTokensList = Engine.filterStopwordsAndMapSynonymsStatic(key, synonymsSnapshot, stopwordsSnapshot).first
+                    if (keyTokensList.isEmpty()) continue
+                    val weightedJ = engine.weightedJaccard(qTokensLocalList, keyTokensList)
                     if (weightedJ > bestLocalJ) {
                         bestLocalJ = weightedJ
                         bestLocal = key
@@ -573,7 +575,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 for (key in localCandidates) {
                     val maxD = engine.getFuzzyDistance(qFiltered)
                     if (kotlin.math.abs(key.length - qFiltered.length) > maxD + 1) continue
-                    val d = engine.levenshtein(qFiltered, key, qFiltered)
+                    val d = engine.damerauLevenshtein(qFiltered, key, qFiltered)
                     if (d < bestLocalDist) {
                         bestLocalDist = d
                         bestLocalKey = key
