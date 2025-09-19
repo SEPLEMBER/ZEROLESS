@@ -28,6 +28,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.*
 import kotlin.math.roundToInt
+import com.nemesis.droidcrypt.Engine
+import com.nemesis.droidcrypt.ChatCore
 
 class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
