@@ -960,7 +960,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             }
             contentResolver.openInputStream(file.uri)?.bufferedReader()?.use { reader ->
                 reader.forEachLine { raw ->
-                    val l = raw.trim()
+                    val l = Engine.normalizeText(raw.trim())
                     if (l.isEmpty()) return@forEachLine
                     if (filename == "base.txt" && l.startsWith(":") && l.endsWith(":")) {
                         val contextLine = l.substring(1, l.length - 1)
