@@ -192,7 +192,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             val (ok, _) = ChatCore.loadTemplatesFromFile(
                 this, folderUri, currentContext,
                 templatesMap, keywordResponses, mutableListOf(), mutableMapOf(),
-                synonymsMap, stopwords, metadataOut, contextMap
+                synonymsMap, stopwords, metadataOut
             )
             if (!ok) {
                 // fallback
@@ -506,23 +506,168 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 }
             }
 
-            // Поиск ответа через ChatCore.findBestResponse
-            val response = ChatCore.findBestResponse(
-                this@ChatActivity, folderUri, engine, qOrigRaw, currentContext, contextMapSnapshot
-            )
+            // Попытка детекта контекста (по contextMapSnapshot)
+            val detectedContext = ChatCore.detectContext(qFiltered, contextMapSnapshot, engine)
 
-            withContext(Dispatchers.Main) {
-                // Проверяем, изменился ли контекст
-                val detectedContext = ChatCore.detectContext(qFiltered, contextMapSnapshot, engine)
-                if (detectedContext != null && detectedContext != currentContext) {
-                    currentContext = detectedContext
-                    loadTemplatesFromFile(currentContext)
-                    addChatMessage(currentMascotName, "Переключился на тему: $currentContext")
+            if (detectedContext != null) {
+                withContext(Dispatchers.Main) {
+                    if (detectedContext != currentContext) {
+                        currentContext = detectedContext
+                        // Перезагрузить шаблоны для нового контекста через ChatCore
+                        val metadataOut = HashMap<String, String>()
+                        val (ok, _) = ChatCore.loadTemplatesFromFile(
+                            this@ChatActivity, folderUri, currentContext,
+                            templatesMap, keywordResponses, mutableListOf(), mutableMapOf(),
+                            synonymsMap, stopwords, metadataOut
+                        )
+                        if (ok) {
+                            metadataOut["mascot_name"]?.let { currentMascotName = it }
+                            metadataOut["mascot_icon"]?.let { currentMascotIcon = it }
+                            metadataOut["theme_color"]?.let { currentThemeColor = it }
+                            metadataOut["theme_background"]?.let { currentThemeBackground = it }
+                        }
+                        rebuildInvertedIndex()
+                        engine.computeTokenWeights()
+                        updateAutoComplete()
+                    }
                 }
 
-                addChatMessage(currentMascotName, response)
+                // Сначала попытка найти точный/локальный ответ в файле контекста
+                val (localTemplates, localKeywords) = ChatCore.parseTemplatesFromFile(
+                    this@ChatActivity, folderUri, detectedContext, synonymsSnapshot, stopwordsSnapshot
+                )
+                localTemplates[qFiltered]?.let { possible ->
+                    if (possible.isNotEmpty()) {
+                        val response = possible.random()
+                        withContext(Dispatchers.Main) {
+                            addChatMessage(currentMascotName, response)
+                            startIdleTimer()
+                            cacheResponse(qKeyForCount, response)
+                        }
+                        return@launch
+                    }
+                }
+
+                // local inverted + jaccard/levenshtein аналогично (упрощённо)
+                val localInverted = HashMap<String, MutableList<String>>()
+                for ((k, v) in localTemplates) {
+                    val toks = Engine.filterStopwordsAndMapSynonymsStatic(k, synonymsSnapshot, stopwordsSnapshot).first
+                    for (t in toks) {
+                        val list = localInverted.getOrPut(t) { mutableListOf() }
+                        if (!list.contains(k)) list.add(k)
+                    }
+                }
+                val localCandidateCounts = HashMap<String, Int>()
+                val tokensLocal = qTokens
+                for (tok in tokensLocal) {
+                    localInverted[tok]?.forEach { trig ->
+                        localCandidateCounts[trig] = localCandidateCounts.getOrDefault(trig, 0) + 1
+                    }
+                }
+                val localCandidates: List<String> = if (localCandidateCounts.isNotEmpty()) {
+                    localCandidateCounts.entries
+                        .filter { it.value >= Engine.CANDIDATE_TOKEN_THRESHOLD }
+                        .sortedByDescending { it.value }
+                        .map { it.key }
+                        .take(Engine.MAX_CANDIDATES_FOR_LEV)
+                } else {
+                    val md = engine.getFuzzyDistance(qFiltered)
+                    localTemplates.keys.filter { kotlin.math.abs(it.length - qFiltered.length) <= md }
+                        .take(Engine.MAX_CANDIDATES_FOR_LEV)
+                }
+
+                var bestLocal: String? = null
+                var bestLocalJ = 0.0
+                val qSetLocal = tokensLocal.toSet()
+                for (key in localCandidates) {
+                    val keyTokens = Engine.filterStopwordsAndMapSynonymsStatic(key, synonymsSnapshot, stopwordsSnapshot).first.toSet()
+                    if (keyTokens.isEmpty()) continue
+                    val weightedJ = engine.weightedJaccard(qSetLocal, keyTokens)
+                    if (weightedJ > bestLocalJ) {
+                        bestLocalJ = weightedJ
+                        bestLocal = key
+                    }
+                }
+                if (bestLocal != null && bestLocalJ >= jaccardThreshold) {
+                    val possible = localTemplates[bestLocal]
+                    if (!possible.isNullOrEmpty()) {
+                        val response = possible.random()
+                        withContext(Dispatchers.Main) {
+                            addChatMessage(currentMascotName, response)
+                            startIdleTimer()
+                            cacheResponse(qKeyForCount, response)
+                        }
+                        return@launch
+                    }
+                }
+
+                var bestLocalKey: String? = null
+                var bestLocalDist = Int.MAX_VALUE
+                for (key in localCandidates) {
+                    val maxD = engine.getFuzzyDistance(qFiltered)
+                    if (kotlin.math.abs(key.length - qFiltered.length) > maxD + 1) continue
+                    val d = engine.levenshtein(qFiltered, key, qFiltered)
+                    if (d < bestLocalDist) {
+                        bestLocalDist = d
+                        bestLocalKey = key
+                    }
+                    if (bestLocalDist == 0) break
+                }
+                if (bestLocalKey != null && bestLocalDist <= engine.getFuzzyDistance(qFiltered)) {
+                    val possible = localTemplates[bestLocalKey]
+                    if (!possible.isNullOrEmpty()) {
+                        val response = possible.random()
+                        withContext(Dispatchers.Main) {
+                            addChatMessage(currentMascotName, response)
+                            startIdleTimer()
+                            cacheResponse(qKeyForCount, response)
+                        }
+                        return@launch
+                    }
+                }
+
+                // Поиск по core-файлам через ChatCore (использует engine для веса/levenshtein)
+                val coreResult = ChatCore.searchInCoreFiles(
+                    this@ChatActivity, folderUri, qFiltered, qTokens, engine,
+                    synonymsSnapshot, stopwordsSnapshot, jaccardThreshold
+                )
+                if (coreResult != null) {
+                    withContext(Dispatchers.Main) {
+                        addChatMessage(currentMascotName, coreResult)
+                        startIdleTimer()
+                        cacheResponse(qKeyForCount, coreResult)
+                    }
+                    return@launch
+                }
+
+                val dummy = ChatCore.getDummyResponse(qOrig)
+                withContext(Dispatchers.Main) {
+                    addChatMessage(currentMascotName, dummy)
+                    startIdleTimer()
+                    cacheResponse(qKeyForCount, dummy)
+                }
+                return@launch
+            }
+
+            // Ищем по core, если не найдено
+            val coreResult = ChatCore.searchInCoreFiles(
+                this@ChatActivity, folderUri, qFiltered, qTokens, engine,
+                synonymsSnapshot, stopwordsSnapshot, jaccardThreshold
+            )
+            if (coreResult != null) {
+                withContext(Dispatchers.Main) {
+                    addChatMessage(currentMascotName, coreResult)
+                    startIdleTimer()
+                    cacheResponse(qKeyForCount, coreResult)
+                }
+                return@launch
+            }
+
+            val dummy = ChatCore.getDummyResponse(qOrig)
+            withContext(Dispatchers.Main) {
+                addChatMessage(currentMascotName, dummy)
                 startIdleTimer()
-                cacheResponse(qKeyForCount, response)
+                cacheResponse(qKeyForCount, dummy)
             }
         }
     }
@@ -812,11 +957,14 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     // Упрощённая загрузка шаблонов — делегируем ChatCore, чтобы не дублировать логику
     private fun loadTemplatesFromFile(filename: String) {
+        if (filename == "base.txt") {
+            contextMap.clear()
+        }
         val metadataOut = HashMap<String, String>()
         val (ok, _) = ChatCore.loadTemplatesFromFile(
             this, folderUri, filename,
             templatesMap, keywordResponses, mutableListOf(), mutableMapOf(),
-            synonymsMap, stopwords, metadataOut, contextMap
+            synonymsMap, stopwords, metadataOut
         )
         if (!ok) {
             Log.w("ChatActivity", "loadTemplatesFromFile failed — loading fallback")
