@@ -3,7 +3,6 @@ package com.nemesis.droidcrypt
 import kotlin.math.abs
 import kotlin.math.min
 import kotlin.math.log10
-import kotlin.math.roundToInt
 import kotlin.math.max
 import kotlin.collections.HashMap
 import java.util.Locale
@@ -42,6 +41,10 @@ class Engine(
             return s.split(Regex("\\s+")).map { it.trim() }.filter { it.isNotEmpty() }
         }
 
+        /**
+         * Фильтрует стоп-слова и мапит синонимы.
+         * Возвращает Pair<tokensList, joinedString>
+         */
         fun filterStopwordsAndMapSynonymsStatic(input: String, synonymsSnapshot: Map<String, String>, stopwordsSnapshot: Set<String>): Pair<List<String>, String> {
             val toks = tokenizeStatic(input)
             val mapped = toks.map { tok ->
@@ -51,6 +54,16 @@ class Engine(
             }.filter { it.isNotEmpty() && !stopwordsSnapshot.contains(it) }
             val joined = mapped.joinToString(" ")
             return Pair(mapped, joined)
+        }
+
+        /**
+         * Возвращает каноническое представление строки:
+         * токены -> нормализация -> синонимы -> удаление стоп-слов -> сортировка -> join
+         */
+        fun canonicalize(input: String, synonymsSnapshot: Map<String, String>, stopwordsSnapshot: Set<String>): String {
+            val toks = filterStopwordsAndMapSynonymsStatic(input, synonymsSnapshot, stopwordsSnapshot).first
+            if (toks.isEmpty()) return ""
+            return toks.sorted().joinToString(" ")
         }
     }
 
