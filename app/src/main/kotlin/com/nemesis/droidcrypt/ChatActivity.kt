@@ -25,6 +25,7 @@ import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.lifecycleScope
 import java.util.*
 import kotlin.math.roundToInt
+import com.nemesis.droidcrypt.ChatManager
 
 interface ChatCallback {
     fun addChatMessage(sender: String, text: String)
