@@ -31,6 +31,8 @@ import kotlin.math.abs
 import kotlin.math.log10
 import kotlin.math.min
 import kotlin.math.roundToInt
+import com.nemesis.droidcrypt.Engine
+import com.nemesis.droidcrypt.ChatCore
 
 class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
