@@ -29,6 +29,12 @@ object ChatCore {
 
     fun getAntiSpamResponse(): String = antiSpamResponses.random()
 
+    // canonical helper — единый способ получения ключа из сырого текста:
+    private fun canonicalKeyFromText(text: String, synonyms: Map<String, String>, stopwords: Set<String>): String {
+        val tokens = Engine.filterStopwordsAndMapSynonymsStatic(text, synonyms, stopwords).first
+        return tokens.sorted().joinToString(" ")
+    }
+
     // --- Загрузка синонимов и стоп-слов ---
     fun loadSynonymsAndStopwords(
         context: Context,
@@ -103,7 +109,6 @@ object ChatCore {
                             if (keyMapped.isNotEmpty() && responses.isNotEmpty()) {
                                 keywords[keyMapped] = responses.toMutableList()
                             } else {
-                                // логируем потенциально потерянный ключ (полезно для отладки формата файлов и стоп-слов)
                                 Log.d(TAG, "Skipped keyword (empty after mapping) in $filename: rawKey='$key' -> tokens=$keyTokens")
                             }
                         } else if (l.contains("=")) {
@@ -215,9 +220,9 @@ object ChatCore {
                 // Levenshtein: ограничиваем количество кандидатов константой из Engine
                 var bestLev: String? = null
                 var bestDist = Int.MAX_VALUE
-                val levCandidates = templates.keys.take(engine.MAX_CANDIDATES_FOR_LEV)
+                val levCandidates = templates.keys.take(Engine.MAX_CANDIDATES_FOR_LEV)
                 for (key in levCandidates) {
-                    // сравниваем canonical представления (или пустую строку)
+                    // сравниваем canonical представления
                     val d = engine.levenshtein(qCanonical, key, qCanonical)
                     if (d < bestDist) {
                         bestDist = d
@@ -292,16 +297,40 @@ object ChatCore {
     }
 
     // --- Заглушки ---
+    // Обратите внимание: сигнатура включает снэпшоты synonyms/stopwords, чтобы ключи были canonical
     fun loadFallbackTemplates(
         templatesMap: MutableMap<String, MutableList<String>>,
         keywordResponses: MutableMap<String, MutableList<String>>,
         mascotList: MutableList<Map<String, String>>,
-        contextMap: MutableMap<String, String>
+        contextMap: MutableMap<String, String>,
+        synonymsSnapshot: Map<String, String>,
+        stopwordsSnapshot: Set<String>
     ) {
         templatesMap.clear(); keywordResponses.clear(); mascotList.clear(); contextMap.clear()
-        templatesMap[Engine.normalizeText("привет")] = mutableListOf("Привет! Чем могу помочь?", "Здравствуй!")
-        templatesMap[Engine.normalizeText("как дела")] = mutableListOf("Всё отлично, а у тебя?", "Нормально, как дела?")
-        keywordResponses[Engine.normalizeText("спасибо")] = mutableListOf("Рад, что помог!", "Всегда пожалуйста!")
+
+        fun putTemplate(rawKey: String, responses: List<String>) {
+            val k = canonicalKeyFromText(rawKey, synonymsSnapshot, stopwordsSnapshot)
+            if (k.isNotEmpty()) {
+                templatesMap[k] = responses.toMutableList()
+                Log.d(TAG, "Inserted fallback template key='$k' raw='$rawKey'")
+            } else {
+                Log.d(TAG, "Skipped fallback template (empty canonical) raw='$rawKey'")
+            }
+        }
+
+        fun putKeyword(rawKey: String, responses: List<String>) {
+            val k = canonicalKeyFromText(rawKey, synonymsSnapshot, stopwordsSnapshot)
+            if (k.isNotEmpty()) {
+                keywordResponses[k] = responses.toMutableList()
+                Log.d(TAG, "Inserted fallback keyword key='$k' raw='$rawKey'")
+            } else {
+                Log.d(TAG, "Skipped fallback keyword (empty canonical) raw='$rawKey'")
+            }
+        }
+
+        putTemplate("привет", listOf("Привет! Чем могу помочь?", "Здравствуй!"))
+        putTemplate("как дела", listOf("Всё отлично, а у тебя?", "Нормально, как дела?"))
+        putKeyword("спасибо", listOf("Рад, что помог!", "Всегда пожалуйста!"))
     }
 
     fun getDummyResponse(query: String): String =
@@ -310,11 +339,13 @@ object ChatCore {
         else
             "Не понял запрос. Попробуй другой вариант."
 
+    // detectContext: предполагаем, что contextMap ключи уже в canonical-форме (sorted tokens join)
     fun detectContext(input: String, contextMap: Map<String, String>, engine: Engine): String? {
-        val tokens = Engine.tokenizeStatic(Engine.normalizeText(input))
+        val inputTokens = Engine.filterStopwordsAndMapSynonymsStatic(input, engine.synonymsMap, engine.stopwords).first.toSet()
         return contextMap.maxByOrNull { (k, _) ->
-            val kw = Engine.tokenizeStatic(Engine.normalizeText(k))
-            tokens.count { it in kw }
+            if (k.isBlank()) return@maxByOrNull 0
+            val ctxTokens = k.split(" ").filter { it.isNotEmpty() }.toSet()
+            inputTokens.count { it in ctxTokens }
         }?.value
     }
 }
