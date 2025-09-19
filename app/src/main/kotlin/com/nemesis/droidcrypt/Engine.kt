@@ -31,7 +31,13 @@ class Engine(
         const val MAX_TEMPLATES_SIZE = 5000
 
         fun normalizeText(s: String): String {
-            val lower = s.lowercase(Locale.getDefault())
+            // Убираем BOM, NBSP, zero-width / format chars и остальное "мусорное"
+            var str = s.replace("\uFEFF", "") // BOM
+            str = str.replace('\u00A0', ' ') // NBSP -> space
+            // Zero-width and formatting characters
+            str = str.replace(Regex("[\\u200B-\\u200F\\u2060-\\u206F]"), "")
+            val lower = str.lowercase(Locale.getDefault())
+            // Убираем всё кроме букв/цифр/пробелов
             val cleaned = lower.replace(Regex("[^\\p{L}\\p{Nd}\\s]"), " ")
             val collapsed = cleaned.replace(Regex("\\s+"), " ").trim()
             return collapsed
@@ -42,10 +48,6 @@ class Engine(
             return s.split(Regex("\\s+")).map { it.trim() }.filter { it.isNotEmpty() }
         }
 
-        /**
-         * Фильтрует стоп-слова и мапит синонимы.
-         * Возвращает Pair<tokensList, joinedString>
-         */
         fun filterStopwordsAndMapSynonymsStatic(input: String, synonymsSnapshot: Map<String, String>, stopwordsSnapshot: Set<String>): Pair<List<String>, String> {
             val toks = tokenizeStatic(input)
             val mapped = toks.map { tok ->
@@ -55,16 +57,6 @@ class Engine(
             }.filter { it.isNotEmpty() && !stopwordsSnapshot.contains(it) }
             val joined = mapped.joinToString(" ")
             return Pair(mapped, joined)
-        }
-
-        /**
-         * Возвращает каноническое представление строки:
-         * токены -> нормализация -> синонимы -> удаление стоп-слов -> сортировка -> join
-         */
-        fun canonicalize(input: String, synonymsSnapshot: Map<String, String>, stopwordsSnapshot: Set<String>): String {
-            val toks = filterStopwordsAndMapSynonymsStatic(input, synonymsSnapshot, stopwordsSnapshot).first
-            if (toks.isEmpty()) return ""
-            return toks.sorted().joinToString(" ")
         }
     }
 
@@ -82,13 +74,17 @@ class Engine(
         }
     }
 
+    /**
+     * Levenshtein distance with early exits but using symmetric fuzzy threshold:
+     * threshold is max(getFuzzyDistance(s), getFuzzyDistance(t))
+     */
     fun levenshtein(s: String, t: String, qFiltered: String): Int {
         if (s == t) return 0
         val n = s.length
         val m = t.length
         if (n == 0) return m
         if (m == 0) return n
-        val maxDist = getFuzzyDistance(qFiltered)
+        val maxDist = max(getFuzzyDistance(qFiltered), getFuzzyDistance(t))
         if (abs(n - m) > maxDist + 2) return Int.MAX_VALUE / 2
         val prev = IntArray(m + 1) { it }
         val curr = IntArray(m + 1)
@@ -104,7 +100,7 @@ class Engine(
                 curr[j] = min(min(deletion, insertion), substitution)
                 if (curr[j] < minInRow) minInRow = curr[j]
             }
-            val maxDistRow = getFuzzyDistance(qFiltered)
+            val maxDistRow = max(getFuzzyDistance(qFiltered), getFuzzyDistance(t))
             if (minInRow > maxDistRow + 2) return Int.MAX_VALUE / 2
             for (k in 0..m) prev[k] = curr[k]
         }
