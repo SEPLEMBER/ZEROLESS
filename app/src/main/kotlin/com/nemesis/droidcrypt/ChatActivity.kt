@@ -177,24 +177,27 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     }
 
     private fun processUserQuery(userInput: String) {
-        addChatMessage("You", userInput)
-        showTypingIndicator()
+    addChatMessage("You", userInput)
+    showTypingIndicator()
 
-        lifecycleScope.launch(Dispatchers.Default) {
-            val response = ChatCore.findBestResponse(
-                this@ChatActivity,
-                folderUri,
-                engine,
-                userInput,
-                currentContext
-            )
+    lifecycleScope.launch(Dispatchers.Default) {
+        val response = ChatCore.searchInCoreFiles(
+            context = this@ChatActivity,
+            folderUri = folderUri,
+            qFiltered = userInput,
+            qTokens = userInput.split(" "),
+            engine = engine,
+            synonymsSnapshot = engine.synonymsMap,
+            stopwordsSnapshot = engine.stopwords,
+            jaccardThreshold = 0.5
+        ) ?: "Не понял запрос. Попробуй другой вариант."
 
-            withContext(Dispatchers.Main) {
-                addChatMessage(currentMascotName, response)
-                startIdleTimer()
-            }
+        withContext(Dispatchers.Main) {
+            addChatMessage(currentMascotName, response)
+            startIdleTimer()
         }
     }
+}
 
     // --- Helpers ---
     private fun getPersistedFolderUri(): Uri? {
