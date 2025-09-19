@@ -5,6 +5,7 @@ import kotlin.math.min
 import kotlin.math.log10
 import kotlin.math.roundToInt
 import kotlin.math.max
+import kotlin.math.sqrt
 import kotlin.collections.HashMap
 import java.util.*
 import kotlin.math.pow
@@ -23,7 +24,7 @@ class Engine(
         const val CANDIDATE_TOKEN_THRESHOLD = 2
         const val MAX_SUBQUERY_RESPONSES = 3
         const val SUBQUERY_RESPONSE_DELAY = 1500L
-        const val MAX_CANDIDATES_FOR_LEV = 8
+        const val MAX_CANDIDATES_FOR_LEV = 20 // Увеличено для лучшей точности
         const val JACCARD_THRESHOLD = 0.75
         const val SEND_DEBOUNCE_MS = 400L
         const val IDLE_TIMEOUT_MS = 30000L
@@ -71,46 +72,54 @@ class Engine(
         }
     }
 
-    fun levenshtein(s: String, t: String, qFiltered: String): Int {
-        if (s == t) return 0
+    fun damerauLevenshtein(s: String, t: String, qFiltered: String): Int {
         val n = s.length
         val m = t.length
         if (n == 0) return m
         if (m == 0) return n
         val maxDist = getFuzzyDistance(qFiltered)
         if (abs(n - m) > maxDist + 2) return Int.MAX_VALUE / 2
-        val prev = IntArray(m + 1) { it }
-        val curr = IntArray(m + 1)
+
+        val matrix = Array(n + 1) { IntArray(m + 1) }
+        for (i in 0..n) matrix[i][0] = i
+        for (j in 0..m) matrix[0][j] = j
+
         for (i in 1..n) {
-            curr[0] = i
-            var minInRow = curr[0]
-            val si = s[i - 1]
             for (j in 1..m) {
-                val cost = if (si == t[j - 1]) 0 else 1
-                val deletion = prev[j] + 1
-                val insertion = curr[j - 1] + 1
-                val substitution = prev[j - 1] + cost
-                curr[j] = min(min(deletion, insertion), substitution)
-                if (curr[j] < minInRow) minInRow = curr[j]
+                val cost = if (s[i - 1] == t[j - 1]) 0 else 1
+                matrix[i][j] = minOf(
+                    matrix[i - 1][j] + 1,   // deletion
+                    matrix[i][j - 1] + 1,   // insertion
+                    matrix[i - 1][j - 1] + cost // substitution
+                )
+                if (i > 1 && j > 1 && s[i - 1] == t[j - 2] && s[i - 2] == t[j - 1]) {
+                    matrix[i][j] = min(matrix[i][j], matrix[i - 2][j - 2] + 1) // transposition
+                }
             }
-            val maxDistRow = getFuzzyDistance(qFiltered)
-            if (minInRow > maxDistRow + 2) return Int.MAX_VALUE / 2
-            for (k in 0..m) prev[k] = curr[k]
         }
-        return prev[m]
+        return matrix[n][m]
     }
 
     fun getJaccardThreshold(query: String): Double {
         return when {
-            query.length <= 10 -> 0.3
-            query.length <= 20 -> 0.4
-            else -> JACCARD_THRESHOLD
+            query.length <= 10 -> 0.5 // Повышен для точности
+            query.length <= 20 -> 0.6
+            else -> 0.8 // Повышен для длинных запросов
         }
     }
 
-    fun weightedJaccard(qSet: Set<String>, keyTokens: Set<String>): Double {
-        val intersection = qSet.intersect(keyTokens)
-        val union = qSet.union(keyTokens)
+    fun weightedJaccard(qTokens: List<String>, keyTokens: List<String>): Double {
+        fun getBigrams(tokens: List<String>): Set<String> {
+            val bigrams = mutableSetOf<String>()
+            for (i in 0 until tokens.size - 1) {
+                bigrams.add("${tokens[i]}_${tokens[i+1]}")
+            }
+            return bigrams
+        }
+        val qSet = qTokens.toSet() + getBigrams(qTokens)
+        val keySet = keyTokens.toSet() + getBigrams(keyTokens)
+        val intersection = qSet.intersect(keySet)
+        val union = qSet.union(keySet)
         val interWeight = intersection.sumOf { tokenWeights.getOrDefault(it, 1.0) }
         val unionWeight = union.sumOf { tokenWeights.getOrDefault(it, 1.0) }
         return if (unionWeight == 0.0) 0.0 else interWeight / unionWeight
