@@ -126,7 +126,11 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         idleCheckRunnable = object : Runnable {
             override fun run() {
                 if (System.currentTimeMillis() - lastUserInputTime > Engine.IDLE_TIMEOUT_MS) {
-                    val idleMessage = listOf("Эй, ты здесь?", "Что-то тихо стало...", "Расскажи, о чём думаешь?").random()
+                    val idleMessage = listOf(
+                        "Эй, ты здесь?",
+                        "Что-то тихо стало...",
+                        "Расскажи, о чём думаешь?"
+                    ).random()
                     addChatMessage(currentMascotName, idleMessage)
                 }
                 dialogHandler.postDelayed(this, 5000)
@@ -177,27 +181,24 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     }
 
     private fun processUserQuery(userInput: String) {
-    addChatMessage("You", userInput)
-    showTypingIndicator()
+        addChatMessage("You", userInput)
+        showTypingIndicator()
 
-    lifecycleScope.launch(Dispatchers.Default) {
-        val response = ChatCore.searchInCoreFiles(
-            context = this@ChatActivity,
-            folderUri = folderUri,
-            qFiltered = userInput,
-            qTokens = userInput.split(" "),
-            engine = engine,
-            synonymsSnapshot = engine.synonymsMap,
-            stopwordsSnapshot = engine.stopwords,
-            jaccardThreshold = 0.5
-        ) ?: "Не понял запрос. Попробуй другой вариант."
+        lifecycleScope.launch(Dispatchers.Default) {
+            val response = ChatCore.findBestResponse(
+                this@ChatActivity,
+                folderUri,
+                engine,
+                userInput,
+                currentContext
+            )
 
-        withContext(Dispatchers.Main) {
-            addChatMessage(currentMascotName, response)
-            startIdleTimer()
+            withContext(Dispatchers.Main) {
+                addChatMessage(currentMascotName, response)
+                startIdleTimer()
+            }
         }
     }
-}
 
     // --- Helpers ---
     private fun getPersistedFolderUri(): Uri? {
@@ -246,7 +247,8 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         runOnUiThread {
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
-                layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+                layoutParams =
+                    LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
             }
             val isUser = sender.equals("You", ignoreCase = true)
             val bubble = TextView(this).apply {
@@ -282,50 +284,51 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     }
 
     private fun loadTemplatesFromFile(filename: String) {
-    val templatesMap = HashMap<String, MutableList<String>>()
-    val keywordResponses = HashMap<String, MutableList<String>>()
-    val metadataOut = HashMap<String, String>()
+        val templatesMap = HashMap<String, MutableList<String>>()
+        val keywordResponses = HashMap<String, MutableList<String>>()
+        val mascotList = mutableListOf<Map<String, String>>()
+        val contextMap = HashMap<String, String>()
 
-    val (ok, _) = ChatCore.loadTemplatesFromFile(
-        context = this,
-        folderUri = folderUri,
-        filename = filename,
-        templatesMap = templatesMap,
-        keywordResponses = keywordResponses,
-        mascotList = mutableListOf(),
-        contextMap = HashMap(),
-        synonymsSnapshot = engine.synonymsMap,
-        stopwordsSnapshot = engine.stopwords,
-        metadataOut = metadataOut
-    )
+        ChatCore.loadTemplatesFromFile(
+            context = this,
+            folderUri = folderUri,
+            filename = filename,
+            templatesMap = templatesMap,
+            keywordResponses = keywordResponses,
+            mascotList = mascotList,
+            contextMap = contextMap
+        )
 
-    if (ok) {
         engine.templatesMap.clear()
         engine.templatesMap.putAll(templatesMap)
-        // При желании можно сохранить keywordResponses в движке
-        metadataOut["mascot_name"]?.let { currentMascotName = it }
-        metadataOut["mascot_icon"]?.let { currentMascotIcon = it }
-        metadataOut["theme_color"]?.let { currentThemeColor = it }
-        metadataOut["theme_background"]?.let { currentThemeBackground = it }
-    } else {
-        ChatCore.loadFallbackTemplates(
-            templatesMap = engine.templatesMap,
-            keywordResponses = HashMap(),
-            mascotList = mutableListOf(),
-            contextMap = HashMap()
-        )
+
+        mascotList.firstOrNull()?.let {
+            it["mascot_name"]?.let { name -> currentMascotName = name }
+            it["mascot_icon"]?.let { icon -> currentMascotIcon = icon }
+            it["theme_color"]?.let { color -> currentThemeColor = color }
+            it["theme_background"]?.let { bg -> currentThemeBackground = bg }
+        }
+
+        if (templatesMap.isEmpty()) {
+            ChatCore.loadFallbackTemplates(
+                templatesMap = engine.templatesMap,
+                keywordResponses = HashMap(),
+                mascotList = mutableListOf(),
+                contextMap = HashMap()
+            )
+        }
     }
-}
 
-private fun dpToPx(dp: Int): Int {
-    val density = resources.displayMetrics.density
-    return (dp * density).roundToInt()
-}
+    private fun dpToPx(dp: Int): Int {
+        val density = resources.displayMetrics.density
+        return (dp * density).roundToInt()
+    }
 
-private fun startIdleTimer() {
-    lastUserInputTime = System.currentTimeMillis()
-    idleCheckRunnable?.let {
-        dialogHandler.removeCallbacks(it)
-        dialogHandler.postDelayed(it, 5000)
+    private fun startIdleTimer() {
+        lastUserInputTime = System.currentTimeMillis()
+        idleCheckRunnable?.let {
+            dialogHandler.removeCallbacks(it)
+            dialogHandler.postDelayed(it, 5000)
+        }
     }
 }
