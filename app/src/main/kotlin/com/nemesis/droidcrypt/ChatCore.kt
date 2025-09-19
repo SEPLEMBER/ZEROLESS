@@ -6,7 +6,7 @@ import android.util.Log
 import androidx.documentfile.provider.DocumentFile
 import java.util.*
 import kotlin.collections.HashMap
-import com.nemesis.nemesis.droidcrypt.Engine
+import com.nemesis.droidcrypt.Engine
 
 object ChatCore {
     private const val TAG = "ChatCore"
