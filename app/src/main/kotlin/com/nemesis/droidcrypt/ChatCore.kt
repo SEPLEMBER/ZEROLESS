@@ -220,7 +220,7 @@ object ChatCore {
                 // Levenshtein: ограничиваем количество кандидатов (берём первые N ключей)
                 var bestLev: String? = null
                 var bestDist = Int.MAX_VALUE
-                val levCandidates = templates.keys.take(engine.MAX_CANDIDATES_FOR_LEV)
+                val levCandidates = templates.keys.take(Engine.MAX_CANDIDATES_FOR_LEV)
                 for (key in levCandidates) {
                     // сравниваем canonical представления (или пустую строку)
                     val d = engine.levenshtein(qCanonical, key, qCanonical)
