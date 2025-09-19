@@ -73,13 +73,6 @@ object ChatCore {
     }
 
     // --- Парсинг шаблонов ---
-    /**
-     * Возвращает пары:
-     * templates: Map<canonicalTrigger, responses>
-     * keywords: Map<canonicalKeyword, responses>
-     *
-     * canonical — это sorted tokens join (после нормализации/синонимов/удаления стоп-слов)
-     */
     fun parseTemplatesFromFile(
         context: Context,
         folderUri: Uri?,
@@ -102,22 +95,25 @@ object ChatCore {
 
                     try {
                         if (l.startsWith("-")) {
-                            val (keyRaw, respRaw) = l.substring(1).split("=", limit = 2).map { it.trim() }
-                            val keyCanonical = Engine.canonicalize(keyRaw, synonymsSnapshot, stopwordsSnapshot)
+                            val (key, respRaw) = l.substring(1).split("=", limit = 2).map { it.trim() }
+                            // canonical ключ: токены после нормализации/синонимов/удаления стоп-слов, отсортированные
+                            val keyTokens = Engine.filterStopwordsAndMapSynonymsStatic(key, synonymsSnapshot, stopwordsSnapshot).first
+                            val keyMapped = keyTokens.sorted().joinToString(" ")
                             val responses = respRaw.split("|").map { it.trim() }.filter { it.isNotEmpty() }
-                            if (keyCanonical.isNotEmpty() && responses.isNotEmpty()) {
-                                keywords[keyCanonical] = responses.toMutableList()
+                            if (keyMapped.isNotEmpty() && responses.isNotEmpty()) {
+                                keywords[keyMapped] = responses.toMutableList()
                             } else {
-                                Log.d(TAG, "Skipped keyword (empty after mapping) in $filename: rawKey='$keyRaw' -> canonical='$keyCanonical'")
+                                Log.d(TAG, "Skipped keyword (empty after mapping) in $filename: rawKey='$key' -> tokens=$keyTokens")
                             }
                         } else if (l.contains("=")) {
-                            val (triggerRaw, respRaw) = l.split("=", limit = 2).map { it.trim() }
-                            val triggerCanonical = Engine.canonicalize(triggerRaw, synonymsSnapshot, stopwordsSnapshot)
+                            val (trigger, respRaw) = l.split("=", limit = 2).map { it.trim() }
+                            val triggerTokens = Engine.filterStopwordsAndMapSynonymsStatic(trigger, synonymsSnapshot, stopwordsSnapshot).first
+                            val triggerMapped = triggerTokens.sorted().joinToString(" ")
                             val responses = respRaw.split("|").map { it.trim() }.filter { it.isNotEmpty() }
-                            if (triggerCanonical.isNotEmpty() && responses.isNotEmpty()) {
-                                templates[triggerCanonical] = responses.toMutableList()
+                            if (triggerMapped.isNotEmpty() && responses.isNotEmpty()) {
+                                templates[triggerMapped] = responses.toMutableList()
                             } else {
-                                Log.d(TAG, "Skipped template (empty after mapping) in $filename: rawTrigger='$triggerRaw' -> canonical='$triggerCanonical'")
+                                Log.d(TAG, "Skipped template (empty after mapping) in $filename: rawTrigger='$trigger' -> tokens=$triggerTokens")
                             }
                         }
                     } catch (pe: Exception) {
@@ -126,6 +122,7 @@ object ChatCore {
                 }
             }
 
+            // отладочная информация
             Log.d(TAG, "Parsed $filename: templates=${templates.size}, keywords=${keywords.size}")
             templates.keys.take(5).forEach { Log.d(TAG, "TPL_KEY: '$it'") }
             keywords.keys.take(5).forEach { Log.d(TAG, "KW_KEY: '$it'") }
@@ -137,10 +134,6 @@ object ChatCore {
     }
 
     // --- Поиск ---
-    /**
-     * Поиск ответа по core-файлам (core1..core9).
-     * Использует каноническое представление (sorted tokens) повсеместно.
-     */
     fun searchInCoreFiles(
         context: Context,
         folderUri: Uri?,
@@ -159,58 +152,18 @@ object ChatCore {
             val qCanonical = qMappedTokens.sorted().joinToString(" ")
             val dynamicJaccardThreshold = engine.getJaccardThreshold(qFiltered)
 
-            Log.d(TAG, "Search start: qFiltered='$qFiltered' tokens=$qMappedTokens canonical='$qCanonical' jaccardThreshold=$dynamicJaccardThreshold")
+            Log.d(TAG, "Search start: qFiltered='$qFiltered' qMappedTokens=$qMappedTokens qCanonical='$qCanonical' jaccardThreshold=$dynamicJaccardThreshold")
 
             fun resolvePotentialFileResponse(respRaw: String): String {
                 val respTrim = respRaw.trim()
-                // более строгий поиск имени файла в строке
+                val resp = respTrim.trim(':', ' ', '\t')
+                // ищем имя файла в строке более надёжно
                 val fileRegex = Regex("""([\w\-\._]+\.txt)""", RegexOption.IGNORE_CASE)
-                val match = fileRegex.find(respTrim)
+                val match = fileRegex.find(resp)
                 if (match != null) {
                     val filename = match.groupValues[1].trim()
                     if (filename.isNotEmpty()) {
                         val (tpls, keywords) = parseTemplatesFromFile(context, folderUri, filename, synonymsSnapshot, stopwordsSnapshot)
-
-                        // 1) exact match внутри файла по canonical
-                        if (qCanonical.isNotEmpty()) {
-                            tpls[qCanonical]?.let { if (it.isNotEmpty()) return it.random() }
-                        }
-
-                        // 2) keyword match (требуем хотя бы 1 общий токен; можно усилить до 2)
-                        for ((k, v) in keywords) {
-                            if (k.isBlank() || v.isEmpty()) continue
-                            val kTokens = k.split(" ").filter { it.isNotEmpty() }.toSet()
-                            val common = qSet.intersect(kTokens).size
-                            if (common >= 1) return v.random()
-                        }
-
-                        // 3) Jaccard внутри файла
-                        var best: String? = null
-                        var bestScore = 0.0
-                        for (key in tpls.keys) {
-                            val keyTokens = if (key.isEmpty()) emptySet<String>() else key.split(" ").toSet()
-                            val score = engine.weightedJaccard(qSet, keyTokens)
-                            if (score > bestScore) {
-                                bestScore = score
-                                best = key
-                            }
-                        }
-                        if (best != null && bestScore >= dynamicJaccardThreshold) {
-                            return tpls[best]?.random() ?: ""
-                        }
-
-                        // 4) Levenshtein внутри файла (по всем ключам)
-                        var bestLev: String? = null
-                        var bestDist = Int.MAX_VALUE
-                        for (key in tpls.keys) {
-                            val d = engine.levenshtein(qCanonical, key, qCanonical)
-                            if (d < bestDist) { bestDist = d; bestLev = key }
-                        }
-                        if (bestLev != null && bestDist <= engine.getFuzzyDistance(qCanonical)) {
-                            return tpls[bestLev]?.random() ?: ""
-                        }
-
-                        // 5) fallback — случайный ответ из файла
                         val allResponses = mutableListOf<String>()
                         tpls.values.forEach { allResponses.addAll(it) }
                         keywords.values.forEach { allResponses.addAll(it) }
@@ -226,51 +179,32 @@ object ChatCore {
                 if (!file.exists()) continue
                 val (templates, keywords) = parseTemplatesFromFile(context, folderUri, filename, synonymsSnapshot, stopwordsSnapshot)
 
-                // exact match по canonical ключу
-                if (qCanonical.isNotEmpty()) {
-                    templates[qCanonical]?.let {
-                        Log.d(TAG, "Exact match in $filename for '$qCanonical'")
-                        return resolvePotentialFileResponse(it.random())
-                    }
+                // exact match по canonical ключу (т.к. парсер теперь сохраняет canonical)
+                templates[qCanonical]?.let {
+                    Log.d(TAG, "Exact (canonical) match in $filename for '$qCanonical'")
+                    return resolvePotentialFileResponse(it.random())
+                }
+
+                // fallback: иногда в старых шаблонах ключи могли храниться в обычной форме — попробуем и qMappedRaw
+                templates[qMappedRaw]?.let {
+                    Log.d(TAG, "Exact (raw) match in $filename for '$qMappedRaw'")
+                    return resolvePotentialFileResponse(it.random())
                 }
 
                 // keyword match: проверяем пересечение токенов (keywords хранятся как canonical строки)
                 for ((k, v) in keywords) {
                     if (k.isBlank()) continue
                     val kTokens = k.split(" ").filter { it.isNotEmpty() }.toSet()
-                    if (qSet.intersect(kTokens).size >= 1) {
+                    if (qSet.intersect(kTokens).isNotEmpty()) {
                         Log.d(TAG, "Keyword match in $filename: key='$k' tokens=$kTokens")
                         return resolvePotentialFileResponse(v.random())
                     }
                 }
 
-                // Соберём кандидатов через простой локальный inverted по tokens запроса
-                val candidateCounts = HashMap<String, Int>()
-                for (tok in qSet) {
-                    for (key in templates.keys) {
-                        if (key.contains(tok)) {
-                            candidateCounts[key] = candidateCounts.getOrDefault(key, 0) + 1
-                        }
-                    }
-                }
-
-                val candidates: List<String> = if (candidateCounts.isNotEmpty()) {
-                    candidateCounts.entries
-                        .filter { it.value >= Engine.CANDIDATE_TOKEN_THRESHOLD }
-                        .sortedByDescending { it.value }
-                        .map { it.key }
-                        .take(Engine.MAX_CANDIDATES_FOR_LEV * 4) // расширяем пул
-                } else {
-                    // fallback: ближайшие по длине (увеличиваем охват)
-                    val maxDist = engine.getFuzzyDistance(qCanonical)
-                    templates.keys.sortedBy { kotlin.math.abs(it.length - qCanonical.length) }
-                        .take(Engine.MAX_CANDIDATES_FOR_LEV * 6)
-                }
-
-                // weighted Jaccard по кандидатам
+                // weighted Jaccard (по всем ключам)
                 var best: String? = null
                 var bestScore = 0.0
-                for (key in candidates) {
+                for (key in templates.keys) {
                     val keyTokens = if (key.isEmpty()) emptySet<String>() else key.split(" ").toSet()
                     val score = engine.weightedJaccard(qSet, keyTokens)
                     if (score > bestScore) {
@@ -283,10 +217,12 @@ object ChatCore {
                     return resolvePotentialFileResponse(templates[best]?.random() ?: "")
                 }
 
-                // Levenshtein по кандидатам
+                // Levenshtein: ограничиваем количество кандидатов (берём первые N ключей)
                 var bestLev: String? = null
                 var bestDist = Int.MAX_VALUE
-                for (key in candidates) {
+                val levCandidates = templates.keys.take(engine.MAX_CANDIDATES_FOR_LEV)
+                for (key in levCandidates) {
+                    // сравниваем canonical представления (или пустую строку)
                     val d = engine.levenshtein(qCanonical, key, qCanonical)
                     if (d < bestDist) {
                         bestDist = d
