@@ -3,12 +3,13 @@ package com.nemesis.droidcrypt
 import kotlin.math.abs
 import kotlin.math.min
 import kotlin.math.log10
-import java.util.*
 import kotlin.math.roundToInt
 import kotlin.math.max
+import kotlin.collections.HashMap
+import java.util.*
 import kotlin.math.pow
 import kotlin.math.sqrt
-import kotlin.collections.HashMap
+
 
 class Engine(
     val templatesMap: MutableMap<String, MutableList<String>>,
@@ -22,7 +23,7 @@ class Engine(
         const val CANDIDATE_TOKEN_THRESHOLD = 2
         const val MAX_SUBQUERY_RESPONSES = 3
         const val SUBQUERY_RESPONSE_DELAY = 1500L
-        const val MAX_CANDIDATES_FOR_LEV = 20 // увеличено, но применяется только после ранжирования
+        const val MAX_CANDIDATES_FOR_LEV = 8
         const val JACCARD_THRESHOLD = 0.75
         const val SEND_DEBOUNCE_MS = 400L
         const val IDLE_TIMEOUT_MS = 30000L
@@ -70,7 +71,6 @@ class Engine(
         }
     }
 
-    // Оптимизированная рекурсивная реализация Левенштейна (iterative dynamic programming)
     fun levenshtein(s: String, t: String, qFiltered: String): Int {
         if (s == t) return 0
         val n = s.length
@@ -104,7 +104,7 @@ class Engine(
         return when {
             query.length <= 10 -> 0.3
             query.length <= 20 -> 0.4
-            else -> 0.75
+            else -> JACCARD_THRESHOLD
         }
     }
 
