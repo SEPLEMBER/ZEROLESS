@@ -11,6 +11,7 @@ import com.nemesis.droidcrypt.Engine
 object ChatCore {
     private const val TAG = "ChatCore"
 
+    // Вшитые антиспам-ответы
     private val antiSpamResponses = listOf(
         "Ты надоел, давай что-то новенького!",
         "Спамить нехорошо, попробуй другой запрос.",
@@ -28,6 +29,7 @@ object ChatCore {
 
     fun getAntiSpamResponse(): String = antiSpamResponses.random()
 
+    // --- Загрузка синонимов и стоп-слов ---
     fun loadSynonymsAndStopwords(
         context: Context,
         folderUri: Uri?,
@@ -70,33 +72,28 @@ object ChatCore {
         }
     }
 
+    // --- Парсинг шаблонов ---
     fun parseTemplatesFromFile(
         context: Context,
         folderUri: Uri?,
         filename: String,
         synonymsSnapshot: Map<String, String>,
         stopwordsSnapshot: Set<String>
-    ): Triple<HashMap<String, MutableList<String>>, HashMap<String, MutableList<String>>, HashMap<String, MutableList<String>>> {
+    ): Pair<HashMap<String, MutableList<String>>, HashMap<String, MutableList<String>>> {
         val templates = HashMap<String, MutableList<String>>()
         val keywords = HashMap<String, MutableList<String>>()
-        val strictTemplates = HashMap<String, MutableList<String>>()
-        val uriLocal = folderUri ?: return Triple(templates, keywords, strictTemplates)
+        val uriLocal = folderUri ?: return Pair(templates, keywords)
         try {
-            val dir = DocumentFile.fromTreeUri(context, uriLocal) ?: return Triple(templates, keywords, strictTemplates)
-            val file = dir.findFile(filename) ?: return Triple(templates, keywords, strictTemplates)
-            if (!file.exists()) return Triple(templates, keywords, strictTemplates)
+            val dir = DocumentFile.fromTreeUri(context, uriLocal) ?: return Pair(templates, keywords)
+            val file = dir.findFile(filename) ?: return Pair(templates, keywords)
+            if (!file.exists()) return Pair(templates, keywords)
 
             context.contentResolver.openInputStream(file.uri)?.bufferedReader()?.useLines { lines ->
                 lines.forEach { raw ->
                     val l = raw.trim()
                     if (l.isEmpty()) return@forEach
 
-                    if (l.startsWith(">>")) {
-                        val (trigger, respRaw) = l.substring(2).split("=", limit = 2).map { it.trim() }
-                        val triggerMapped = Engine.normalizeText(trigger).lowercase(Locale.ROOT)
-                        val responses = respRaw.split("|").map { it.trim() }.filter { it.isNotEmpty() }
-                        if (triggerMapped.isNotEmpty() && responses.isNotEmpty()) strictTemplates[triggerMapped] = responses.toMutableList()
-                    } else if (l.startsWith("-")) {
+                    if (l.startsWith("-")) {
                         val (key, respRaw) = l.substring(1).split("=", limit = 2).map { it.trim() }
                         val keyMapped = Engine.normalizeText(key).lowercase(Locale.ROOT)
                         val responses = respRaw.split("|").map { it.trim() }.filter { it.isNotEmpty() }
@@ -112,9 +109,10 @@ object ChatCore {
         } catch (e: Exception) {
             Log.e(TAG, "Error parsing templates from $filename", e)
         }
-        return Triple(templates, keywords, strictTemplates)
+        return Pair(templates, keywords)
     }
 
+    // --- Поиск ---
     fun searchInCoreFiles(
         context: Context,
         folderUri: Uri?,
@@ -129,7 +127,7 @@ object ChatCore {
         try {
             val dir = DocumentFile.fromTreeUri(context, uriLocal) ?: return null
             val (qMappedTokens, qMapped) = Engine.filterStopwordsAndMapSynonymsStatic(qFiltered, synonymsSnapshot, stopwordsSnapshot)
-            val qTokensList = qMappedTokens
+            val qSet = qMappedTokens.toSet()
 
             fun resolvePotentialFileResponse(respRaw: String): String {
                 val respTrim = respRaw.trim()
@@ -137,11 +135,10 @@ object ChatCore {
                 if (resp.contains(".txt", ignoreCase = true)) {
                     val filename = resp.substringAfterLast('/').trim()
                     if (filename.isNotEmpty()) {
-                        val (tpls, kws, stricts) = parseTemplatesFromFile(context, folderUri, filename, synonymsSnapshot, stopwordsSnapshot)
+                        val (tpls, keywords) = parseTemplatesFromFile(context, folderUri, filename, synonymsSnapshot, stopwordsSnapshot)
                         val allResponses = mutableListOf<String>()
                         tpls.values.forEach { allResponses.addAll(it) }
-                        kws.values.forEach { allResponses.addAll(it) }
-                        stricts.values.forEach { allResponses.addAll(it) }
+                        keywords.values.forEach { allResponses.addAll(it) }
                         if (allResponses.isNotEmpty()) return allResponses.random()
                     }
                 }
@@ -152,45 +149,36 @@ object ChatCore {
                 val filename = "core$i.txt"
                 val file = dir.findFile(filename) ?: continue
                 if (!file.exists()) continue
-                val (templates, keywords, strictTemplates) = parseTemplatesFromFile(context, folderUri, filename, synonymsSnapshot, stopwordsSnapshot)
-
-                strictTemplates[qMapped.lowercase(Locale.ROOT)]?.let { return it.random() }
+                val (templates, keywords) = parseTemplatesFromFile(context, folderUri, filename, synonymsSnapshot, stopwordsSnapshot)
 
                 templates[qMapped]?.let { return resolvePotentialFileResponse(it.random()) }
                 for ((k, v) in keywords) {
-                    if (qMapped.lowercase(Locale.ROOT).contains(k)) return resolvePotentialFileResponse(v.random())
+                    if (qMapped.contains(k)) return resolvePotentialFileResponse(v.random())
                 }
 
                 var best: String? = null
                 var bestScore = 0.0
                 for (key in templates.keys) {
-                    val keyTokensList = Engine.filterStopwordsAndMapSynonymsStatic(key, synonymsSnapshot, stopwordsSnapshot).first
-                    val score = engine.weightedJaccard(qTokensList, keyTokensList)
+                    val keyTokens = key.split(" ").toSet()
+                    val score = engine.weightedJaccard(qSet, keyTokens)
                     if (score > bestScore) {
                         bestScore = score
                         best = key
                     }
                 }
-                Log.d(TAG, "Core $filename, Jaccard: $bestScore, BestKey: $best")
                 if (best != null && bestScore >= jaccardThreshold) {
                     return resolvePotentialFileResponse(templates[best]?.random() ?: "")
                 }
 
                 var bestLev: String? = null
                 var bestDist = Int.MAX_VALUE
-                for (key in templates.keys.take(30)) {
-                    val keyTokensList = Engine.filterStopwordsAndMapSynonymsStatic(key, synonymsSnapshot, stopwordsSnapshot).first
-                    val d = if (keyTokensList.size > 1 && qTokensList.size > 1) {
-                        engine.tokenSetLevenshtein(qTokensList, keyTokensList, qFiltered)
-                    } else {
-                        engine.damerauLevenshtein(qMapped, key, qFiltered)
-                    }
+                for (key in templates.keys.take(20)) {
+                    val d = engine.levenshtein(qMapped, key, qFiltered)
                     if (d < bestDist) {
                         bestDist = d
                         bestLev = key
                     }
                 }
-                Log.d(TAG, "Core $filename, Levenshtein: $bestDist, BestLev: $bestLev")
                 if (bestLev != null && bestDist <= engine.getFuzzyDistance(qFiltered)) {
                     return resolvePotentialFileResponse(templates[bestLev]?.random() ?: "")
                 }
@@ -201,6 +189,7 @@ object ChatCore {
         return null
     }
 
+    // --- findBestResponse ---
     fun findBestResponse(
         context: Context,
         folderUri: Uri?,
@@ -224,12 +213,12 @@ object ChatCore {
         return resp ?: getDummyResponse(userInput)
     }
 
+    // --- loadTemplatesFromFile ---
     fun loadTemplatesFromFile(
         context: Context,
         folderUri: Uri?,
         filename: String,
         templatesMap: MutableMap<String, MutableList<String>>,
-        strictTemplatesMap: MutableMap<String, MutableList<String>>,
         keywords: MutableMap<String, MutableList<String>>,
         jaccardList: MutableList<Pair<String, Set<String>>>,
         levenshteinMap: MutableMap<String, String>,
@@ -238,7 +227,7 @@ object ChatCore {
         metadataOut: MutableMap<String, String>
     ): Pair<Boolean, Int> {
         return try {
-            val (parsedTemplates, parsedKeywords, parsedStrictTemplates) = parseTemplatesFromFile(
+            val (parsedTemplates, parsedKeywords) = parseTemplatesFromFile(
                 context,
                 folderUri,
                 filename,
@@ -247,17 +236,16 @@ object ChatCore {
             )
             templatesMap.clear()
             templatesMap.putAll(parsedTemplates)
-            strictTemplatesMap.clear()
-            strictTemplatesMap.putAll(parsedStrictTemplates)
             keywords.clear()
             keywords.putAll(parsedKeywords)
-            true to (parsedTemplates.size + parsedKeywords.size + parsedStrictTemplates.size)
+            true to (parsedTemplates.size + parsedKeywords.size)
         } catch (e: Exception) {
             Log.e(TAG, "Error loading templates", e)
             false to 0
         }
     }
 
+    // --- Заглушки ---
     fun loadFallbackTemplates(
         templatesMap: MutableMap<String, MutableList<String>>,
         keywordResponses: MutableMap<String, MutableList<String>>,
