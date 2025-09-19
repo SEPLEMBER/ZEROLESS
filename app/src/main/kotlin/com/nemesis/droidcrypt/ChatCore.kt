@@ -6,7 +6,7 @@ import android.util.Log
 import androidx.documentfile.provider.DocumentFile
 import java.util.*
 import kotlin.collections.HashMap
-import com.nemesis.droidcrypt.Engine
+import com.nemesis.nemesis.droidcrypt.Engine
 
 object ChatCore {
     private const val TAG = "ChatCore"
@@ -93,19 +93,41 @@ object ChatCore {
                     val l = raw.trim()
                     if (l.isEmpty()) return@forEach
 
-                    if (l.startsWith("-")) {
-                        val (key, respRaw) = l.substring(1).split("=", limit = 2).map { it.trim() }
-                        val keyMapped = Engine.normalizeText(key).lowercase(Locale.ROOT)
-                        val responses = respRaw.split("|").map { it.trim() }.filter { it.isNotEmpty() }
-                        if (keyMapped.isNotEmpty() && responses.isNotEmpty()) keywords[keyMapped] = responses.toMutableList()
-                    } else if (l.contains("=")) {
-                        val (trigger, respRaw) = l.split("=", limit = 2).map { it.trim() }
-                        val triggerMapped = Engine.filterStopwordsAndMapSynonymsStatic(trigger, synonymsSnapshot, stopwordsSnapshot).second
-                        val responses = respRaw.split("|").map { it.trim() }.filter { it.isNotEmpty() }
-                        if (triggerMapped.isNotEmpty() && responses.isNotEmpty()) templates[triggerMapped] = responses.toMutableList()
+                    try {
+                        if (l.startsWith("-")) {
+                            val (key, respRaw) = l.substring(1).split("=", limit = 2).map { it.trim() }
+                            // canonical ключ: токены после нормализации/синонимов/удаления стоп-слов, отсортированные
+                            val keyTokens = Engine.filterStopwordsAndMapSynonymsStatic(key, synonymsSnapshot, stopwordsSnapshot).first
+                            val keyMapped = keyTokens.sorted().joinToString(" ")
+                            val responses = respRaw.split("|").map { it.trim() }.filter { it.isNotEmpty() }
+                            if (keyMapped.isNotEmpty() && responses.isNotEmpty()) {
+                                keywords[keyMapped] = responses.toMutableList()
+                            } else {
+                                // логируем потенциально потерянный ключ (полезно для отладки формата файлов и стоп-слов)
+                                Log.d(TAG, "Skipped keyword (empty after mapping) in $filename: rawKey='$key' -> tokens=$keyTokens")
+                            }
+                        } else if (l.contains("=")) {
+                            val (trigger, respRaw) = l.split("=", limit = 2).map { it.trim() }
+                            val triggerTokens = Engine.filterStopwordsAndMapSynonymsStatic(trigger, synonymsSnapshot, stopwordsSnapshot).first
+                            val triggerMapped = triggerTokens.sorted().joinToString(" ")
+                            val responses = respRaw.split("|").map { it.trim() }.filter { it.isNotEmpty() }
+                            if (triggerMapped.isNotEmpty() && responses.isNotEmpty()) {
+                                templates[triggerMapped] = responses.toMutableList()
+                            } else {
+                                Log.d(TAG, "Skipped template (empty after mapping) in $filename: rawTrigger='$trigger' -> tokens=$triggerTokens")
+                            }
+                        }
+                    } catch (pe: Exception) {
+                        Log.e(TAG, "Error parsing line in $filename: '$l'", pe)
                     }
                 }
             }
+
+            // отладочная информация: кол-во и пара примеров ключей
+            Log.d(TAG, "Parsed $filename: templates=${templates.size}, keywords=${keywords.size}")
+            templates.keys.take(5).forEach { Log.d(TAG, "TPL_KEY: '$it'") }
+            keywords.keys.take(5).forEach { Log.d(TAG, "KW_KEY: '$it'") }
+
         } catch (e: Exception) {
             Log.e(TAG, "Error parsing templates from $filename", e)
         }
@@ -126,14 +148,21 @@ object ChatCore {
         val uriLocal = folderUri ?: return null
         try {
             val dir = DocumentFile.fromTreeUri(context, uriLocal) ?: return null
-            val (qMappedTokens, qMapped) = Engine.filterStopwordsAndMapSynonymsStatic(qFiltered, synonymsSnapshot, stopwordsSnapshot)
+            val (qMappedTokens, qMappedRaw) = Engine.filterStopwordsAndMapSynonymsStatic(qFiltered, synonymsSnapshot, stopwordsSnapshot)
             val qSet = qMappedTokens.toSet()
+            val qCanonical = qMappedTokens.sorted().joinToString(" ")
+            val dynamicJaccardThreshold = engine.getJaccardThreshold(qFiltered)
+
+            Log.d(TAG, "Search start: qFiltered='$qFiltered' qMappedTokens=$qMappedTokens qCanonical='$qCanonical' jaccardThreshold=$dynamicJaccardThreshold")
 
             fun resolvePotentialFileResponse(respRaw: String): String {
                 val respTrim = respRaw.trim()
-                val resp = respTrim.removeSuffix(":").trim()
-                if (resp.contains(".txt", ignoreCase = true)) {
-                    val filename = resp.substringAfterLast('/').trim()
+                val resp = respTrim.trim(':', ' ', '\t')
+                // ищем имя файла в строке более надёжно
+                val fileRegex = Regex("""([\w\-\._]+\.txt)""", RegexOption.IGNORE_CASE)
+                val match = fileRegex.find(resp)
+                if (match != null) {
+                    val filename = match.groupValues[1].trim()
                     if (filename.isNotEmpty()) {
                         val (tpls, keywords) = parseTemplatesFromFile(context, folderUri, filename, synonymsSnapshot, stopwordsSnapshot)
                         val allResponses = mutableListOf<String>()
@@ -151,35 +180,52 @@ object ChatCore {
                 if (!file.exists()) continue
                 val (templates, keywords) = parseTemplatesFromFile(context, folderUri, filename, synonymsSnapshot, stopwordsSnapshot)
 
-                templates[qMapped]?.let { return resolvePotentialFileResponse(it.random()) }
-                for ((k, v) in keywords) {
-                    if (qMapped.contains(k)) return resolvePotentialFileResponse(v.random())
+                // exact match по canonical ключу
+                templates[qCanonical]?.let {
+                    Log.d(TAG, "Exact match in $filename for '$qCanonical'")
+                    return resolvePotentialFileResponse(it.random())
                 }
 
+                // keyword match: проверяем пересечение токенов (keywords хранятся как canonical строки)
+                for ((k, v) in keywords) {
+                    if (k.isBlank()) continue
+                    val kTokens = k.split(" ").toSet()
+                    if (qSet.intersect(kTokens).isNotEmpty()) {
+                        Log.d(TAG, "Keyword match in $filename: key='$k' tokens=$kTokens")
+                        return resolvePotentialFileResponse(v.random())
+                    }
+                }
+
+                // weighted Jaccard (по всем ключам)
                 var best: String? = null
                 var bestScore = 0.0
                 for (key in templates.keys) {
-                    val keyTokens = key.split(" ").toSet()
+                    val keyTokens = if (key.isEmpty()) emptySet<String>() else key.split(" ").toSet()
                     val score = engine.weightedJaccard(qSet, keyTokens)
                     if (score > bestScore) {
                         bestScore = score
                         best = key
                     }
                 }
-                if (best != null && bestScore >= jaccardThreshold) {
+                if (best != null && bestScore >= dynamicJaccardThreshold) {
+                    Log.d(TAG, "Jaccard match in $filename: best='$best' score=$bestScore threshold=$dynamicJaccardThreshold")
                     return resolvePotentialFileResponse(templates[best]?.random() ?: "")
                 }
 
+                // Levenshtein: ограничиваем количество кандидатов константой из Engine
                 var bestLev: String? = null
                 var bestDist = Int.MAX_VALUE
-                for (key in templates.keys.take(20)) {
-                    val d = engine.levenshtein(qMapped, key, qFiltered)
+                val levCandidates = templates.keys.take(engine.MAX_CANDIDATES_FOR_LEV)
+                for (key in levCandidates) {
+                    // сравниваем canonical представления (или пустую строку)
+                    val d = engine.levenshtein(qCanonical, key, qCanonical)
                     if (d < bestDist) {
                         bestDist = d
                         bestLev = key
                     }
                 }
-                if (bestLev != null && bestDist <= engine.getFuzzyDistance(qFiltered)) {
+                if (bestLev != null && bestDist <= engine.getFuzzyDistance(qCanonical)) {
+                    Log.d(TAG, "Levenshtein match in $filename: bestLev='$bestLev' dist=$bestDist fuzzy=${engine.getFuzzyDistance(qCanonical)}")
                     return resolvePotentialFileResponse(templates[bestLev]?.random() ?: "")
                 }
             }
