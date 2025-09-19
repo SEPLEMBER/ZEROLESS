@@ -1,4 +1,4 @@
-package.com.nemesis.droidcrypt
+package com.nemesis.droidcrypt
 
 import android.animation.ObjectAnimator
 import android.content.*
