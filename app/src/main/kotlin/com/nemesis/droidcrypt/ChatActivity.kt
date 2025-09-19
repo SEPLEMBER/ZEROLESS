@@ -55,12 +55,10 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     // TTS
     private var tts: TextToSpeech? = null
 
-    // Data structures (Activity держит коллекции — Engine работает с ними через ссылку)
-    private val fallback = arrayOf("Привет", "Как дела?", "Расскажи о себе", "Выход")
+    // Data structures (Activity держит коллекции — Engine/ChatCore работают с ними через ссылки)
     private val templatesMap = HashMap<String, MutableList<String>>()
     private val contextMap = HashMap<String, String>()
     private val keywordResponses = HashMap<String, MutableList<String>>()
-    private val antiSpamResponses = mutableListOf<String>()
     private val mascotList = mutableListOf<Map<String, String>>()
     private val invertedIndex = HashMap<String, MutableList<String>>()
     private val synonymsMap = HashMap<String, String>()
@@ -88,23 +86,6 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     }
     // tokenWeights хранится в engine; activity держит локальную копию, если нужно
     private val tokenWeights = HashMap<String, Double>()
-
-    init {
-        antiSpamResponses.addAll(
-            listOf(
-                "Ты надоел, давай что-то новенького!",
-                "Спамить нехорошо, попробуй другой запрос.",
-                "Я устал от твоих повторений!",
-                "Хватит спамить, придумай что-то интересное.",
-                "Эй, не зацикливайся, попробуй другой вопрос!",
-                "Повторяешь одно и то же? Давай разнообразие!",
-                "Слишком много повторов, я же не робот... ну, почти.",
-                "Не спамь, пожалуйста, задай новый вопрос!",
-                "Пять раз одно и то же? Попробуй что-то другое.",
-                "Я уже ответил, давай новый запрос!"
-            )
-        )
-    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -203,7 +184,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         // Загрузка шаблонов
         if (folderUri == null) {
             showCustomToast("Папка не выбрана! Открой настройки и выбери папку.")
-            loadFallbackTemplates()
+            ChatCore.loadFallbackTemplates(templatesMap, keywordResponses, mascotList, contextMap)
             rebuildInvertedIndex()
             computeTokenWeights()
             updateAutoComplete()
@@ -218,7 +199,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             )
             if (!ok) {
                 // fallback
-                loadFallbackTemplates()
+                ChatCore.loadFallbackTemplates(templatesMap, keywordResponses, mascotList, contextMap)
             } else {
                 // apply metadata
                 metadataOut["mascot_name"]?.let { currentMascotName = it }
@@ -333,7 +314,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     /**
      * Основная логика обработки пользовательского запроса.
-     * Здесь сохранил основную orchestration: debounce, spam-check, кэш, показа "печатает..." и т.д.
+     * Сохранил orchestration: debounce, spam-check, кэш, показа "печатает..." и т.д.
      * Сам поиск ответа использует engine + ChatCore (парсинг файлов и поиск в core).
      */
     private fun processUserQuery(userInput: String) {
@@ -362,13 +343,13 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         addChatMessage("You", userInput)
         showTypingIndicator()
 
-        // Антиспам с временным окном
+        // Антиспам с временным окном — используем ChatCore
         val now = System.currentTimeMillis()
         val timestamps = queryTimestamps.getOrPut(qKeyForCount) { mutableListOf() }
         timestamps.add(now)
         timestamps.removeAll { it < now - Engine.SPAM_WINDOW_MS }
         if (timestamps.size >= 5) {
-            val spamResp = antiSpamResponses.random()
+            val spamResp = ChatCore.getAntiSpamResponse()
             addChatMessage(currentMascotName, spamResp)
             startIdleTimer()
             return
@@ -545,18 +526,8 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 }
             }
 
-            // Попытка детекта контекста (по contextMapSnapshot)
-            val lower = normalizeLocal(qFiltered)
-            val detectedContext = run {
-                val tokens = engine.tokenize(lower)
-                val contextScores = HashMap<String, Int>()
-                for ((keyword, value) in contextMapSnapshot) {
-                    val keywordTokens = engine.tokenize(keyword)
-                    val matches = tokens.count { it in keywordTokens }
-                    if (matches > 0) contextScores[value] = contextScores.getOrDefault(value, 0) + matches
-                }
-                contextScores.maxByOrNull { it.value }?.key
-            }
+            // Попытка детекта контекста (по contextMapSnapshot) — используем ChatCore.detectContext
+            val detectedContext = ChatCore.detectContext(qFiltered, contextMapSnapshot, engine)
 
             if (detectedContext != null) {
                 withContext(Dispatchers.Main) {
@@ -689,7 +660,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     return@launch
                 }
 
-                val dummy = getDummyResponse(qOrig)
+                val dummy = ChatCore.getDummyResponse(qOrig)
                 withContext(Dispatchers.Main) {
                     addChatMessage(currentMascotName, dummy)
                     startIdleTimer()
@@ -712,7 +683,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 return@launch
             }
 
-            val dummy = getDummyResponse(qOrig)
+            val dummy = ChatCore.getDummyResponse(qOrig)
             withContext(Dispatchers.Main) {
                 addChatMessage(currentMascotName, dummy)
                 startIdleTimer()
@@ -729,23 +700,8 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         tokenWeights.putAll(engine.tokenWeights)
     }
 
-    private fun weightedJaccard(qSet: Set<String>, keyTokens: Set<String>): Double {
-        return engine.weightedJaccard(qSet, keyTokens)
-    }
-
     private fun cacheResponse(qKey: String, response: String) {
         queryCache[qKey] = response
-    }
-
-    private fun detectContext(input: String): String? {
-        val tokens = engine.tokenize(input)
-        val contextScores = HashMap<String, Int>()
-        for ((keyword, value) in contextMap) {
-            val keywordTokens = engine.tokenize(keyword)
-            val matches = tokens.count { it in keywordTokens }
-            if (matches > 0) contextScores[value] = contextScores.getOrDefault(value, 0) + matches
-        }
-        return contextScores.maxByOrNull { it.value }?.key
     }
 
     private fun handleCommand(cmdRaw: String) {
@@ -819,16 +775,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
     }
 
-    private fun getDummyResponse(query: String): String {
-        val lower = query.lowercase(Locale.ROOT)
-        return when {
-            lower.contains("привет") -> "Привет! Чем могу помочь?"
-            lower.contains("как дела") -> "Всё отлично, а у тебя?"
-            else -> "Не понял запрос. Попробуй другой вариант."
-        }
-    }
-
-    // Делегируем normalize/tokenize/filter к engine, чтобы не менять много вызовов по коду
+    // Делегируем normalize/tokenize/filter к engine
     private fun normalizeText(s: String): String = engine.normalizeText(s)
     private fun tokenize(s: String): List<String> = engine.tokenize(s)
     private fun filterStopwordsAndMapSynonyms(input: String): Pair<List<String>, String> = engine.filterStopwordsAndMapSynonyms(input)
@@ -881,6 +828,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                         scaleX.start()
                         scaleY.start()
                         Handler(Looper.getMainLooper()).postDelayed({
+                            // delegated to ChatCore
                             loadAndSendOuchMessage(sender)
                             view.isEnabled = true
                         }, 260)
@@ -910,23 +858,11 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     }
 
     private fun loadAndSendOuchMessage(mascot: String) {
-        val uri = folderUri ?: return
         try {
-            val dir = DocumentFile.fromTreeUri(this, uri) ?: return
-            val mascotOuch = dir.findFile("${mascot.lowercase(Locale.getDefault())}.txt") ?: dir.findFile("ouch.txt")
-            if (mascotOuch != null && mascotOuch.exists()) {
-                contentResolver.openInputStream(mascotOuch.uri)?.bufferedReader()?.use { reader ->
-                    val allText = reader.readText()
-                    val responses = allText.split("|").map { it.trim() }.filter { it.isNotEmpty() }
-                    if (responses.isNotEmpty()) {
-                        val randomResponse = responses.random()
-                        addChatMessage(mascot, randomResponse)
-                    }
-                }
-            }
+            val resp = ChatCore.loadOuchMessage(this, folderUri, mascot)
+            resp?.let { addChatMessage(mascot, it) }
         } catch (e: Exception) {
             Log.e("ChatActivity", "Error loading ouch message", e)
-            showCustomToast("Ошибка загрузки ouch.txt: ${e.message}")
         }
     }
 
@@ -1051,7 +987,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         )
         if (!ok) {
             Log.w("ChatActivity", "loadTemplatesFromFile failed: $err — loading fallback")
-            loadFallbackTemplates()
+            ChatCore.loadFallbackTemplates(templatesMap, keywordResponses, mascotList, contextMap)
         } else {
             metadataOut["mascot_name"]?.let { currentMascotName = it }
             metadataOut["mascot_icon"]?.let { currentMascotIcon = it }
@@ -1064,22 +1000,10 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
     }
 
-    private fun loadFallbackTemplates() {
-        templatesMap.clear()
-        contextMap.clear()
-        keywordResponses.clear()
-        mascotList.clear()
-        val t1 = engine.normalizeText("привет")
-        templatesMap[t1] = mutableListOf("Привет! Чем могу помочь?", "Здравствуй!")
-        val t2 = engine.normalizeText("как дела")
-        templatesMap[t2] = mutableListOf("Всё отлично, а у тебя?", "Нормально, как дела?")
-        keywordResponses["спасибо"] = mutableListOf("Рад, что помог!", "Всегда пожалуйста!")
-    }
-
     private fun updateAutoComplete() {
         val suggestions = mutableListOf<String>()
         suggestions.addAll(templatesMap.keys)
-        for (s in fallback) {
+        for (s in ChatCore.fallbackReplies) {
             val low = engine.normalizeText(s)
             if (!suggestions.contains(low)) suggestions.add(low)
         }
@@ -1103,28 +1027,18 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private fun loadMascotMetadata(mascotName: String) {
         if (folderUri == null) return
-        val metadataFilename = "${mascotName.lowercase(Locale.getDefault())}_metadata.txt"
-        val dir = DocumentFile.fromTreeUri(this, folderUri!!) ?: return
-        val metadataFile = dir.findFile(metadataFilename)
-        if (metadataFile != null && metadataFile.exists()) {
-            try {
-                contentResolver.openInputStream(metadataFile.uri)?.bufferedReader()?.use { reader ->
-                    reader.forEachLine { raw ->
-                        val line = raw.trim()
-                        when {
-                            line.startsWith("mascot_name=") -> currentMascotName = line.substring("mascot_name=".length).trim()
-                            line.startsWith("mascot_icon=") -> currentMascotIcon = line.substring("mascot_icon=".length).trim()
-                            line.startsWith("theme_color=") -> currentThemeColor = line.substring("theme_color=".length).trim()
-                            line.startsWith("theme_background=") -> currentThemeBackground = line.substring("theme_background=".length).trim()
-                        }
-                    }
-                    updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
-                }
-            } catch (e: Exception) {
-                Log.e("ChatActivity", "Error loading mascot metadata", e)
-                showCustomToast("Ошибка загрузки метаданных маскота: ${e.message}")
-            }
+        val metadataOut = HashMap<String, String>()
+        val (ok, err) = ChatCore.loadMascotMetadata(this, folderUri, mascotName, metadataOut)
+        if (!ok) {
+            Log.w("ChatActivity", "loadMascotMetadata failed: $err")
+            showCustomToast("Ошибка загрузки метаданных маскота: $err")
+            return
         }
+        metadataOut["mascot_name"]?.let { currentMascotName = it }
+        metadataOut["mascot_icon"]?.let { currentMascotIcon = it }
+        metadataOut["theme_color"]?.let { currentThemeColor = it }
+        metadataOut["theme_background"]?.let { currentThemeBackground = it }
+        updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
     }
 
     private fun updateUI(mascotName: String, mascotIcon: String, themeColor: String, themeBackground: String) {
