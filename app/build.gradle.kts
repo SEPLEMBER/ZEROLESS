@@ -48,13 +48,21 @@ dependencies {
     implementation(libs.material)
     implementation(libs.bcprov.jdk15on)
 
-    // Теперь используем aliases вместо прямых зависимостей
     implementation(libs.multidex)
     implementation(libs.recyclerview)
 
-    // Для фоновых вычислений
+    // --- Kotlin coroutines ---
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.coroutines.android)
+
+    // --- Lifecycle (для lifecycleScope) ---
+    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.6")
+
+    // --- Preferences ---
+    implementation("androidx.preference:preference-ktx:1.2.1")
+
+    // --- Для работы с Uri (AndroidX) ---
+    implementation("androidx.documentfile:documentfile:1.0.1")
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.ext.junit)
