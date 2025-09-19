@@ -1,3 +1,5 @@
+package com.nemesis.droidcrypt
+
 import kotlin.math.abs
 import kotlin.math.min
 import kotlin.math.log10
