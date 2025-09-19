@@ -202,7 +202,7 @@ fun searchInCoreFiles(
                     // 5) Levenshtein внутри файла (ограничиваем кандидатов)
                     var bestLev: String? = null
                     var bestDist = Int.MAX_VALUE
-                    val levCandidates = tpls.keys.take(engine.MAX_CANDIDATES_FOR_LEV)
+                    val levCandidates = tpls.keys.take(Engine.MAX_CANDIDATES_FOR_LEV)
                     for (key in levCandidates) {
                         val d = engine.levenshtein(qCanonicalLocal, key, qCanonicalLocal)
                         if (d < bestDist) {
@@ -273,7 +273,7 @@ fun searchInCoreFiles(
             // Levenshtein: ограничиваем количество кандидатов (берём первые N ключей)
             var bestLev: String? = null
             var bestDist = Int.MAX_VALUE
-            val levCandidates = templates.keys.take(engine.MAX_CANDIDATES_FOR_LEV)
+            val levCandidates = templates.keys.take(Engine.MAX_CANDIDATES_FOR_LEV)
             for (key in levCandidates) {
                 val d = engine.levenshtein(qCanonical, key, qCanonical)
                 if (d < bestDist) {
