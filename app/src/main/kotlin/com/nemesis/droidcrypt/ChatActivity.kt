@@ -1,16 +1,15 @@
 package com.nemesis.droidcrypt
 
+import com.nemesis.droidcrypt.Engine
+import com.nemesis.droidcrypt.ChatCore
 import android.animation.ObjectAnimator
-import android.content.*
-import android.graphics.*
-import android.graphics.drawable.GradientDrawable
+import android.content.Intent
+import android.graphics.BitmapFactory
+import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
+import android.graphics.drawable.GradientDrawable
 import android.media.MediaPlayer
-import android.net.Uri
-import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
-import android.preference.PreferenceManager
+import android.os.*
 import android.speech.tts.TextToSpeech
 import android.util.Log
 import android.view.Gravity
@@ -21,18 +20,13 @@ import android.view.WindowManager
 import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.graphics.ColorUtils
+import androidx.preference.PreferenceManager
 import androidx.documentfile.provider.DocumentFile
-import androidx.lifecycle.lifecycleScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import java.util.*
-import kotlin.math.abs
-import kotlin.math.log10
-import kotlin.math.min
+import kotlin.collections.ArrayList
+import kotlin.collections.HashMap
 import kotlin.math.roundToInt
-import com.nemesis.droidcrypt.Engine
-import com.nemesis.droidcrypt.ChatCore
+import kotlinx.coroutines.*
 
 class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
@@ -61,7 +55,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     // Data structures (Activity держит коллекции — Engine работает с ними через ссылку)
     private val templatesMap = HashMap<String, MutableList<String>>()
-    private val contextMap = HashMap<String, String>()
+    private val contextMap = HashMap<String, String>() // keys in canonical form
     private val keywordResponses = HashMap<String, MutableList<String>>()
     private val mascotList = mutableListOf<Map<String, String>>()
     private val invertedIndex = HashMap<String, MutableList<String>>()
@@ -87,6 +81,13 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, String>?): Boolean {
             return size > Engine.MAX_CACHE_SIZE
         }
+    }
+
+    // --- helper для canonical ключа (использует глобальные snapshots)
+    private fun canonicalKeyFromTokens(tokens: List<String>): String = tokens.sorted().joinToString(" ")
+    private fun canonicalKeyFromTextStatic(text: String, synonyms: Map<String, String>, stopwords: Set<String>): String {
+        val toks = Engine.filterStopwordsAndMapSynonymsStatic(text, synonyms, stopwords).first
+        return canonicalKeyFromTokens(toks)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -181,7 +182,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         // Загрузка шаблонов
         if (folderUri == null) {
             showCustomToast("Папка не выбрана! Открой настройки и выбери папку.")
-            ChatCore.loadFallbackTemplates(templatesMap, keywordResponses, mascotList, contextMap)
+            ChatCore.loadFallbackTemplates(templatesMap, keywordResponses, mascotList, contextMap, synonymsMap, stopwords)
             rebuildInvertedIndex()
             engine.computeTokenWeights()
             updateAutoComplete()
@@ -302,11 +303,13 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         val qOrigRaw = userInput.trim()
         val qOrig = Engine.normalizeText(qOrigRaw)
         val (qTokensFiltered, qFiltered) = engine.filterStopwordsAndMapSynonyms(qOrig)
-        val qKeyForCount = qFiltered
+        // canonical ключ для точечных lookup'ов / кэша
+        val qCanonical = if (qTokensFiltered.isNotEmpty()) canonicalKeyFromTokens(qTokensFiltered) else canonicalKeyFromTextStatic(qFiltered, synonymsMap, stopwords)
+        val qKeyForCount = qCanonical
 
         if (qFiltered.isEmpty()) return
 
-        // Кэш: проверка на повторный запрос
+        // Кэш: проверка на повторный запрос (используем canonical)
         queryCache[qKeyForCount]?.let { cachedResponse ->
             addChatMessage(currentMascotName, cachedResponse)
             startIdleTimer()
@@ -347,11 +350,12 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             val subqueryResponses = mutableListOf<String>()
             val processedSubqueries = mutableSetOf<String>()
 
-            templatesSnapshot[qFiltered]?.let { possible ->
+            // exact match по canonical ключу
+            templatesSnapshot[qCanonical]?.let { possible ->
                 if (possible.isNotEmpty()) {
                     subqueryResponses.add(possible.random())
                     answered = true
-                    processedSubqueries.add(qFiltered)
+                    processedSubqueries.add(qCanonical)
                 }
             }
 
@@ -399,9 +403,12 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 return@launch
             }
 
-            // Ключевые ответы
+            // Ключевые ответы (keywordResponsesSnapshot keys — canonical strings)
+            val qTokenSet = if (qTokensFiltered.isNotEmpty()) qTokensFiltered.toSet() else Engine.tokenizeStatic(qFiltered).toSet()
             for ((keyword, responses) in keywordResponsesSnapshot) {
-                if (qFiltered.contains(keyword) && responses.isNotEmpty()) {
+                if (keyword.isBlank() || responses.isEmpty()) continue
+                val kwTokens = keyword.split(" ").filter { it.isNotEmpty() }.toSet()
+                if (qTokenSet.intersect(kwTokens).isNotEmpty()) {
                     withContext(Dispatchers.Main) {
                         addChatMessage(currentMascotName, responses.random())
                         startIdleTimer()
@@ -426,8 +433,8 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     .map { it.key }
                     .take(Engine.MAX_CANDIDATES_FOR_LEV)
             } else {
-                val maxDist = engine.getFuzzyDistance(qFiltered)
-                templatesSnapshot.keys.filter { kotlin.math.abs(it.length - qFiltered.length) <= maxDist }
+                val maxDist = engine.getFuzzyDistance(qCanonical)
+                templatesSnapshot.keys.filter { kotlin.math.abs(it.length - qCanonical.length) <= maxDist }
                     .take(Engine.MAX_CANDIDATES_FOR_LEV)
             }
 
@@ -462,16 +469,16 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             var bestKey: String? = null
             var bestDist = Int.MAX_VALUE
             for (key in candidates) {
-                val maxDist = engine.getFuzzyDistance(qFiltered)
-                if (kotlin.math.abs(key.length - qFiltered.length) > maxDist + 1) continue
-                val d = engine.levenshtein(qFiltered, key, qFiltered)
+                val maxDist = engine.getFuzzyDistance(qCanonical)
+                if (kotlin.math.abs(key.length - qCanonical.length) > maxDist + 1) continue
+                val d = engine.levenshtein(qCanonical, key, qCanonical)
                 if (d < bestDist) {
                     bestDist = d
                     bestKey = key
                 }
                 if (bestDist == 0) break
             }
-            val maxDistLocal = engine.getFuzzyDistance(qFiltered)
+            val maxDistLocal = engine.getFuzzyDistance(qCanonical)
             if (bestKey != null && bestDist <= maxDistLocal) {
                 val possible = templatesSnapshot[bestKey]
                 if (!possible.isNullOrEmpty()) {
@@ -503,7 +510,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 val (localTemplates, localKeywords) = ChatCore.parseTemplatesFromFile(
                     this@ChatActivity, folderUri, detectedContext, synonymsSnapshot, stopwordsSnapshot
                 )
-                localTemplates[qFiltered]?.let { possible ->
+                localTemplates[qCanonical]?.let { possible ->
                     if (possible.isNotEmpty()) {
                         val response = possible.random()
                         withContext(Dispatchers.Main) {
@@ -518,7 +525,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 // local inverted + jaccard/levenshtein аналогично (упрощённо)
                 val localInverted = HashMap<String, MutableList<String>>()
                 for ((k, v) in localTemplates) {
-                    val toks = Engine.filterStopwordsAndMapSynonymsStatic(k, synonymsSnapshot, stopwordsSnapshot).first
+                    val toks = if (k.isBlank()) emptyList<String>() else k.split(" ").filter { it.isNotEmpty() }
                     for (t in toks) {
                         val list = localInverted.getOrPut(t) { mutableListOf() }
                         if (!list.contains(k)) list.add(k)
@@ -538,8 +545,8 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                         .map { it.key }
                         .take(Engine.MAX_CANDIDATES_FOR_LEV)
                 } else {
-                    val md = engine.getFuzzyDistance(qFiltered)
-                    localTemplates.keys.filter { kotlin.math.abs(it.length - qFiltered.length) <= md }
+                    val md = engine.getFuzzyDistance(qCanonical)
+                    localTemplates.keys.filter { kotlin.math.abs(it.length - qCanonical.length) <= md }
                         .take(Engine.MAX_CANDIDATES_FOR_LEV)
                 }
 
@@ -571,16 +578,16 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 var bestLocalKey: String? = null
                 var bestLocalDist = Int.MAX_VALUE
                 for (key in localCandidates) {
-                    val maxD = engine.getFuzzyDistance(qFiltered)
-                    if (kotlin.math.abs(key.length - qFiltered.length) > maxD + 1) continue
-                    val d = engine.levenshtein(qFiltered, key, qFiltered)
+                    val maxD = engine.getFuzzyDistance(qCanonical)
+                    if (kotlin.math.abs(key.length - qCanonical.length) > maxD + 1) continue
+                    val d = engine.levenshtein(qCanonical, key, qCanonical)
                     if (d < bestLocalDist) {
                         bestLocalDist = d
                         bestLocalKey = key
                     }
                     if (bestLocalDist == 0) break
                 }
-                if (bestLocalKey != null && bestLocalDist <= engine.getFuzzyDistance(qFiltered)) {
+                if (bestLocalKey != null && bestLocalDist <= engine.getFuzzyDistance(qCanonical)) {
                     val possible = localTemplates[bestLocalKey]
                     if (!possible.isNullOrEmpty()) {
                         val response = possible.random()
@@ -925,9 +932,12 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         currentMascotIcon = "raccoon_icon.png"
         currentThemeColor = "#00FF00"
         currentThemeBackground = "#000000"
+
+        // Обновляем синонимы/стоп-слова
         ChatCore.loadSynonymsAndStopwords(this, folderUri, synonymsMap, stopwords)
+
         if (folderUri == null) {
-            ChatCore.loadFallbackTemplates(templatesMap, keywordResponses, mascotList, contextMap)
+            ChatCore.loadFallbackTemplates(templatesMap, keywordResponses, mascotList, contextMap, synonymsMap, stopwords)
             rebuildInvertedIndex()
             engine.computeTokenWeights()
             updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
@@ -935,7 +945,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
         try {
             val dir = DocumentFile.fromTreeUri(this, folderUri!!) ?: run {
-                ChatCore.loadFallbackTemplates(templatesMap, keywordResponses, mascotList, contextMap)
+                ChatCore.loadFallbackTemplates(templatesMap, keywordResponses, mascotList, contextMap, synonymsMap, stopwords)
                 rebuildInvertedIndex()
                 engine.computeTokenWeights()
                 updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
@@ -943,7 +953,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             }
             val file = dir.findFile(filename)
             if (file == null || !file.exists()) {
-                ChatCore.loadFallbackTemplates(templatesMap, keywordResponses, mascotList, contextMap)
+                ChatCore.loadFallbackTemplates(templatesMap, keywordResponses, mascotList, contextMap, synonymsMap, stopwords)
                 rebuildInvertedIndex()
                 engine.computeTokenWeights()
                 updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
@@ -958,9 +968,12 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                         if (contextLine.contains("=")) {
                             val parts = contextLine.split("=", limit = 2)
                             if (parts.size == 2) {
-                                val keyword = parts[0].trim().lowercase(Locale.ROOT)
+                                val keyword = parts[0].trim()
                                 val contextFile = parts[1].trim()
-                                if (keyword.isNotEmpty() && contextFile.isNotEmpty()) contextMap[keyword] = contextFile
+                                if (keyword.isNotEmpty() && contextFile.isNotEmpty()) {
+                                    val keyCanon = canonicalKeyFromTextStatic(keyword, synonymsMap, stopwords)
+                                    if (keyCanon.isNotEmpty()) contextMap[keyCanon] = contextFile
+                                }
                             }
                         }
                         return@forEachLine
@@ -970,10 +983,13 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                         if (keywordLine.contains("=")) {
                             val parts = keywordLine.split("=", limit = 2)
                             if (parts.size == 2) {
-                                val keyword = parts[0].trim().lowercase(Locale.ROOT)
+                                val keyword = parts[0].trim()
                                 val responses = parts[1].split("|")
                                 val responseList = responses.mapNotNull { it.trim().takeIf { s -> s.isNotEmpty() } }.toMutableList()
-                                if (keyword.isNotEmpty() && responseList.isNotEmpty()) keywordResponses[keyword] = responseList
+                                if (keyword.isNotEmpty() && responseList.isNotEmpty()) {
+                                    val keyCanon = canonicalKeyFromTextStatic(keyword, synonymsMap, stopwords)
+                                    if (keyCanon.isNotEmpty()) keywordResponses[keyCanon] = responseList
+                                }
                             }
                         }
                         return@forEachLine
@@ -982,11 +998,11 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     val parts = l.split("=", limit = 2)
                     if (parts.size == 2) {
                         val triggerRaw = parts[0].trim()
-                        val trigger = Engine.normalizeText(triggerRaw)
-                        val triggerFiltered = engine.filterStopwordsAndMapSynonyms(trigger).second
+                        val triggerTokens = Engine.filterStopwordsAndMapSynonymsStatic(triggerRaw, synonymsMap, stopwords).first
+                        val triggerCanonical = triggerTokens.sorted().joinToString(" ")
                         val responses = parts[1].split("|")
                         val responseList = responses.mapNotNull { it.trim().takeIf { s -> s.isNotEmpty() } }.toMutableList()
-                        if (triggerFiltered.isNotEmpty() && responseList.isNotEmpty()) templatesMap[triggerFiltered] = responseList
+                        if (triggerCanonical.isNotEmpty() && responseList.isNotEmpty()) templatesMap[triggerCanonical] = responseList
                     }
                 }
             }
@@ -1033,7 +1049,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         } catch (e: Exception) {
             Log.e("ChatActivity", "Error loading templates from $filename", e)
             showCustomToast("Ошибка чтения файла: ${e.message}")
-            ChatCore.loadFallbackTemplates(templatesMap, keywordResponses, mascotList, contextMap)
+            ChatCore.loadFallbackTemplates(templatesMap, keywordResponses, mascotList, contextMap, synonymsMap, stopwords)
             rebuildInvertedIndex()
             engine.computeTokenWeights()
             updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
@@ -1042,6 +1058,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private fun updateAutoComplete() {
         val suggestions = mutableListOf<String>()
+        // templatesMap keys — canonical strings; показываем их прямо (можно заменить на prettier rendering)
         suggestions.addAll(templatesMap.keys)
         for (s in ChatCore.fallbackReplies) {
             val low = Engine.normalizeText(s)
