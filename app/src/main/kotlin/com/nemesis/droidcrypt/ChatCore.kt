@@ -191,6 +191,62 @@ object ChatCore {
         return null
     }
 
+    // --- findBestResponse ---
+    fun findBestResponse(
+        context: Context,
+        folderUri: Uri?,
+        engine: Engine,
+        userInput: String,
+        filename: String = "core1.txt"
+    ): String {
+        val normalized = normalizeForIndex(userInput)
+        val tokens = normalized.split(" ").filter { it.isNotBlank() }
+
+        val resp = searchInCoreFiles(
+            context,
+            folderUri,
+            normalized,
+            tokens,
+            engine,
+            engine.synonymsMap,
+            engine.stopwords,
+            jaccardThreshold = 0.6
+        )
+        return resp ?: getDummyResponse(userInput)
+    }
+
+    // --- loadTemplatesFromFile ---
+    fun loadTemplatesFromFile(
+        context: Context,
+        folderUri: Uri?,
+        filename: String,
+        templatesMap: MutableMap<String, String>,
+        keywords: MutableMap<String, String>,
+        jaccardList: MutableList<Pair<String, Set<String>>>,
+        levenshteinMap: MutableMap<String, String>,
+        synonymsMap: MutableMap<String, String>,
+        stopwords: MutableSet<String>,
+        metadataOut: MutableMap<String, String>
+    ): Pair<Boolean, Int> {
+        return try {
+            val (parsedTemplates, parsedKeywords) = parseTemplatesFromFile(
+                context,
+                folderUri,
+                filename,
+                synonymsMap,
+                stopwords
+            )
+            templatesMap.clear()
+            parsedTemplates.forEach { (k, v) -> templatesMap[k] = v.random() }
+            keywords.clear()
+            parsedKeywords.forEach { (k, v) -> keywords[k] = v.random() }
+            true to (parsedTemplates.size + parsedKeywords.size)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error loading templates", e)
+            false to 0
+        }
+    }
+
     // --- Заглушки ---
     fun loadFallbackTemplates(
         templatesMap: MutableMap<String, MutableList<String>>,
@@ -204,10 +260,11 @@ object ChatCore {
         keywordResponses[normalizeForIndex("спасибо")] = mutableListOf("Рад, что помог!", "Всегда пожалуйста!")
     }
 
-    fun getDummyResponse(query: String): String = when (val q = query.lowercase(Locale.getDefault())) {
-        in q -> "Привет! Чем могу помочь?"
-        else -> "Не понял запрос. Попробуй другой вариант."
-    }
+    fun getDummyResponse(query: String): String =
+        if (query.lowercase(Locale.getDefault()).contains("привет"))
+            "Привет! Чем могу помочь?"
+        else
+            "Не понял запрос. Попробуй другой вариант."
 
     fun detectContext(input: String, contextMap: Map<String, String>, engine: Engine): String? {
         val tokens = engine.filterStopwordsAndMapSynonyms(input).first
