@@ -279,32 +279,47 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     }
 
     private fun loadTemplatesFromFile(filename: String) {
-        val metadataOut = HashMap<String, String>()
-        val (ok, _) = ChatCore.loadTemplatesFromFile(
-            this, folderUri, filename,
-            engine.templatesMap, HashMap(), mutableListOf(), HashMap(),
-            engine.synonymsMap, engine.stopwords, metadataOut
+    val templatesMap = HashMap<String, MutableList<String>>()
+    val keywordResponses = HashMap<String, MutableList<String>>()
+    val metadataOut = HashMap<String, String>()
+
+    val (ok, _) = ChatCore.loadTemplatesFromFile(
+        context = this,
+        folderUri = folderUri,
+        filename = filename,
+        templatesMap = templatesMap,
+        keywordResponses = keywordResponses,
+        synonymsSnapshot = engine.synonymsMap,
+        stopwordsSnapshot = engine.stopwords
+    )
+
+    if (ok) {
+        engine.templatesMap.clear()
+        engine.templatesMap.putAll(templatesMap)
+        // Здесь можно при желании сохранить keywordResponses в движке, если нужно
+        metadataOut["mascot_name"]?.let { currentMascotName = it }
+        metadataOut["mascot_icon"]?.let { currentMascotIcon = it }
+        metadataOut["theme_color"]?.let { currentThemeColor = it }
+        metadataOut["theme_background"]?.let { currentThemeBackground = it }
+    } else {
+        ChatCore.loadFallbackTemplates(
+            templatesMap = engine.templatesMap,
+            keywordResponses = HashMap(),
+            mascotList = mutableListOf(),
+            contextMap = HashMap()
         )
-        if (ok) {
-            metadataOut["mascot_name"]?.let { currentMascotName = it }
-            metadataOut["mascot_icon"]?.let { currentMascotIcon = it }
-            metadataOut["theme_color"]?.let { currentThemeColor = it }
-            metadataOut["theme_background"]?.let { currentThemeBackground = it }
-        } else {
-            ChatCore.loadFallbackTemplates(engine.templatesMap, HashMap(), mutableListOf(), HashMap())
-        }
     }
+}
 
-    private fun dpToPx(dp: Int): Int {
-        val density = resources.displayMetrics.density
-        return (dp * density).roundToInt()
-    }
+private fun dpToPx(dp: Int): Int {
+    val density = resources.displayMetrics.density
+    return (dp * density).roundToInt()
+}
 
-    private fun startIdleTimer() {
-        lastUserInputTime = System.currentTimeMillis()
-        idleCheckRunnable?.let {
-            dialogHandler.removeCallbacks(it)
-            dialogHandler.postDelayed(it, 5000)
-        }
+private fun startIdleTimer() {
+    lastUserInputTime = System.currentTimeMillis()
+    idleCheckRunnable?.let {
+        dialogHandler.removeCallbacks(it)
+        dialogHandler.postDelayed(it, 5000)
     }
 }
