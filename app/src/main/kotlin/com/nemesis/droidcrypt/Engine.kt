@@ -8,11 +8,10 @@ import kotlin.math.max
 import kotlin.math.sqrt
 import kotlin.collections.HashMap
 import java.util.*
-import kotlin.math.pow
-import kotlin.math.sqrt
 
 class Engine(
     val templatesMap: MutableMap<String, MutableList<String>>,
+    val strictTemplatesMap: MutableMap<String, MutableList<String>>, // Добавлено для строгих шаблонов
     val synonymsMap: MutableMap<String, String>,
     val stopwords: MutableSet<String>
 ) {
@@ -23,8 +22,8 @@ class Engine(
         const val CANDIDATE_TOKEN_THRESHOLD = 2
         const val MAX_SUBQUERY_RESPONSES = 3
         const val SUBQUERY_RESPONSE_DELAY = 1500L
-        const val MAX_CANDIDATES_FOR_LEV = 20 // Увеличено для лучшей точности
-        const val JACCARD_THRESHOLD = 0.75
+        const val MAX_CANDIDATES_FOR_LEV = 30 // Увеличено для большей точности
+        const val JACCARD_THRESHOLD = 0.3 // Базовый порог снижен
         const val SEND_DEBOUNCE_MS = 400L
         const val IDLE_TIMEOUT_MS = 30000L
         const val MAX_CACHE_SIZE = 100
@@ -99,11 +98,25 @@ class Engine(
         return matrix[n][m]
     }
 
+    fun tokenSetLevenshtein(qTokens: List<String>, keyTokens: List<String>, qFiltered: String): Int {
+        val qSorted = qTokens.sorted()
+        val keySorted = keyTokens.sorted()
+        val maxDist = getFuzzyDistance(qFiltered)
+        var totalDist = 0
+        for (i in 0 until min(qSorted.size, keySorted.size)) {
+            totalDist += damerauLevenshtein(qSorted[i], keySorted[i], qSorted[i])
+            if (totalDist > maxDist) return Int.MAX_VALUE / 2
+        }
+        totalDist += abs(qSorted.size - keySorted.size) * maxDist
+        return totalDist
+    }
+
     fun getJaccardThreshold(query: String): Double {
+        val tokenCount = tokenizeStatic(query).size
         return when {
-            query.length <= 10 -> 0.5 // Повышен для точности
-            query.length <= 20 -> 0.6
-            else -> 0.8 // Повышен для длинных запросов
+            query.length <= 10 -> 0.3
+            query.length <= 20 || tokenCount <= 3 -> 0.4
+            else -> 0.75
         }
     }
 
@@ -115,8 +128,10 @@ class Engine(
             }
             return bigrams
         }
-        val qSet = qTokens.toSet() + getBigrams(qTokens)
-        val keySet = keyTokens.toSet() + getBigrams(keyTokens)
+        val qSorted = qTokens.sorted()
+        val keySorted = keyTokens.sorted()
+        val qSet = qSorted.toSet() + getBigrams(qSorted)
+        val keySet = keySorted.toSet() + getBigrams(keySorted)
         val intersection = qSet.intersect(keySet)
         val union = qSet.union(keySet)
         val interWeight = intersection.sumOf { tokenWeights.getOrDefault(it, 1.0) }
@@ -128,7 +143,7 @@ class Engine(
         tokenWeights.clear()
         val tokenCounts = HashMap<String, Int>()
         var totalTokens = 0
-        for (key in templatesMap.keys) {
+        for (key in templatesMap.keys + strictTemplatesMap.keys) {
             val tokens = filterStopwordsAndMapSynonyms(key).first
             for (token in tokens) {
                 tokenCounts[token] = tokenCounts.getOrDefault(token, 0) + 1
@@ -146,13 +161,13 @@ class Engine(
         maxTokensPerIndex: Int = MAX_TOKENS_PER_INDEX
     ): MutableMap<String, MutableList<String>> {
         val invertedIndex = HashMap<String, MutableList<String>>()
-        for (key in templatesMap.keys) {
+        for (key in templatesMap.keys + strictTemplatesMap.keys) {
             val toks = filterStopwordsAndMapSynonyms(key).first.filter { it.length >= minTokenLength }
             for (t in toks) {
                 val list = invertedIndex.getOrPut(t) { mutableListOf() }
                 if (!list.contains(key)) list.add(key)
                 if (list.size > maxTokensPerIndex) {
-                    list.sortByDescending { templatesMap[it]?.size ?: 0 }
+                    list.sortByDescending { (templatesMap[it] ?: strictTemplatesMap[it])?.size ?: 0 }
                     list.subList(maxTokensPerIndex, list.size).clear()
                 }
             }
@@ -162,10 +177,13 @@ class Engine(
 
     fun trimTemplatesMap(maxTemplatesSize: Int = MAX_TEMPLATES_SIZE, queryCountMap: Map<String, Int>): List<String> {
         val removed = mutableListOf<String>()
-        if (templatesMap.size > maxTemplatesSize) {
-            val leastUsed = templatesMap.keys.sortedBy { queryCountMap.getOrDefault(it, 0) }.take(templatesMap.size - maxTemplatesSize)
+        if (templatesMap.size + strictTemplatesMap.size > maxTemplatesSize) {
+            val leastUsed = (templatesMap.keys + strictTemplatesMap.keys)
+                .sortedBy { queryCountMap.getOrDefault(it, 0) }
+                .take(templatesMap.size + strictTemplatesMap.size - maxTemplatesSize)
             leastUsed.forEach { k ->
                 templatesMap.remove(k)
+                strictTemplatesMap.remove(k)
                 removed.add(k)
             }
         }
