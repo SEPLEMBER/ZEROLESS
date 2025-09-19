@@ -31,32 +31,35 @@ class Engine(
         const val MAX_TOKENS_PER_INDEX = 50
         const val MIN_TOKEN_LENGTH = 3
         const val MAX_TEMPLATES_SIZE = 5000
+
+        fun normalizeText(s: String): String {
+            val lower = s.lowercase(Locale.getDefault())
+            val cleaned = lower.replace(Regex("[^\\p{L}\\p{Nd}\\s]"), " ")
+            val collapsed = cleaned.replace(Regex("\\s+"), " ").trim()
+            return collapsed
+        }
+
+        fun tokenizeStatic(s: String): List<String> {
+            if (s.isBlank()) return emptyList()
+            return s.split(Regex("\\s+")).map { it.trim() }.filter { it.isNotEmpty() }
+        }
+
+        fun filterStopwordsAndMapSynonymsStatic(input: String, synonymsSnapshot: Map<String, String>, stopwordsSnapshot: Set<String>): Pair<List<String>, String> {
+            val toks = tokenizeStatic(input)
+            val mapped = toks.map { tok ->
+                val n = normalizeText(tok)
+                val s = synonymsSnapshot[n] ?: n
+                s
+            }.filter { it.isNotEmpty() && !stopwordsSnapshot.contains(it) }
+            val joined = mapped.joinToString(" ")
+            return Pair(mapped, joined)
+        }
     }
 
     val tokenWeights: MutableMap<String, Double> = HashMap()
 
-    // Нормализация — ведёт себя идентично ChatCore.normalizeForIndex
-    fun normalizeText(s: String): String {
-        val lower = s.lowercase(Locale.getDefault())
-        val cleaned = lower.replace(Regex("[^\\p{L}\\p{Nd}\\s]"), " ")
-        val collapsed = cleaned.replace(Regex("\\s+"), " ").trim()
-        return collapsed
-    }
-
-    fun tokenize(s: String): List<String> {
-        if (s.isBlank()) return emptyList()
-        return s.split(Regex("\\s+")).map { it.trim() }.filter { it.isNotEmpty() }
-    }
-
     fun filterStopwordsAndMapSynonyms(input: String): Pair<List<String>, String> {
-        val toks = tokenize(input)
-        val mapped = toks.map { tok ->
-            val n = normalizeText(tok)
-            val s = synonymsMap[n] ?: n
-            s
-        }.filter { it.isNotEmpty() && !stopwords.contains(it) }
-        val joined = mapped.joinToString(" ")
-        return Pair(mapped, joined)
+        return filterStopwordsAndMapSynonymsStatic(input, synonymsMap, stopwords)
     }
 
     fun getFuzzyDistance(word: String): Int {
