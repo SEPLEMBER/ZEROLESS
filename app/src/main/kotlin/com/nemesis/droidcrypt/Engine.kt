@@ -6,6 +6,7 @@ import kotlin.math.log10
 import kotlin.math.max
 import kotlin.collections.HashMap
 import java.util.Locale
+import kotlin.math.roundToInt
 
 class Engine(
     val templatesMap: MutableMap<String, MutableList<String>>,
