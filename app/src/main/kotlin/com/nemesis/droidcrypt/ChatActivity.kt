@@ -27,9 +27,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.*
+import kotlin.math.abs
+import kotlin.math.log10
+import kotlin.math.min
 import kotlin.math.roundToInt
-import com.nemesis.droidcrypt.Engine
-import com.nemesis.droidcrypt.ChatCore
 
 class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
@@ -127,9 +128,6 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         // Инициализация Engine (он работает с теми же коллекциями)
         engine = Engine(templatesMap, synonymsMap, stopwords)
 
-        // Рассчитать веса
-        engine.computeTokenWeights()
-
         try {
             val prefs = PreferenceManager.getDefaultSharedPreferences(this)
             val disable = prefs.getBoolean(PREF_KEY_DISABLE_SCREENSHOTS, false)
@@ -187,23 +185,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             updateAutoComplete()
             addChatMessage(currentMascotName, "Добро пожаловать!")
         } else {
-            // Используем ChatCore.loadTemplatesFromFile (корректно заполняет templatesMap, keywordResponses, mascotList, contextMap)
-            val metadataOut = HashMap<String, String>()
-            val (ok, _) = ChatCore.loadTemplatesFromFile(
-                this, folderUri, currentContext,
-                templatesMap, keywordResponses, mutableListOf(), mutableMapOf(),
-                synonymsMap, stopwords, metadataOut
-            )
-            if (!ok) {
-                // fallback
-                ChatCore.loadFallbackTemplates(templatesMap, keywordResponses, mascotList, contextMap)
-            } else {
-                // apply metadata
-                metadataOut["mascot_name"]?.let { currentMascotName = it }
-                metadataOut["mascot_icon"]?.let { currentMascotIcon = it }
-                metadataOut["theme_color"]?.let { currentThemeColor = it }
-                metadataOut["theme_background"]?.let { currentThemeBackground = it }
-            }
+            loadTemplatesFromFile(currentContext)
             rebuildInvertedIndex()
             engine.computeTokenWeights()
             updateAutoComplete()
@@ -309,11 +291,6 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
     }
 
-    /**
-     * Основная логика обработки пользовательского запроса.
-     * Здесь сохранил основную orchestration: debounce, spam-check, кэш, показа "печатает..." и т.д.
-     * Сам поиск ответа использует engine + ChatCore (парсинг файлов и поиск в core).
-     */
     private fun processUserQuery(userInput: String) {
         if (userInput.startsWith("/")) {
             handleCommand(userInput.trim())
@@ -513,19 +490,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 withContext(Dispatchers.Main) {
                     if (detectedContext != currentContext) {
                         currentContext = detectedContext
-                        // Перезагрузить шаблоны для нового контекста через ChatCore
-                        val metadataOut = HashMap<String, String>()
-                        val (ok, _) = ChatCore.loadTemplatesFromFile(
-                            this@ChatActivity, folderUri, currentContext,
-                            templatesMap, keywordResponses, mutableListOf(), mutableMapOf(),
-                            synonymsMap, stopwords, metadataOut
-                        )
-                        if (ok) {
-                            metadataOut["mascot_name"]?.let { currentMascotName = it }
-                            metadataOut["mascot_icon"]?.let { currentMascotIcon = it }
-                            metadataOut["theme_color"]?.let { currentThemeColor = it }
-                            metadataOut["theme_background"]?.let { currentThemeBackground = it }
-                        }
+                        loadTemplatesFromFile(currentContext)
                         rebuildInvertedIndex()
                         engine.computeTokenWeights()
                         updateAutoComplete()
@@ -755,14 +720,6 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         invertedIndex.putAll(tempIndex)
     }
 
-    private fun trimTemplatesMap() {
-        if (templatesMap.size > Engine.MAX_TEMPLATES_SIZE) {
-            val leastUsed = templatesMap.keys.sortedBy { queryCountMap.getOrDefault(it, 0) }.take(templatesMap.size - Engine.MAX_TEMPLATES_SIZE)
-            leastUsed.forEach { templatesMap.remove(it) }
-            Log.d("ChatActivity", "Trimmed templatesMap to ${Engine.MAX_TEMPLATES_SIZE} entries")
-        }
-    }
-
     private fun addChatMessage(sender: String, text: String) {
         runOnUiThread {
             val row = LinearLayout(this).apply {
@@ -955,30 +912,130 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         return (dp * density).roundToInt()
     }
 
-    // Упрощённая загрузка шаблонов — делегируем ChatCore, чтобы не дублировать логику
     private fun loadTemplatesFromFile(filename: String) {
+        templatesMap.clear()
+        keywordResponses.clear()
+        mascotList.clear()
         if (filename == "base.txt") {
             contextMap.clear()
         }
-        val metadataOut = HashMap<String, String>()
-        val (ok, _) = ChatCore.loadTemplatesFromFile(
-            this, folderUri, filename,
-            templatesMap, keywordResponses, mutableListOf(), mutableMapOf(),
-            synonymsMap, stopwords, metadataOut
-        )
-        if (!ok) {
-            Log.w("ChatActivity", "loadTemplatesFromFile failed — loading fallback")
+        currentMascotName = "Racky"
+        currentMascotIcon = "raccoon_icon.png"
+        currentThemeColor = "#00FF00"
+        currentThemeBackground = "#000000"
+        ChatCore.loadSynonymsAndStopwords(this, folderUri, synonymsMap, stopwords)
+        if (folderUri == null) {
             ChatCore.loadFallbackTemplates(templatesMap, keywordResponses, mascotList, contextMap)
-        } else {
-            metadataOut["mascot_name"]?.let { currentMascotName = it }
-            metadataOut["mascot_icon"]?.let { currentMascotIcon = it }
-            metadataOut["theme_color"]?.let { currentThemeColor = it }
-            metadataOut["theme_background"]?.let { currentThemeBackground = it }
+            rebuildInvertedIndex()
+            engine.computeTokenWeights()
+            updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
+            return
         }
-        rebuildInvertedIndex()
-        engine.computeTokenWeights()
-        updateAutoComplete()
-        updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
+        try {
+            val dir = DocumentFile.fromTreeUri(this, folderUri!!) ?: run {
+                ChatCore.loadFallbackTemplates(templatesMap, keywordResponses, mascotList, contextMap)
+                rebuildInvertedIndex()
+                engine.computeTokenWeights()
+                updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
+                return
+            }
+            val file = dir.findFile(filename)
+            if (file == null || !file.exists()) {
+                ChatCore.loadFallbackTemplates(templatesMap, keywordResponses, mascotList, contextMap)
+                rebuildInvertedIndex()
+                engine.computeTokenWeights()
+                updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
+                return
+            }
+            contentResolver.openInputStream(file.uri)?.bufferedReader()?.use { reader ->
+                reader.forEachLine { raw ->
+                    val l = raw.trim()
+                    if (l.isEmpty()) return@forEachLine
+                    if (filename == "base.txt" && l.startsWith(":") && l.endsWith(":")) {
+                        val contextLine = l.substring(1, l.length - 1)
+                        if (contextLine.contains("=")) {
+                            val parts = contextLine.split("=", limit = 2)
+                            if (parts.size == 2) {
+                                val keyword = parts[0].trim().lowercase(Locale.ROOT)
+                                val contextFile = parts[1].trim()
+                                if (keyword.isNotEmpty() && contextFile.isNotEmpty()) contextMap[keyword] = contextFile
+                            }
+                        }
+                        return@forEachLine
+                    }
+                    if (l.startsWith("-")) {
+                        val keywordLine = l.substring(1)
+                        if (keywordLine.contains("=")) {
+                            val parts = keywordLine.split("=", limit = 2)
+                            if (parts.size == 2) {
+                                val keyword = parts[0].trim().lowercase(Locale.ROOT)
+                                val responses = parts[1].split("|")
+                                val responseList = responses.mapNotNull { it.trim().takeIf { s -> s.isNotEmpty() } }.toMutableList()
+                                if (keyword.isNotEmpty() && responseList.isNotEmpty()) keywordResponses[keyword] = responseList
+                            }
+                        }
+                        return@forEachLine
+                    }
+                    if (!l.contains("=")) return@forEachLine
+                    val parts = l.split("=", limit = 2)
+                    if (parts.size == 2) {
+                        val triggerRaw = parts[0].trim()
+                        val trigger = Engine.normalizeText(triggerRaw)
+                        val triggerFiltered = engine.filterStopwordsAndMapSynonyms(trigger).second
+                        val responses = parts[1].split("|")
+                        val responseList = responses.mapNotNull { it.trim().takeIf { s -> s.isNotEmpty() } }.toMutableList()
+                        if (triggerFiltered.isNotEmpty() && responseList.isNotEmpty()) templatesMap[triggerFiltered] = responseList
+                    }
+                }
+            }
+            val metadataFilename = filename.replace(".txt", "_metadata.txt")
+            val metadataFile = dir.findFile(metadataFilename)
+            if (metadataFile != null && metadataFile.exists()) {
+                contentResolver.openInputStream(metadataFile.uri)?.bufferedReader()?.use { reader ->
+                    reader.forEachLine { raw ->
+                        val line = raw.trim()
+                        when {
+                            line.startsWith("mascot_list=") -> {
+                                val mascots = line.substring("mascot_list=".length).split("|")
+                                for (mascot in mascots) {
+                                    val parts = mascot.split(":")
+                                    if (parts.size == 4) {
+                                        val mascotData = mapOf(
+                                            "name" to parts[0].trim(),
+                                            "icon" to parts[1].trim(),
+                                            "color" to parts[2].trim(),
+                                            "background" to parts[3].trim()
+                                        )
+                                        mascotList.add(mascotData)
+                                    }
+                                }
+                            }
+                            line.startsWith("mascot_name=") -> currentMascotName = line.substring("mascot_name=".length).trim()
+                            line.startsWith("mascot_icon=") -> currentMascotIcon = line.substring("mascot_icon=".length).trim()
+                            line.startsWith("theme_color=") -> currentThemeColor = line.substring("theme_color=".length).trim()
+                            line.startsWith("theme_background=") -> currentThemeBackground = line.substring("theme_background=".length).trim()
+                        }
+                    }
+                }
+            }
+            if (filename == "base.txt" && mascotList.isNotEmpty()) {
+                val selected = mascotList.random()
+                selected["name"]?.let { currentMascotName = it }
+                selected["icon"]?.let { currentMascotIcon = it }
+                selected["color"]?.let { currentThemeColor = it }
+                selected["background"]?.let { currentThemeBackground = it }
+            }
+            rebuildInvertedIndex()
+            engine.computeTokenWeights()
+            updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
+        } catch (e: Exception) {
+            Log.e("ChatActivity", "Error loading templates from $filename", e)
+            showCustomToast("Ошибка чтения файла: ${e.message}")
+            ChatCore.loadFallbackTemplates(templatesMap, keywordResponses, mascotList, contextMap)
+            rebuildInvertedIndex()
+            engine.computeTokenWeights()
+            updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
+        }
     }
 
     private fun updateAutoComplete() {
