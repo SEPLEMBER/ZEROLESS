@@ -26,26 +26,17 @@
     <string name="avatar">avatar</string>
     <string name="open_settings">Открыть настройки</string>
 
-    <!-- Sender label (используется в коде как метка пользователя) -->
-    <string name="user_label">You</string>
-
     <!-- Диалоговые сообщения -->
     <string name="welcome_message">Добро пожаловать!</string>
     <string name="typing_indicator">печатает...</string>
+    <string name="user_label">You</string>
 
-    <!-- Idle-подсказки -->
-    <string-array name="idle_messages">
-        <item>Эй, ты здесь?</item>
-        <item>Что-то тихо стало...</item>
-        <item>Расскажи, о чём думаешь?</item>
-    </string-array>
-
-    <!-- Ответы по умолчанию / заглушки -->
+    <!-- Ответы по умолчанию -->
     <string name="default_response_hello">Привет! Чем могу помочь?</string>
     <string name="default_response_how_are_you">Всё отлично, а у тебя?</string>
     <string name="default_response_unknown">Не понял запрос. Попробуй другой вариант.</string>
 
-    <!-- Ответы для времени и даты (форматируемые) -->
+    <!-- Ответы для времени и даты -->
     <string name="date_response">Сегодня %1$s.</string>
     <string name="day_response">Сегодня %1$s.</string>
     <string name="year_response">Сейчас %1$s год.</string>
@@ -63,6 +54,13 @@
         <item>Не спамь, пожалуйста, задай новый вопрос!</item>
         <item>Пять раз одно и то же? Попробуй что-то другое.</item>
         <item>Я уже ответил, давай новый запрос!</item>
+    </string-array>
+
+    <!-- Idle (ожидание, тишина) -->
+    <string-array name="idle_prompts">
+        <item>Эй, ты здесь?</item>
+        <item>Что-то тихо стало...</item>
+        <item>Расскажи, о чём думаешь?</item>
     </string-array>
 
     <!-- Сообщения о батарее -->
@@ -89,7 +87,7 @@
     <string name="error_loading_mascot_metadata">Ошибка загрузки метаданных маскота: %1$s</string>
     <string name="error_loading_batterycare">Ошибка загрузки batterycare.txt: %1$s</string>
 
-    <!-- Fallback шаблоны (массивы) -->
+    <!-- Fallback шаблоны -->
     <string-array name="fallback_hello_responses">
         <item>Привет! Чем могу помочь?</item>
         <item>Здравствуй!</item>
@@ -101,13 +99,5 @@
     <string-array name="fallback_thanks_responses">
         <item>Рад, что помог!</item>
         <item>Всегда пожалуйста!</item>
-    </string-array>
-
-    <!-- Общий fallback (использовался в ChatCore.fallbackReplies) -->
-    <string-array name="fallback_general">
-        <item>Привет!</item>
-        <item>Как дела?</item>
-        <item>Расскажи о себе</item>
-        <item>Выход</item>
     </string-array>
 </resources>
