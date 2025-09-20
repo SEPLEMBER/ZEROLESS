@@ -32,7 +32,16 @@ class SplashActivity : AppCompatActivity() {
 
         prefs = getSharedPreferences("my_prefs", MODE_PRIVATE)
         prefs.getString("pref_folder_uri", null)?.let { saved ->
-            folderUri = Uri.parse(saved)
+            try {
+                folderUri = Uri.parse(saved)
+                contentResolver.takePersistableUriPermission(
+                    folderUri!!,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                )
+            } catch (e: Exception) {
+                folderUri = null
+                // Опционально: Покажите Toast или лог об ошибке
+            }
         }
 
         // Устанавливаем статус "подключение"
@@ -46,7 +55,11 @@ class SplashActivity : AppCompatActivity() {
 
         // Сразу переходим в чат после загрузки
         Handler(Looper.getMainLooper()).postDelayed({
-            startActivity(Intent(this, ChatActivity::class.java))
+            val intent = Intent(this, ChatActivity::class.java)
+            if (folderUri != null) {
+                intent.putExtra("folderUri", folderUri)
+            }
+            startActivity(intent)
             finish()
         }, 50)
     }
