@@ -1,6 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!-- Название приложения и заголовки -->
-    <string name="app_name">DroidCrypt</string>
+    <string name="app_name">Pawstribe</string>
     <string name="app_title_prefix">Pawstribe - %1$s</string>
     <string name="settings_title">Настройки</string>
     <string name="chat_title">Чат</string>
@@ -21,8 +22,8 @@
     <string name="templates_hint">Каждый шаблон в новой строке. Формат: триггер=ответ</string>
     <string name="start_chat">Перейти в чат</string>
     <string name="bluetooth">Bluetooth</string>
-    <string name="wifi">wifi</string>
-    <string name="avatar">avatar</string>
+    <string name="wifi">Wi-Fi</string>
+    <string name="avatar">Аватар</string>
     <string name="open_settings">Открыть настройки</string>
     <string name="user_label">Пользователь</string>
 
@@ -79,6 +80,14 @@
     <string name="error_reading_file">Ошибка чтения файла: %1$s</string>
     <string name="error_loading_mascot_metadata">Ошибка загрузки метаданных маскота: %1$s</string>
     <string name="error_loading_batterycare">Ошибка загрузки batterycare.txt: %1$s</string>
+
+    <!-- Строки, используемые в SetupActivity (недостающие ранее) -->
+    <string name="error_no_permission">Нет прав для доступа к выбранной папке.</string>
+    <string name="error_no_folder_selected">Папка не выбрана. Пожалуйста, укажите папку с шаблонами.</string>
+    <string name="error_folder_unavailable">Указанная папка недоступна или была удалена.</string>
+    <string name="no_supported_files_in_assets">В assets отсутствуют поддерживаемые файлы шаблонов.</string>
+    <string name="files_copied_successfully">Файлы успешно скопированы.</string>
+    <string name="error_copying_files">Ошибка копирования файлов: %1$s</string>
 
     <!-- Fallback -->
     <string name="fallback_1">Привет! Чем могу помочь?</string>
