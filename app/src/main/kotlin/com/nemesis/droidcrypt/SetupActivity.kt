@@ -110,7 +110,7 @@ class SetupActivity : AppCompatActivity() {
                 return
             }
 
-            for (fileName in assetFiles) five {
+                for (fileName in assetFiles) {
                 val inputStream: InputStream = assets.open(fileName)
                 val newFile = documentFile.createFile("text/plain", fileName)
 
