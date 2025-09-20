@@ -194,12 +194,12 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         // Загрузка шаблонов
         if (folderUri == null) {
-            showCustomToast("Папка не выбрана! Открой настройки и выбери папку.")
+            showCustomToast(getString(R.string.toast_folder_not_selected))
             ChatCore.loadFallbackTemplates(templatesMap, keywordResponses, mascotList, contextMap)
             rebuildInvertedIndex()
             engine.computeTokenWeights()
             updateAutoComplete()
-            addChatMessage(currentMascotName, "Добро пожаловать!")
+            addChatMessage(currentMascotName, getString(R.string.welcome_message))
         } else {
             loadTemplatesFromFile(currentContext)
             // Обновим шаблоны памяти (на случай, если vospominania/zapominanie были в папке)
@@ -209,7 +209,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             rebuildInvertedIndex()
             engine.computeTokenWeights()
             updateAutoComplete()
-            addChatMessage(currentMascotName, "Добро пожаловать!")
+            addChatMessage(currentMascotName, getString(R.string.welcome_message))
         }
 
         queryInput.setOnItemClickListener { parent, _, position, _ ->
@@ -221,7 +221,11 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         idleCheckRunnable = object : Runnable {
             override fun run() {
                 if (System.currentTimeMillis() - lastUserInputTime > Engine.IDLE_TIMEOUT_MS) {
-                    val idleMessage = listOf("Эй, ты здесь?", "Что-то тихо стало...", "Расскажи, о чём думаешь?").random()
+                    val idleMessage = listOf(
+                        getString(R.string.idle_msg_1),
+                        getString(R.string.idle_msg_2),
+                        getString(R.string.idle_msg_3)
+                    ).random()
                     addChatMessage(currentMascotName, idleMessage)
                 }
                 dialogHandler.postDelayed(this, 5000)
@@ -361,7 +365,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         lastUserInputTime = System.currentTimeMillis()
         userActivityCount++
 
-        addChatMessage("You", userInput)
+        addChatMessage(getString(R.string.user_label), userInput)
         showTypingIndicator()
 
         // Антиспам с временным окном
@@ -742,24 +746,24 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         val cmd = cmdRaw.trim().lowercase(Locale.getDefault())
         when {
             cmd == "/reload" -> {
-                addChatMessage(currentMascotName, "Перезагружаю шаблоны...")
+                addChatMessage(currentMascotName, getString(R.string.reloading_templates))
                 loadTemplatesFromFile(currentContext)
                 rebuildInvertedIndex()
                 engine.computeTokenWeights()
                 updateAutoComplete()
-                addChatMessage(currentMascotName, "Шаблоны перезагружены.")
+                addChatMessage(currentMascotName, getString(R.string.templates_reloaded))
             }
             cmd == "/stats" -> {
                 val templatesCount = templatesMap.size
                 val keywordsCount = keywordResponses.size
-                val msg = "Контекст: $currentContext. Шаблонов: $templatesCount. Ключевых ответов: $keywordsCount."
+                val msg = getString(R.string.stats_template, currentContext, templatesCount, keywordsCount)
                 addChatMessage(currentMascotName, msg)
             }
             cmd == "/clear" || cmd == "очисти чат" -> {
                 clearChat()
             }
             else -> {
-                addChatMessage(currentMascotName, "Неизвестная команда: $cmdRaw")
+                addChatMessage(currentMascotName, getString(R.string.unknown_command, cmdRaw))
             }
         }
     }
@@ -769,7 +773,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             val existing = messagesContainer.findViewWithTag<View>("typingView")
             if (existing != null) return@runOnUiThread
             val typingView = TextView(this).apply {
-                text = "печатает..."
+                text = getString(R.string.typing)
                 textSize = 14f
                 setTextColor(getColor(android.R.color.white))
                 setBackgroundColor(0x80000000.toInt())
@@ -805,7 +809,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             rebuildInvertedIndex()
             engine.computeTokenWeights()
             updateAutoComplete()
-            addChatMessage(currentMascotName, "Чат очищен. Возвращаюсь к началу.")
+            addChatMessage(currentMascotName, getString(R.string.chat_cleared))
         }
     }
 
@@ -823,7 +827,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 setPadding(pad, pad / 2, pad, pad / 2)
                 layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
             }
-            val isUser = sender.equals("You", ignoreCase = true)
+            val isUser = sender.equals(getString(R.string.user_label), ignoreCase = true)
             if (isUser) {
                 val bubble = createMessageBubble(sender, text, isUser)
                 val lp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
@@ -892,7 +896,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             }
         } catch (e: Exception) {
             Log.e("ChatActivity", "Error loading ouch message", e)
-            showCustomToast("Ошибка загрузки ouch.txt: ${e.message}")
+            showCustomToast(getString(R.string.error_loading_ouch, e.message ?: ""))
         }
     }
 
@@ -1134,7 +1138,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
         } catch (e: Exception) {
             Log.e("ChatActivity", "Error loading templates from $filename", e)
-            showCustomToast("Ошибка чтения файла: ${e.message}")
+            showCustomToast(getString(R.string.error_reading_file, e.message ?: ""))
             ChatCore.loadFallbackTemplates(templatesMap, keywordResponses, mascotList, contextMap)
             rebuildInvertedIndex()
             engine.computeTokenWeights()
@@ -1189,14 +1193,14 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 }
             } catch (e: Exception) {
                 Log.e("ChatActivity", "Error loading mascot metadata", e)
-                showCustomToast("Ошибка загрузки метаданных маскота: ${e.message}")
+                showCustomToast(getString(R.string.error_loading_mascot_metadata, e.message ?: ""))
             }
         }
     }
 
     private fun updateUI(mascotName: String, mascotIcon: String, themeColor: String, themeBackground: String) {
         runOnUiThread {
-            title = "Pawstribe - $mascotName"
+            title = getString(R.string.app_title_prefix, mascotName)
             try {
                 messagesContainer.setBackgroundColor(Color.parseColor(themeBackground))
             } catch (e: Exception) {
