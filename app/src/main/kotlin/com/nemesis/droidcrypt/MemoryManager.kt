@@ -13,15 +13,8 @@ private const val TAG = "MemoryManager"
 
 /**
  * Простая реализация менеджера памяти на шаблонах (без сторонних библиотек).
- * - Загружает шаблоны из папки (vospominania.txt, zapominanie.txt, ncorrect.txt)
- * - Хранит recentMessages (дека) и извлечённые MemoryEntry
- * - Сохраняет простые слоты (name, age, petname и т.д.) в SharedPreferences
- * - Обрабатывает входящие сообщения: пытается сопоставить с zapominanie -> сохраняет слот;
- *   иначе сопоставляет с vospominania -> создаёт память (event/state/fact)
- * - Отвечает на запросы типа "о чём мы говорили" через recallRecentConversation()
- *
- * Замечание: это MVP, использует простую замену "я->ты" при воспоминании. Для корректных
- * падежей/рода нужна морфология — это за пределами MVP.
+ * Поддерживает произвольные плейсхолдеры <xxx>, сохранение слотов в SharedPreferences,
+ * использование ncorrect.txt и recall: правил, и случайные варианты ответа через |.
  */
 
 object MemoryManager {
@@ -71,11 +64,17 @@ object MemoryManager {
     // corrections: неправильное -> правильное (из ncorrect.txt)
     private val corrections: MutableMap<String, String> = mutableMapOf()
 
+    // recall-specific corrections (используются только при transformFirstPersonToYou)
+    private val recallCorrections: MutableMap<String, String> = mutableMapOf()
+
+    // дополнительные глобальные маппинги (передаются вызовом loadTemplatesFromFolder)
+    private var synonymsGlobal: Map<String, String> = emptyMap()
+
     // простые списки чувств для эвристики
     private val sadWords = setOf("грустн", "грустит", "плохо", "тоску", "одинок", "печаль")
     private val happyWords = setOf("счастл", "рад", "весел", "восторг", "счастье", "радост")
 
-    // слот-плейсхолдеры, которые мы поддерживаем по умолчанию
+    // слот-плейсхолдеры, поддерживаемые по умолчанию (можно дополнять)
     private val knownSlots = setOf("name", "age", "petname")
 
     // Инициализация менеджера памяти
@@ -84,10 +83,13 @@ object MemoryManager {
     }
 
     // Загрузить шаблоны из директории (DocumentFile tree)
-    fun loadTemplatesFromFolder(context: Context, folderUri: Uri?) {
+    // `synonyms` — опциональная мапа canonical форм (передавать engine.synonymsMap для совместимости)
+    fun loadTemplatesFromFolder(context: Context, folderUri: Uri?, synonyms: Map<String, String> = emptyMap()) {
         vospominaniaTemplates.clear()
         zapominanieTemplates.clear()
         corrections.clear()
+        recallCorrections.clear()
+        synonymsGlobal = synonyms
         val uri = folderUri ?: return
         try {
             val dir = DocumentFile.fromTreeUri(context, uri) ?: return
@@ -98,9 +100,17 @@ object MemoryManager {
                         val l = raw.trim()
                         if (l.isEmpty()) return@forEach
                         // формат: incorrect=correct
+                        // для правил recall: левые ключи могут начинаться с "recall:"
                         val parts = l.split("=", limit = 2).map { it.trim() }
                         if (parts.size == 2) {
-                            corrections[parts[0].lowercase(Locale.getDefault())] = parts[1]
+                            val left = parts[0]
+                            val right = parts[1]
+                            if (left.startsWith("recall:")) {
+                                val key = left.substringAfter("recall:").lowercase(Locale.getDefault())
+                                recallCorrections[key] = right
+                            } else {
+                                corrections[left.lowercase(Locale.getDefault())] = right
+                            }
                         }
                     }
                 }
@@ -129,7 +139,7 @@ object MemoryManager {
                 context.contentResolver.openInputStream(file.uri)?.bufferedReader()?.useLines { lines ->
                     lines.forEach { raw ->
                         val l = raw.trim()
-                        if (l.isEmpty()) return@forEach
+                        if (l.isEmpty()) return@forEachLine
                         try {
                             val parts = l.split("=", limit = 2).map { it.trim() }
                             val pattern = parts[0]
@@ -143,45 +153,64 @@ object MemoryManager {
                 }
             }
 
-            Log.d(TAG, "Loaded templates: vosp=${vospominaniaTemplates.size}, zapom=${zapominanieTemplates.size}, corrections=${corrections.size}")
+            Log.d(TAG, "Loaded templates: vosp=${vospominaniaTemplates.size}, zapom=${zapominanieTemplates.size}, corrections=${corrections.size}, recall=${recallCorrections.size}")
 
         } catch (e: Exception) {
             Log.e(TAG, "Error loading templates from folder", e)
         }
     }
 
-    // Создаёт Template из строкового шаблона: поддерживает <name>, <age>, <petname>, <any>
-    // ВАЖНО: использует обычные численные группы (без именованных), чтобы работать корректно с Kotlin Regex
+    // Создаёт Template из строкового шаблона: поддерживает любые <placeholder>
+    // Строим regex по нормализованной/mapped форме (synonymsGlobal применяется к литеральным сегментам)
     private fun buildTemplateFromPattern(pattern: String, response: String?, isSlot: Boolean): Template {
-        // Найдём плейсхолдеры
         val placeholderRegex = Regex("<([a-zA-Z0-9_]+)>")
         val placeholders = placeholderRegex.findAll(pattern).map { it.groupValues[1] }.toList()
 
-        // Построим regex, где каждый плейсхолдер заменяется на захватывающую группу (.*?) — ленивую
+        // Если шаблон — ровно один плейсхолдер (например "<name>"), захватываем всю строку
+        val onlyPlaceholder = pattern.trim().matches(Regex("^<[^>]+>\$"))
+
         val sb = StringBuilder()
         var last = 0
         for (m in placeholderRegex.findAll(pattern)) {
             val start = m.range.first
             val end = m.range.last
-            // добавить предыдущее текстовое содержимое (экранированное)
-            sb.append(Pattern.quote(pattern.substring(last, start)))
-            // заменяем на ленивую захватывающую группу (негребущую)
+            if (start > last) {
+                val segment = pattern.substring(last, start)
+                val mapped = mapAndNormalizeSegment(segment)
+                if (mapped.isNotEmpty()) sb.append(Pattern.quote(mapped))
+            }
+            // заменяем на ленивую захватывающую группу — порядковые группы, не именованные
             sb.append("(.+?)")
             last = end + 1
         }
-        if (last < pattern.length) sb.append(Pattern.quote(pattern.substring(last)))
+        if (last < pattern.length) {
+            val tail = pattern.substring(last)
+            val mappedTail = mapAndNormalizeSegment(tail)
+            if (mappedTail.isNotEmpty()) sb.append(Pattern.quote(mappedTail))
+        }
 
-        // Разрешаем возможные пробелы и пунктуацию в начале/конце
-val finalRegex = ".*" + sb.toString() + ".*"
-val kotlinRegex = Regex(finalRegex, setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
+        val finalRegex = if (onlyPlaceholder) {
+            "^\\s*(.+)\\s*\$"
+        } else {
+            "^\\s*" + sb.toString() + "\\s*\$"
+        }
 
-        // Если это слот, попробуем извлечь ключ из шаблона (например "моего питомца зовут <name>") -> targetSlot=name
-        val targetSlot = if (isSlot && placeholders.size == 1 && placeholders[0] in knownSlots) placeholders[0] else null
+        val kotlinRegex = Regex(finalRegex, setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
+
+        val targetSlot = if (isSlot && placeholders.size == 1) placeholders[0] else null
 
         return Template(raw = pattern, regex = kotlinRegex, placeholders = placeholders, responseTemplate = response, targetSlot = targetSlot)
     }
 
-    // Применить исправления из ncorrect.txt на нормализованную строку
+    // Нормализует и заменяет токены на canonical (synonymsGlobal) для кусочка текста шаблона
+    private fun mapAndNormalizeSegment(seg: String): String {
+        val norm = Engine.normalizeText(seg)
+        if (norm.isBlank()) return ""
+        val toks = norm.split(Regex("\\s+")).map { t -> synonymsGlobal[t] ?: t }
+        return toks.joinToString(" ")
+    }
+
+    // Применить исправления из ncorrect.txt на нормализованную строку (только corrections, без recall)
     private fun applyCorrections(s: String): String {
         if (corrections.isEmpty()) return s
         var res = s
@@ -206,19 +235,22 @@ val kotlinRegex = Regex(finalRegex, setOf(RegexOption.IGNORE_CASE, RegexOption.D
         return match.groupValues.getOrNull(1)?.takeIf { it.isNotBlank() }
     }
 
-    // Рендер ответа, подставляя захваченные группы (по имени плейсхолдера) и при необходимости
-    // выполняя минимальные преобразования (например, <name> -> значение слота)
+    // Рендер ответа, подставляя захваченные группы (по имени плейсхолдера), поддержка | (варианты)
     private fun renderResponseWithPlaceholders(template: String, match: MatchResult, placeholders: List<String>): String {
-        var out = template
+        // если есть альтернативы через | — выберем одну случайно
+        val chosen = if (template.contains("|")) {
+            val parts = template.split("|").map { it.trim() }.filter { it.isNotEmpty() }
+            if (parts.isEmpty()) template else parts.random()
+        } else template
+
+        var out = chosen
         val placeholderRegex = Regex("<([a-zA-Z0-9_]+)>")
-        // Найдём все плейсхолдеры в шаблоне и подставим значение
-        placeholderRegex.findAll(template).forEach { m ->
+        placeholderRegex.findAll(chosen).forEach { m ->
             val name = m.groupValues[1]
             val valFromMatch = getCapturedValue(match, placeholders, name)
             val replacement = when {
                 !valFromMatch.isNullOrBlank() -> valFromMatch
-                knownSlots.contains(name) -> readSlot(name) ?: ""
-                else -> ""
+                else -> readSlot(name) ?: ""
             }
             out = out.replace("<${name}>", replacement)
         }
@@ -229,18 +261,19 @@ val kotlinRegex = Regex(finalRegex, setOf(RegexOption.IGNORE_CASE, RegexOption.D
     fun processIncoming(context: Context, text: String): String? {
         val normalized = Engine.normalizeText(text)
         val corrected = applyCorrections(normalized)
+        // также подготовим mapped версию для поиска (synonyms)
+        val correctedMapped = corrected.split(Regex("\\s+")).map { t -> synonymsGlobal[t] ?: t }.joinToString(" ")
         addRecentMessage(text, corrected)
 
         // 1) попытка сопоставления с zapominanie (сохранение слотов)
         for (tpl in zapominanieTemplates) {
-            val m = tpl.regex.find(corrected)
+            val m = tpl.regex.find(correctedMapped)
             if (m != null) {
                 // если шаблон предназначен для слота
                 if (tpl.targetSlot != null) {
                     val slotValue = getCapturedValue(m, tpl.placeholders, tpl.targetSlot)
                     if (!slotValue.isNullOrBlank()) {
                         saveSlot(tpl.targetSlot, slotValue)
-                        // сформируем ответ: если в шаблоне указан responseTemplate -- используем
                         val resp = tpl.responseTemplate?.let { renderResponseWithPlaceholders(it, m, tpl.placeholders) }
                             ?: "Запомнил."
                         return resp
@@ -254,7 +287,6 @@ val kotlinRegex = Regex(finalRegex, setOf(RegexOption.IGNORE_CASE, RegexOption.D
                             val resp = tpl.responseTemplate?.let { renderResponseWithPlaceholders(it, m, tpl.placeholders) } ?: "Запомню это."
                             return resp
                         } else {
-                            // Если шаблон не явно слот, но есть ответ — отдадим ответ
                             val resp = tpl.responseTemplate?.let { renderResponseWithPlaceholders(it, m, tpl.placeholders) }
                             if (!resp.isNullOrBlank()) return resp
                         }
@@ -265,9 +297,16 @@ val kotlinRegex = Regex(finalRegex, setOf(RegexOption.IGNORE_CASE, RegexOption.D
 
         // 2) попытка сопоставления с vospominania (создание памяти)
         for (tpl in vospominaniaTemplates) {
-            val m = tpl.regex.find(corrected)
+            val m = tpl.regex.find(correctedMapped)
             if (m != null) {
-                // постараемся классифицировать как state/event/fact
+                // Сохраняем все захваченные плейсхолдеры в слоты (если есть)
+                for (ph in tpl.placeholders) {
+                    val captured = getCapturedValue(m, tpl.placeholders, ph)
+                    if (!captured.isNullOrBlank()) {
+                        saveSlot(ph, captured)
+                    }
+                }
+
                 val placeholders = tpl.placeholders
                 val mainCaptured = if (placeholders.isNotEmpty()) getCapturedValue(m, placeholders, placeholders[0]) else m.groupValues.getOrNull(1)
                 val obj = if (placeholders.size > 1) getCapturedValue(m, placeholders, placeholders[1]) else null
@@ -285,7 +324,7 @@ val kotlinRegex = Regex(finalRegex, setOf(RegexOption.IGNORE_CASE, RegexOption.D
             }
         }
 
-        // 3) эвристическое извлечение эмоций/событий (если шаблоны не сработали)
+        // 3) эвристическое извлечение эмоций/событий
         val detected = heuristicExtract(corrected)
         if (detected != null) {
             pushMemory(detected)
@@ -319,11 +358,9 @@ val kotlinRegex = Regex(finalRegex, setOf(RegexOption.IGNORE_CASE, RegexOption.D
     // Очень простая эвристика для извлечения эмоций/событий
     private fun heuristicExtract(corrected: String): MemoryEntry? {
         val toks = Engine.tokenizeStatic(corrected)
-        // ищем маркеры первого лица
         val firstPerson = toks.any { it == "я" || it == "мне" || it == "мой" || it == "моя" }
         if (!firstPerson) return null
 
-        // найдем позитив/негатив
         val hasSad = toks.any { t -> sadWords.any { t.contains(it) } }
         val hasHappy = toks.any { t -> happyWords.any { t.contains(it) } }
 
@@ -332,7 +369,6 @@ val kotlinRegex = Regex(finalRegex, setOf(RegexOption.IGNORE_CASE, RegexOption.D
             return MemoryEntry(type = "state", predicate = if (hasHappy) "счастлив" else "грустн", obj = null, rawText = corrected, mood = mood)
         }
 
-        // событие: ищем глаголы-перемены (простая эвристика: слова с "ся"/"лся"/"ил" итд)
         val event = toks.find { it.endsWith("ся") || it.endsWith("лся") || it.endsWith("илась") || it.endsWith("ил") || it.endsWith("ился") }
         if (event != null) {
             return MemoryEntry(type = "event", predicate = event, obj = null, rawText = corrected, mood = null)
@@ -359,10 +395,8 @@ val kotlinRegex = Regex(finalRegex, setOf(RegexOption.IGNORE_CASE, RegexOption.D
 
     // Вернуть наиболее релевантную память для ответа на "о чём мы говорили"
     fun recallRecentConversation(): String? {
-        // ищем первую память типа state/event/fact
         val mem = memories.firstOrNull { it.type in setOf("state", "event", "fact") }
         if (mem != null) return renderMemoryAsReply(mem)
-        // fallback: посмотрим последние сообщения и попытаемся вернуть последнее первое лицо
         val fromRecent = recentMessages.firstOrNull { it.normalized.contains("я ") || it.normalized.startsWith("я") }
         if (fromRecent != null) {
             return transformFirstPersonToYou(fromRecent.text)
@@ -370,10 +404,20 @@ val kotlinRegex = Regex(finalRegex, setOf(RegexOption.IGNORE_CASE, RegexOption.D
         return null
     }
 
-    // Простейшая трансформация "я ..." -> "тебе ..." / "ты ..."
+    // Используем recallCorrections (если есть) для трансформации "я" -> "ты", иначе fallback substitutions
     private fun transformFirstPersonToYou(s: String): String {
         var res = s
-        // Набор базовых замен (используем корректные регулярные границы слова "\\b")
+        // сначала применяем правила recallCorrections (если они заданы в ncorrect.txt как recall:ключ=значение)
+        if (recallCorrections.isNotEmpty()) {
+            for ((bad, good) in recallCorrections) {
+                try {
+                    res = res.replace(Regex("\\b" + Regex.escape(bad) + "\\b", RegexOption.IGNORE_CASE), good)
+                } catch (_: Exception) {}
+            }
+            return res
+        }
+
+        // fallback — встроенные замены
         val subs = listOf(
             Pair("\\bя\\b", "ты"),
             Pair("\\bмне\\b", "тебе"),
@@ -381,25 +425,22 @@ val kotlinRegex = Regex(finalRegex, setOf(RegexOption.IGNORE_CASE, RegexOption.D
             Pair("\\bмой\\b", "твой"),
             Pair("\\bмоя\\b", "твоя"),
             Pair("\\bмоё\\b", "твоё"),
-            Pair("\\bмои\\b", "твои")
+            Pair("\\bмои\\b", "твои"),
+            Pair("\\bмы\\b", "вы")
         )
         for ((from, to) in subs) {
             try {
                 res = res.replace(Regex(from, RegexOption.IGNORE_CASE), to)
-            } catch (_: Exception) {
-            }
+            } catch (_: Exception) {}
         }
-        // Мелкие коррекции: если предложение начинается с "ты " -> лучше: "Тебе было..."
         return res
     }
 
     // Рендер памяти в ответ, бот обращается на "ты"
     private fun renderMemoryAsReply(mem: MemoryEntry): String {
-        // Если у нас есть структурированное поле predicate/obj — попытаемся сформировать понятную фразу
         mem.predicate?.let { pred ->
             when (mem.type) {
                 "state" -> {
-                    // "Тебе было грустно" — нейтрально
                     val humanPred = pred
                     return "Тебе было $humanPred."
                 }
@@ -412,7 +453,6 @@ val kotlinRegex = Regex(finalRegex, setOf(RegexOption.IGNORE_CASE, RegexOption.D
                 }
             }
         }
-        // fallback: raw
         return transformFirstPersonToYou(mem.rawText)
     }
 
