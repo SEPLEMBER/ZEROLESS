@@ -31,6 +31,7 @@ import kotlin.collections.HashMap
 import kotlin.math.roundToInt
 import com.nemesis.droidcrypt.Engine
 import com.nemesis.droidcrypt.ChatCore
+import com.nemesis.droidcrypt.MemoryManager
 
 class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
@@ -135,6 +136,14 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         // Инициализация Engine (он работает с теми же коллекциями)
         engine = Engine(templatesMap, synonymsMap, stopwords)
 
+        // Инициализация MemoryManager (легкая, безопасная) и загрузка его шаблонов
+        try {
+            MemoryManager.init(this)
+            MemoryManager.loadTemplatesFromFolder(this, folderUri)
+        } catch (e: Exception) {
+            Log.w("ChatActivity", "MemoryManager init/load failed: ${e.message}")
+        }
+
         try {
             val prefs = PreferenceManager.getDefaultSharedPreferences(this)
             val disable = prefs.getBoolean(PREF_KEY_DISABLE_SCREENSHOTS, false)
@@ -193,6 +202,10 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             addChatMessage(currentMascotName, "Добро пожаловать!")
         } else {
             loadTemplatesFromFile(currentContext)
+            // Обновим шаблоны памяти (на случай, если vospominania/zapominanie были в папке)
+            try {
+                MemoryManager.loadTemplatesFromFolder(this, folderUri)
+            } catch (_: Exception) {}
             rebuildInvertedIndex()
             engine.computeTokenWeights()
             updateAutoComplete()
@@ -238,6 +251,12 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     override fun onResume() {
         super.onResume()
         folderUri?.let { loadTemplatesFromFile(currentContext) }
+        // Обновим шаблоны памяти при resume (безопасно)
+        try {
+            MemoryManager.loadTemplatesFromFolder(this, folderUri)
+        } catch (e: Exception) {
+            Log.w("ChatActivity", "MemoryManager load onResume failed: ${e.message}")
+        }
         rebuildInvertedIndex()
         engine.computeTokenWeights()
         updateAutoComplete()
@@ -313,8 +332,27 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         if (qFiltered.isEmpty()) return
 
+        // --- Recall intent check (memory manager) ---
+        try {
+            if (MemoryManager.isRecallIntent(qOrigRaw)) {
+                MemoryManager.recallRecentConversation()?.let { recallResp ->
+                    if (!recallResp.isNullOrBlank()) {
+                        addChatMessage(currentMascotName, recallResp)
+                        // side-effect: let memory manager learn from this query
+                        try { MemoryManager.processIncoming(this, qOrigRaw) } catch (_: Exception) {}
+                        startIdleTimer()
+                        return
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.w("ChatActivity", "MemoryManager recall check failed: ${e.message}")
+        }
+
         // Кэш: проверка на повторный запрос (используем canonical)
         queryCache[qKeyForCount]?.let { cachedResponse ->
+            // side-effect: обновим память асинхронно/безопасно
+            try { MemoryManager.processIncoming(this, qOrigRaw) } catch (_: Exception) {}
             addChatMessage(currentMascotName, cachedResponse)
             startIdleTimer()
             return
@@ -347,6 +385,15 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         val keywordResponsesSnapshot = HashMap<String, MutableList<String>>()
         for ((k, v) in keywordResponses) keywordResponsesSnapshot[k] = ArrayList(v)
         val contextMapSnapshot = HashMap(contextMap)
+
+        // helper to record memory side-effect safely (don't block or crash UI)
+        fun recordMemorySideEffect(inputText: String) {
+            try {
+                MemoryManager.processIncoming(this, inputText)
+            } catch (e: Exception) {
+                Log.w("ChatActivity", "MemoryManager.processIncoming failed: ${e.message}")
+            }
+        }
 
         lifecycleScope.launch(Dispatchers.Default) {
             // Попытки простых совпадений / subqueries
@@ -400,6 +447,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 val combined = subqueryResponses.joinToString(". ")
                 withContext(Dispatchers.Main) {
                     addChatMessage(currentMascotName, combined)
+                    recordMemorySideEffect(qOrigRaw)
                     startIdleTimer()
                 }
                 return@launch
@@ -413,6 +461,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 if (qTokenSet.intersect(kwTokens).isNotEmpty()) {
                     withContext(Dispatchers.Main) {
                         addChatMessage(currentMascotName, responses.random())
+                        recordMemorySideEffect(qOrigRaw)
                         startIdleTimer()
                     }
                     return@launch
@@ -460,6 +509,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     val response = possible.random()
                     withContext(Dispatchers.Main) {
                         addChatMessage(currentMascotName, response)
+                        recordMemorySideEffect(qOrigRaw)
                         startIdleTimer()
                         cacheResponse(qKeyForCount, response)
                     }
@@ -487,6 +537,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     val response = possible.random()
                     withContext(Dispatchers.Main) {
                         addChatMessage(currentMascotName, response)
+                        recordMemorySideEffect(qOrigRaw)
                         startIdleTimer()
                         cacheResponse(qKeyForCount, response)
                     }
@@ -517,6 +568,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                         val response = possible.random()
                         withContext(Dispatchers.Main) {
                             addChatMessage(currentMascotName, response)
+                            recordMemorySideEffect(qOrigRaw)
                             startIdleTimer()
                             cacheResponse(qKeyForCount, response)
                         }
@@ -570,6 +622,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                         val response = possible.random()
                         withContext(Dispatchers.Main) {
                             addChatMessage(currentMascotName, response)
+                            recordMemorySideEffect(qOrigRaw)
                             startIdleTimer()
                             cacheResponse(qKeyForCount, response)
                         }
@@ -595,6 +648,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                         val response = possible.random()
                         withContext(Dispatchers.Main) {
                             addChatMessage(currentMascotName, response)
+                            recordMemorySideEffect(qOrigRaw)
                             startIdleTimer()
                             cacheResponse(qKeyForCount, response)
                         }
@@ -610,6 +664,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 if (coreResult != null) {
                     withContext(Dispatchers.Main) {
                         addChatMessage(currentMascotName, coreResult)
+                        recordMemorySideEffect(qOrigRaw)
                         startIdleTimer()
                         cacheResponse(qKeyForCount, coreResult)
                     }
@@ -619,6 +674,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 val dummy = ChatCore.getDummyResponse(qOrig)
                 withContext(Dispatchers.Main) {
                     addChatMessage(currentMascotName, dummy)
+                    recordMemorySideEffect(qOrigRaw)
                     startIdleTimer()
                     cacheResponse(qKeyForCount, dummy)
                 }
@@ -633,6 +689,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             if (coreResult != null) {
                 withContext(Dispatchers.Main) {
                     addChatMessage(currentMascotName, coreResult)
+                    recordMemorySideEffect(qOrigRaw)
                     startIdleTimer()
                     cacheResponse(qKeyForCount, coreResult)
                 }
@@ -642,6 +699,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             val dummy = ChatCore.getDummyResponse(qOrig)
             withContext(Dispatchers.Main) {
                 addChatMessage(currentMascotName, dummy)
+                recordMemorySideEffect(qOrigRaw)
                 startIdleTimer()
                 cacheResponse(qKeyForCount, dummy)
             }
