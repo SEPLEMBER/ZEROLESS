@@ -1,5 +1,6 @@
 package com.nemesis.droidcrypt
 
+import com.nemesis.droidcrypt.R
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
@@ -15,10 +16,6 @@ import java.io.OutputStream
 
 class SetupActivity : AppCompatActivity() {
 
-    companion object {
-        private const val PREF_KEY_FOLDER_URI = "pref_folder_uri"
-    }
-
     private lateinit var selectFolderButton: Button
     private lateinit var progressBar: ProgressBar
     private var folderUri: Uri? = null
@@ -33,18 +30,14 @@ class SetupActivity : AppCompatActivity() {
                             uri,
                             Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
                         )
-                        getSharedPreferences("my_prefs", MODE_PRIVATE)
-                            .edit()
-                            .putString(PREF_KEY_FOLDER_URI, uri.toString())
-                            .apply()
                         copyAssetsToSafFolder(uri)
                     } catch (e: SecurityException) {
-                        Toast.makeText(this, "Ошибка: не удалось получить права доступа", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(this, R.string.error_no_permission, Toast.LENGTH_SHORT).show()
                         progressBar.visibility = View.GONE
                         selectFolderButton.isEnabled = true
                     }
                 } ?: run {
-                    Toast.makeText(this, "Ошибка: папка не выбрана", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this, R.string.error_no_folder_selected, Toast.LENGTH_SHORT).show()
                     progressBar.visibility = View.GONE
                     selectFolderButton.isEnabled = true
                 }
@@ -60,20 +53,6 @@ class SetupActivity : AppCompatActivity() {
 
         selectFolderButton = findViewById(R.id.selectFolderButton)
         progressBar = findViewById(R.id.progressBar)
-
-        // Проверяем, есть ли сохранённый URI
-        getSharedPreferences("my_prefs", MODE_PRIVATE)
-            .getString(PREF_KEY_FOLDER_URI, null)?.let { saved ->
-                try {
-                    folderUri = Uri.parse(saved)
-                    contentResolver.takePersistableUriPermission(
-                        folderUri!!,
-                        Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-                    )
-                } catch (e: Exception) {
-                    folderUri = null
-                }
-            }
 
         selectFolderButton.setOnClickListener {
             selectFolderButton.isEnabled = false
@@ -94,25 +73,33 @@ class SetupActivity : AppCompatActivity() {
         try {
             val documentFile = DocumentFile.fromTreeUri(this, folderUri)
             if (documentFile == null || !documentFile.isDirectory) {
-                Toast.makeText(this, "Ошибка: Папка недоступна", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, R.string.error_folder_unavailable, Toast.LENGTH_SHORT).show()
                 progressBar.visibility = View.GONE
                 selectFolderButton.isEnabled = true
                 return
             }
 
-            // Копируем все файлы из assets (фильтруем по .txt, можно изменить)
-            val assetFiles = assets.list("")?.filter { it.endsWith(".txt") } ?: emptyList()
+            // Копируем файлы из assets (.txt, .png, .ogg)
+            val assetFiles = assets.list("")?.filter {
+                it.endsWith(".txt", true) || it.endsWith(".png", true) || it.endsWith(".ogg", true)
+            } ?: emptyList()
 
             if (assetFiles.isEmpty()) {
-                Toast.makeText(this, "В assets нет текстовых файлов", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, R.string.no_supported_files_in_assets, Toast.LENGTH_SHORT).show()
                 progressBar.visibility = View.GONE
                 selectFolderButton.isEnabled = true
                 return
             }
 
-                for (fileName in assetFiles) {
+            for (fileName in assetFiles) {
                 val inputStream: InputStream = assets.open(fileName)
-                val newFile = documentFile.createFile("text/plain", fileName)
+                val mimeType = when {
+                    fileName.endsWith(".txt", true) -> "text/plain"
+                    fileName.endsWith(".png", true) -> "image/png"
+                    fileName.endsWith(".ogg", true) -> "audio/ogg"
+                    else -> "application/octet-stream" // Fallback, не должен использоваться
+                }
+                val newFile = documentFile.createFile(mimeType, fileName)
 
                 if (newFile != null) {
                     contentResolver.openOutputStream(newFile.uri)?.use { outputStream: OutputStream ->
@@ -122,14 +109,16 @@ class SetupActivity : AppCompatActivity() {
                 inputStream.close()
             }
 
-            Toast.makeText(this, "Файлы успешно скопированы!", Toast.LENGTH_LONG).show()
-            setResult(RESULT_OK, Intent().apply {
-                putExtra("folderUri", folderUri)
-            })
+            // Показываем инструкцию пользователю
+            Toast.makeText(
+                this,
+                R.string.files_copied_successfully,
+                Toast.LENGTH_LONG
+            ).show()
             finish()
         } catch (e: Exception) {
             e.printStackTrace()
-            Toast.makeText(this, "Ошибка при копировании: ${e.message}", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, getString(R.string.error_copying_files, e.message), Toast.LENGTH_LONG).show()
             progressBar.visibility = View.GONE
             selectFolderButton.isEnabled = true
         }
