@@ -71,5 +71,12 @@
             android:parentActivityName=".MainActivity"
             android:configChanges="orientation|screenSize" />
 
+        <!-- SetupActivity -->
+        <activity
+            android:name=".SetupActivity"
+            android:exported="false"
+            android:parentActivityName=".ChatActivity"
+            android:configChanges="orientation|screenSize" />
+
     </application>
 </manifest>
