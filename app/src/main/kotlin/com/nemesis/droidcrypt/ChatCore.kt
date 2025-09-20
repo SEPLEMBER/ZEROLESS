@@ -4,31 +4,85 @@ import android.content.Context
 import android.net.Uri
 import android.util.Log
 import androidx.documentfile.provider.DocumentFile
-import java.util.*
-import kotlin.collections.HashMap
 import com.nemesis.droidcrypt.Engine
 import com.nemesis.droidcrypt.MemoryManager
+import java.util.*
+import kotlin.collections.HashMap
 
 object ChatCore {
     private const val TAG = "ChatCore"
 
-    // Вшитые антиспам-ответы
-    private val antiSpamResponses = listOf(
-        "Ты надоел, давай что-то новенького!",
-        "Спамить нехорошо, попробуй другой запрос.",
-        "Я устал от твоих повторений!",
-        "Хватит спамить, придумай что-то интересное.",
-        "Эй, не зацикливайся, попробуй другой вопрос!",
-        "Повторяешь одно и то же? Давай разнообразие!",
-        "Слишком много повторов, я же не робот... ну, почти.",
-        "Не спамь, пожалуйста, задай новый вопрос!",
-        "Пять раз одно и то же? Попробуй что-то другое.",
-        "Я уже ответил, давай новый запрос!"
-    )
+    // optional application context — инициализируется при старте приложения
+    private var appContext: Context? = null
 
-    val fallbackReplies = listOf("Привет!", "Как дела?", "Расскажи о себе", "Выход")
+    /**
+     * Инициализируйте ChatCore в Application.onCreate() или в ранней Activity:
+     * ChatCore.init(applicationContext)
+     */
+    fun init(context: Context) {
+        appContext = context.applicationContext
+    }
 
+    // Helper: получить строковый ресурс, если доступен, иначе вернуть fallback
+    private fun safeGetString(context: Context?, resId: Int, fallback: String): String {
+        return try {
+            (context ?: appContext)?.getString(resId) ?: fallback
+        } catch (e: Exception) {
+            fallback
+        }
+    }
+
+    // --- Anti-spam / fallback lists (читаются из ресурсов при наличии context) ---
+    private val antiSpamResponses: List<String>
+        get() {
+            val c = appContext
+            return if (c != null) {
+                listOf(
+                    c.getString(R.string.antispam_1),
+                    c.getString(R.string.antispam_2),
+                    c.getString(R.string.antispam_3),
+                    c.getString(R.string.antispam_4),
+                    c.getString(R.string.antispam_5),
+                    c.getString(R.string.antispam_6),
+                    c.getString(R.string.antispam_7),
+                    c.getString(R.string.antispam_8),
+                    c.getString(R.string.antispam_9),
+                    c.getString(R.string.antispam_10)
+                )
+            } else {
+                listOf(
+                    "Ты надоел, давай что-то новенького!",
+                    "Спамить нехорошо, попробуй другой запрос.",
+                    "Я устал от твоих повторений!",
+                    "Хватит спамить, придумай что-то интересное.",
+                    "Эй, не зацикливайся, попробуй другой вопрос!",
+                    "Повторяешь одно и то же? Давай разнообразие!",
+                    "Слишком много повторов, я же не робот... ну, почти.",
+                    "Не спамь, пожалуйста, задай новый вопрос!",
+                    "Пять раз одно и то же? Попробуй что-то другое.",
+                    "Я уже ответил, давай новый запрос!"
+                )
+            }
+        }
+
+    // публичный удобный вызов (с совместимостью — можно вызывать без аргументов)
     fun getAntiSpamResponse(): String = antiSpamResponses.random()
+
+    // fallback replies (используется где-то в UI)
+    val fallbackReplies: List<String>
+        get() {
+            val c = appContext
+            return if (c != null) {
+                listOf(
+                    c.getString(R.string.fallback_1),
+                    c.getString(R.string.fallback_2),
+                    c.getString(R.string.fallback_3),
+                    c.getString(R.string.fallback_4)
+                )
+            } else {
+                listOf("Привет!", "Как дела?", "Расскажи о себе", "Выход")
+            }
+        }
 
     // --- Загрузка синонимов и стоп-слов ---
     fun loadSynonymsAndStopwords(
@@ -352,7 +406,7 @@ object ChatCore {
             Log.w(TAG, "MemoryManager processing failed (ignored): ${e.message}")
         }
 
-        return getDummyResponse(userInput)
+        return getDummyResponse(context, userInput)
     }
 
     // --- loadTemplatesFromFile (используется в UI elsewhere) ---
@@ -389,22 +443,46 @@ object ChatCore {
 
     // --- Заглушки ---
     fun loadFallbackTemplates(
-        templatesMap: MutableMap<String, MutableList<String>>,
+        context: Context?,
         keywordResponses: MutableMap<String, MutableList<String>>,
+        templatesMap: MutableMap<String, MutableList<String>>,
         mascotList: MutableList<Map<String, String>>,
         contextMap: MutableMap<String, String>
     ) {
         templatesMap.clear(); keywordResponses.clear(); mascotList.clear(); contextMap.clear()
-        templatesMap[Engine.normalizeText("привет")] = mutableListOf("Привет! Чем могу помочь?", "Здравствуй!")
-        templatesMap[Engine.normalizeText("как дела")] = mutableListOf("Всё отлично, а у тебя?", "Нормально, как дела?")
-        keywordResponses[Engine.normalizeText("спасибо")] = mutableListOf("Рад, что помог!", "Всегда пожалуйста!")
+        val c = context ?: appContext
+        // greeting
+        templatesMap[Engine.normalizeText("привет")] = mutableListOf(
+            safeGetString(c, R.string.tpl_greeting_1, "Привет! Чем могу помочь?"),
+            safeGetString(c, R.string.tpl_greeting_2, "Здравствуй!")
+        )
+        // how are you
+        templatesMap[Engine.normalizeText("как дела")] = mutableListOf(
+            safeGetString(c, R.string.tpl_howareyou_1, "Всё отлично, а у тебя?"),
+            safeGetString(c, R.string.tpl_howareyou_2, "Нормально, как дела?")
+        )
+        // thanks -> keywordResponses
+        keywordResponses[Engine.normalizeText("спасибо")] = mutableListOf(
+            safeGetString(c, R.string.tpl_thanks_1, "Рад, что помог!"),
+            safeGetString(c, R.string.tpl_thanks_2, "Всегда пожалуйста!")
+        )
     }
 
-    fun getDummyResponse(query: String): String =
-        if (query.lowercase(Locale.getDefault()).contains("привет"))
-            "Привет! Чем могу помочь?"
+    // getDummyResponse: использует ресурсы, если контекст доступен
+    fun getDummyResponse(query: String): String {
+        val c = appContext
+        return getDummyResponse(c, query)
+    }
+
+    // overload с контекстом (используется из findBestResponse и других мест)
+    fun getDummyResponse(context: Context?, query: String): String {
+        val greeting = safeGetString(context, R.string.dummy_greeting, "Привет! Чем могу помочь?")
+        val unknown = safeGetString(context, R.string.dummy_unknown, "Не понял запрос. Попробуй другой вариант.")
+        return if (query.lowercase(Locale.getDefault()).contains("привет"))
+            greeting
         else
-            "Не понял запрос. Попробуй другой вариант."
+            unknown
+    }
 
     fun detectContext(input: String, contextMap: Map<String, String>, engine: Engine): String? {
         val tokens = Engine.tokenizeStatic(Engine.normalizeText(input))
