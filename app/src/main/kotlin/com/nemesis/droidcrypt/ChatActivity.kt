@@ -97,6 +97,10 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // Ensure ChatCore has application context for resource-backed fallbacks
+        ChatCore.init(applicationContext)
+
         setContentView(R.layout.activity_chat)
         window.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
         supportActionBar?.setBackgroundDrawable(ColorDrawable(Color.argb(128, 0, 0, 0)))
@@ -195,7 +199,8 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         // Загрузка шаблонов
         if (folderUri == null) {
             showCustomToast(getString(R.string.toast_folder_not_selected))
-            ChatCore.loadFallbackTemplates(templatesMap, keywordResponses, mascotList, contextMap)
+            // new signature: ChatCore.loadFallbackTemplates(context: Context?, keywordResponses, templatesMap, mascotList, contextMap)
+            ChatCore.loadFallbackTemplates(this, keywordResponses, templatesMap, mascotList, contextMap)
             rebuildInvertedIndex()
             engine.computeTokenWeights()
             updateAutoComplete()
@@ -1027,7 +1032,8 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         ChatCore.loadSynonymsAndStopwords(this, folderUri, synonymsMap, stopwords)
 
         if (folderUri == null) {
-            ChatCore.loadFallbackTemplates(templatesMap, keywordResponses, mascotList, contextMap)
+            // new signature: context first
+            ChatCore.loadFallbackTemplates(this, keywordResponses, templatesMap, mascotList, contextMap)
             rebuildInvertedIndex()
             engine.computeTokenWeights()
             updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
@@ -1035,7 +1041,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
         try {
             val dir = DocumentFile.fromTreeUri(this, folderUri!!) ?: run {
-                ChatCore.loadFallbackTemplates(templatesMap, keywordResponses, mascotList, contextMap)
+                ChatCore.loadFallbackTemplates(this, keywordResponses, templatesMap, mascotList, contextMap)
                 rebuildInvertedIndex()
                 engine.computeTokenWeights()
                 updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
@@ -1043,7 +1049,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             }
             val file = dir.findFile(filename)
             if (file == null || !file.exists()) {
-                ChatCore.loadFallbackTemplates(templatesMap, keywordResponses, mascotList, contextMap)
+                ChatCore.loadFallbackTemplates(this, keywordResponses, templatesMap, mascotList, contextMap)
                 rebuildInvertedIndex()
                 engine.computeTokenWeights()
                 updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
@@ -1139,7 +1145,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         } catch (e: Exception) {
             Log.e("ChatActivity", "Error loading templates from $filename", e)
             showCustomToast(getString(R.string.error_reading_file, e.message ?: ""))
-            ChatCore.loadFallbackTemplates(templatesMap, keywordResponses, mascotList, contextMap)
+            ChatCore.loadFallbackTemplates(this, keywordResponses, templatesMap, mascotList, contextMap)
             rebuildInvertedIndex()
             engine.computeTokenWeights()
             updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
