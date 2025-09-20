@@ -8,6 +8,7 @@ import com.nemesis.droidcrypt.Engine
 import com.nemesis.droidcrypt.MemoryManager
 import java.util.*
 import kotlin.collections.HashMap
+import com.nemesis.droidcrypt.R
 
 object ChatCore {
     private const val TAG = "ChatCore"
