@@ -662,3 +662,5 @@ object ChatCore {
         Log.w(TAG, "detectContext failed: ${e.message}")
         return null
     }
+    }
+}
