@@ -410,6 +410,10 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
             if (subqueryResponses.size < Engine.MAX_SUBQUERY_RESPONSES) {
                 val tokens = if (qTokensFiltered.isNotEmpty()) qTokensFiltered else Engine.tokenizeStatic(qFiltered)
+
+                // ADDED: update engine short-term memory so it can influence later scoring
+                try { engine.updateMemory(tokens) } catch (_: Exception) {}
+
                 for (token in tokens) {
                     if (subqueryResponses.size >= Engine.MAX_SUBQUERY_RESPONSES) break
                     if (processedSubqueries.contains(token) || token.length < 2) continue
@@ -671,6 +675,17 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     return@launch
                 }
 
+                // ADDED: try memory manager before returning dummy
+                val memBeforeDummy = try { MemoryManager.processIncoming(this@ChatActivity, qOrigRaw) } catch (_: Exception) { null }
+                if (!memBeforeDummy.isNullOrBlank()) {
+                    withContext(Dispatchers.Main) {
+                        addChatMessage(currentMascotName, memBeforeDummy)
+                        startIdleTimer()
+                        cacheResponse(qKeyForCount, memBeforeDummy)
+                    }
+                    return@launch
+                }
+
                 val dummy = ChatCore.getDummyResponse(qOrig)
                 withContext(Dispatchers.Main) {
                     addChatMessage(currentMascotName, dummy)
@@ -692,6 +707,17 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     recordMemorySideEffect(qOrigRaw)
                     startIdleTimer()
                     cacheResponse(qKeyForCount, coreResult)
+                }
+                return@launch
+            }
+
+            // ADDED: allow MemoryManager to provide a reply before final dummy fallback
+            val memResp = try { MemoryManager.processIncoming(this@ChatActivity, qOrigRaw) } catch (_: Exception) { null }
+            if (!memResp.isNullOrBlank()) {
+                withContext(Dispatchers.Main) {
+                    addChatMessage(currentMascotName, memResp)
+                    startIdleTimer()
+                    cacheResponse(qKeyForCount, memResp)
                 }
                 return@launch
             }
