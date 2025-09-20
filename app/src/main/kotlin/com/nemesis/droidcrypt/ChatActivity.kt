@@ -32,6 +32,7 @@ import kotlin.math.roundToInt
 import com.nemesis.droidcrypt.Engine
 import com.nemesis.droidcrypt.ChatCore
 import com.nemesis.droidcrypt.MemoryManager
+import com.nemesis.droidcrypt.R
 
 class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
@@ -199,7 +200,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         // Загрузка шаблонов
         if (folderUri == null) {
             showCustomToast(getString(R.string.toast_folder_not_selected))
-            // new signature: ChatCore.loadFallbackTemplates(context: Context?, keywordResponses, templatesMap, mascotList, contextMap)
+            // current ChatCore signature: (context: Context?, keywordResponses, templatesMap, mascotList, contextMap)
             ChatCore.loadFallbackTemplates(this, keywordResponses, templatesMap, mascotList, contextMap)
             rebuildInvertedIndex()
             engine.computeTokenWeights()
@@ -1032,7 +1033,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         ChatCore.loadSynonymsAndStopwords(this, folderUri, synonymsMap, stopwords)
 
         if (folderUri == null) {
-            // new signature: context first
+            // current ChatCore signature: (context: Context?, keywordResponses, templatesMap, mascotList, contextMap)
             ChatCore.loadFallbackTemplates(this, keywordResponses, templatesMap, mascotList, contextMap)
             rebuildInvertedIndex()
             engine.computeTokenWeights()
