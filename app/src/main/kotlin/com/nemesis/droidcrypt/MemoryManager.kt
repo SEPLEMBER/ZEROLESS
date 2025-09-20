@@ -206,7 +206,10 @@ object MemoryManager {
     private fun mapAndNormalizeSegment(seg: String): String {
         val norm = Engine.normalizeText(seg)
         if (norm.isBlank()) return ""
-        val toks = norm.split(Regex("\\s+")).map { t -> synonymsGlobal[t] ?: t }
+        val toks = norm.split(Regex("\\s+")).map { t ->
+            val k = t.lowercase(Locale.getDefault())
+            synonymsGlobal[k] ?: k
+        }
         return toks.joinToString(" ")
     }
 
@@ -229,10 +232,10 @@ object MemoryManager {
         val idx = placeholders.indexOf(name)
         if (idx >= 0) {
             // группы нумеруются с 1
-            return match.groupValues.getOrNull(idx + 1)?.takeIf { it.isNotBlank() }
+            return match.groupValues.getOrNull(idx + 1)?.trim()?.takeIf { it.isNotBlank() }
         }
         // fallback: если нет такого плейсхолдера — вернём первую группу
-        return match.groupValues.getOrNull(1)?.takeIf { it.isNotBlank() }
+        return match.groupValues.getOrNull(1)?.trim()?.takeIf { it.isNotBlank() }
     }
 
     // Рендер ответа, подставляя захваченные группы (по имени плейсхолдера), поддержка | (варианты)
@@ -262,7 +265,10 @@ object MemoryManager {
         val normalized = Engine.normalizeText(text)
         val corrected = applyCorrections(normalized)
         // также подготовим mapped версию для поиска (synonyms)
-        val correctedMapped = corrected.split(Regex("\\s+")).map { t -> synonymsGlobal[t] ?: t }.joinToString(" ")
+        val correctedMapped = corrected.split(Regex("\\s+")).map { t ->
+            val k = t.lowercase(Locale.getDefault())
+            synonymsGlobal[k] ?: k
+        }.joinToString(" ")
         addRecentMessage(text, corrected)
 
         // 1) попытка сопоставления с zapominanie (сохранение слотов)
@@ -280,7 +286,7 @@ object MemoryManager {
                     }
                 } else {
                     // общий zapominanie: берем первую группу и, если шаблон содержит имя — сохраним
-                    val val0 = m.groupValues.getOrNull(1)
+                    val val0 = m.groupValues.getOrNull(1)?.trim()
                     if (!val0.isNullOrBlank()) {
                         if (tpl.placeholders.contains("name")) {
                             saveSlot("name", val0)
@@ -346,8 +352,11 @@ object MemoryManager {
 
     private fun saveSlot(slot: String, value: String) {
         if (!this::prefs.isInitialized) return
-        prefs.edit().putString(slot, value).apply()
-        Log.d(TAG, "Saved slot: $slot = $value")
+        val key = slot.trim()
+        val v = value.trim()
+        if (key.isEmpty() || v.isEmpty()) return
+        prefs.edit().putString(key, v).apply()
+        Log.d(TAG, "Saved slot: $key = $v")
     }
 
     fun readSlot(slot: String): String? {
