@@ -116,28 +116,29 @@ object ChatCore {
     private var currentTopic: String? = null
 
     // Helper to match a context pattern against input tokens, returns captured topic or null
-    private fun matchContextPattern(p: ContextPattern, tokens: List<String>): String? {
+    private fun matchContextPattern(p: ContextPattern, tokensMapped: List<String>): String? {
         // require at least one token captured
+        // FIX: We expect tokensMapped already to be filtered/mapped (same format as p.left/p.right)
         if (p.left.isNotEmpty()) {
-            if (tokens.size <= p.left.size) return null
-            if (tokens.subList(0, p.left.size) != p.left) return null
+            if (tokensMapped.size <= p.left.size) return null
+            if (tokensMapped.subList(0, p.left.size) != p.left) return null
             if (p.right.isEmpty()) {
-                val captured = tokens.drop(p.left.size).joinToString(" ")
+                val captured = tokensMapped.drop(p.left.size).joinToString(" ")
                 return captured.ifBlank { null }
             } else {
-                if (tokens.size <= p.left.size + p.right.size) return null
-                val tail = tokens.takeLast(p.right.size)
+                if (tokensMapped.size <= p.left.size + p.right.size) return null
+                val tail = tokensMapped.takeLast(p.right.size)
                 if (tail != p.right) return null
-                val captured = tokens.drop(p.left.size).dropLast(p.right.size).joinToString(" ")
+                val captured = tokensMapped.drop(p.left.size).dropLast(p.right.size).joinToString(" ")
                 return captured.ifBlank { null }
             }
         } else {
             // left empty -> require right at end
             if (p.right.isEmpty()) return null
-            if (tokens.size <= p.right.size) return null
-            val tail = tokens.takeLast(p.right.size)
+            if (tokensMapped.size <= p.right.size) return null
+            val tail = tokensMapped.takeLast(p.right.size)
             if (tail != p.right) return null
-            val captured = tokens.dropLast(p.right.size).joinToString(" ")
+            val captured = tokensMapped.dropLast(p.right.size).joinToString(" ")
             return captured.ifBlank { null }
         }
     }
@@ -146,7 +147,8 @@ object ChatCore {
     private fun loadContextTemplatesFromFolder(context: Context, folderUri: Uri?, synonymsSnapshot: Map<String, String>, stopwordsSnapshot: Set<String>) {
         contextPatterns.clear()
         contextRecallMap.clear()
-        currentTopic = currentTopic // keep existing topic
+        // currentTopic should be preserved across loads; no-op here
+
         val uri = folderUri ?: return
         try {
             val dir = DocumentFile.fromTreeUri(context, uri) ?: return
@@ -184,6 +186,7 @@ object ChatCore {
                     }
                 }
             }
+            Log.d(TAG, "Loaded context patterns=${contextPatterns.size} recallKeys=${contextRecallMap.size}")
         } catch (e: Exception) {
             Log.w(TAG, "Error loading context.txt", e)
         }
@@ -487,26 +490,34 @@ object ChatCore {
 
         // Normalize & tokens
         val normalized = Engine.normalizeText(userInput)
-        val tokens = Engine.tokenizeStatic(normalized)
+
+        // FIX: получаем mapped tokens (те же самые, что использовались при загрузке contextPatterns)
+        val (mappedTokens, mappedRaw) = Engine.filterStopwordsAndMapSynonymsStatic(normalized, engine.synonymsMap, engine.stopwords)
+        val tokens = mappedTokens // use mapped tokens for context pattern matching
 
         // 1) Try context patterns ({} templates) — if matched, set currentTopic and return response
         try {
             for (p in contextPatterns) {
-                val topic = matchContextPattern(p, tokens)
-                if (topic != null) {
-                    // remember in RAM
-                    currentTopic = topic
+                val topicMapped = matchContextPattern(p, tokens)
+                if (topicMapped != null) {
+                    // remember in RAM (topic is mapped canonical tokens joined). If you want original surface form,
+                    // you'll need to reconstruct from userInput — currently we store mapped form.
+                    currentTopic = topicMapped
                     // also save to memory slot 'topic' for persistence if desired
-                    try { MemoryManager.processIncoming(context, topic) } catch (_: Exception) {}
-                    val resp = p.response?.replace("{topic}", topic) ?: "Запомнил тему: $topic"
+                    try { MemoryManager.processIncoming(context, topicMapped) } catch (_: Exception) {}
+                    val resp = p.response?.replace("{topic}", topicMapped) ?: "Запомнил тему: $topicMapped"
+                    Log.d(TAG, "Context pattern matched. topic='$topicMapped' -> resp='$resp'")
                     return resp
                 }
             }
             // 2) Check recall keys from contextRecallMap
             if (currentTopic != null && contextRecallMap.isNotEmpty()) {
-                val normForKey = Engine.filterStopwordsAndMapSynonymsStatic(normalized, engine.synonymsMap, engine.stopwords).first.sorted().joinToString(" ")
+                val normForKeyTokens = Engine.filterStopwordsAndMapSynonymsStatic(normalized, engine.synonymsMap, engine.stopwords).first
+                val normForKey = normForKeyTokens.sorted().joinToString(" ")
                 contextRecallMap[normForKey]?.let { templ ->
-                    return templ.replace("{topic}", currentTopic ?: "неизвестно")
+                    val result = templ.replace("{topic}", currentTopic ?: "неизвестно")
+                    Log.d(TAG, "Context recall matched key='$normForKey' -> '$result'")
+                    return result
                 }
             }
         } catch (e: Exception) {
@@ -525,7 +536,7 @@ object ChatCore {
         }
 
         val normalizedForSearch = normalized
-        val tokensForSearch = tokens
+        val tokensForSearch = Engine.tokenizeStatic(normalized)
 
         val resp = searchInCoreFiles(
             context,
