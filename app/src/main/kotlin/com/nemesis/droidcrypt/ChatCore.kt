@@ -640,10 +640,26 @@ object ChatCore {
     }
 
     fun detectContext(input: String, contextMap: Map<String, String>, engine: Engine): String? {
-        val tokens = Engine.tokenizeStatic(Engine.normalizeText(input))
+    try {
+        // Нормализуем и применяем mapping/stopwords — та же pipeline, что использовалась при создании ключей contextMap
+        val (mappedTokens, _) = Engine.filterStopwordsAndMapSynonymsStatic(
+            Engine.normalizeText(input),
+            engine.synonymsMap,
+            engine.stopwords
+        )
+
+        if (mappedTokens.isEmpty()) return null
+        val mappedSet = mappedTokens.toSet()
+
+        // Ключи в contextMap ожидаются в canonical форме: tokens sorted (space-separated).
         return contextMap.maxByOrNull { (k, _) ->
-            val kw = Engine.tokenizeStatic(Engine.normalizeText(k))
-            tokens.count { it in kw }
+            if (k.isBlank()) return@maxByOrNull 0
+            val keyTokens = k.split(" ").filter { it.isNotEmpty() }.toSet()
+            // считаем пересечение mappedTokens с токенами ключа
+            mappedSet.count { it in keyTokens }
         }?.value
+    } catch (e: Exception) {
+        Log.w(TAG, "detectContext failed: ${e.message}")
+        return null
     }
 }
