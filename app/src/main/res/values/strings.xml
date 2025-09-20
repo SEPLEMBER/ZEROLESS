@@ -1,8 +1,7 @@
-<?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!-- Название приложения и заголовки -->
     <string name="app_name">DroidCrypt</string>
-    <string name="app_title">Pawstribe - %1$s</string>
+    <string name="app_title_prefix">Pawstribe - %1$s</string>
     <string name="settings_title">Настройки</string>
     <string name="chat_title">Чат</string>
 
@@ -28,8 +27,12 @@
 
     <!-- Диалоговые сообщения -->
     <string name="welcome_message">Добро пожаловать!</string>
-    <string name="typing_indicator">печатает...</string>
-    <string name="user_label">You</string>
+    <string name="typing">печатает...</string>
+
+    <!-- Idle сообщения -->
+    <string name="idle_msg_1">Эй, ты здесь?</string>
+    <string name="idle_msg_2">Что-то тихо стало...</string>
+    <string name="idle_msg_3">Расскажи, о чём думаешь?</string>
 
     <!-- Ответы по умолчанию -->
     <string name="default_response_hello">Привет! Чем могу помочь?</string>
@@ -42,44 +45,33 @@
     <string name="year_response">Сейчас %1$s год.</string>
     <string name="date_day_response">Сегодня %1$s, %2$s.</string>
 
-    <!-- Антиспамовые сообщения -->
-    <string-array name="anti_spam_responses">
-        <item>Ты надоел, давай что-то новенького!</item>
-        <item>Спамить нехорошо, попробуй другой запрос.</item>
-        <item>Я устал от твоих повторений!</item>
-        <item>Хватит спамить, придумай что-то интересное.</item>
-        <item>Эй, не зацикливайся, попробуй другой вопрос!</item>
-        <item>Повторяешь одно и то же? Давай разнообразие!</item>
-        <item>Слишком много повторов, я же не робот... ну, почти.</item>
-        <item>Не спамь, пожалуйста, задай новый вопрос!</item>
-        <item>Пять раз одно и то же? Попробуй что-то другое.</item>
-        <item>Я уже ответил, давай новый запрос!</item>
-    </string-array>
-
-    <!-- Idle (ожидание, тишина) -->
-    <string-array name="idle_prompts">
-        <item>Эй, ты здесь?</item>
-        <item>Что-то тихо стало...</item>
-        <item>Расскажи, о чём думаешь?</item>
-    </string-array>
+    <!-- Антиспам -->
+    <string name="antispam_1">Ты надоел, давай что-то новенького!</string>
+    <string name="antispam_2">Спамить нехорошо, попробуй другой запрос.</string>
+    <string name="antispam_3">Я устал от твоих повторений!</string>
+    <string name="antispam_4">Хватит спамить, придумай что-то интересное.</string>
+    <string name="antispam_5">Эй, не зацикливайся, попробуй другой вопрос!</string>
+    <string name="antispam_6">Повторяешь одно и то же? Давай разнообразие!</string>
+    <string name="antispam_7">Слишком много повторов, я же не робот... ну, почти.</string>
+    <string name="antispam_8">Не спамь, пожалуйста, задай новый вопрос!</string>
+    <string name="antispam_9">Пять раз одно и то же? Попробуй что-то другое.</string>
+    <string name="antispam_10">Я уже ответил, давай новый запрос!</string>
 
     <!-- Сообщения о батарее -->
     <string name="battery_urgent_warning">Это не шутки. Поставь на зарядку.</string>
-    <string-array name="battery_warning_variants">
-        <item>Пожалуйста, поставь устройство на зарядку — батарейка почти села.</item>
-        <item>Аккумулятор низкий, лучше подключить зарядку.</item>
-        <item>Осталось немного заряда, поставь телефон на заряд.</item>
-    </string-array>
+    <string name="battery_warning_1">Пожалуйста, поставь устройство на зарядку — батарейка почти села.</string>
+    <string name="battery_warning_2">Аккумулятор низкий, лучше подключить зарядку.</string>
+    <string name="battery_warning_3">Осталось немного заряда, поставь телефон на заряд.</string>
 
     <!-- Сообщения для команд -->
-    <string name="command_reload_start">Перезагружаю шаблоны...</string>
-    <string name="command_reload_complete">Шаблоны перезагружены.</string>
-    <string name="command_stats">Контекст: %1$s. Шаблонов: %2$d. Ключевых ответов: %3$d.</string>
-    <string name="command_clear">Чат очищен. Возвращаюсь к началу.</string>
-    <string name="command_unknown">Неизвестная команда: %1$s</string>
+    <string name="reloading_templates">Перезагружаю шаблоны...</string>
+    <string name="templates_reloaded">Шаблоны перезагружены.</string>
+    <string name="stats_template">Контекст: %1$s. Шаблонов: %2$d. Ключевых ответов: %3$d.</string>
+    <string name="chat_cleared">Чат очищен. Возвращаюсь к началу.</string>
+    <string name="unknown_command">Неизвестная команда: %1$s</string>
 
     <!-- Сообщения об ошибках -->
-    <string name="folder_not_selected">Папка не выбрана! Открой настройки и выбери папку.</string>
+    <string name="toast_folder_not_selected">Папка не выбрана! Открой настройки и выбери папку.</string>
     <string name="error_loading_ouch">Ошибка загрузки ouch.txt: %1$s</string>
     <string name="error_loading_timetosleep">Ошибка загрузки timetosleep.txt: %1$s</string>
     <string name="error_loading_cldsys">Ошибка загрузки cldsys.txt: %1$s</string>
@@ -87,17 +79,21 @@
     <string name="error_loading_mascot_metadata">Ошибка загрузки метаданных маскота: %1$s</string>
     <string name="error_loading_batterycare">Ошибка загрузки batterycare.txt: %1$s</string>
 
-    <!-- Fallback шаблоны -->
-    <string-array name="fallback_hello_responses">
-        <item>Привет! Чем могу помочь?</item>
-        <item>Здравствуй!</item>
-    </string-array>
-    <string-array name="fallback_how_are_you_responses">
-        <item>Всё отлично, а у тебя?</item>
-        <item>Нормально, как дела?</item>
-    </string-array>
-    <string-array name="fallback_thanks_responses">
-        <item>Рад, что помог!</item>
-        <item>Всегда пожалуйста!</item>
-    </string-array>
+    <!-- Fallback -->
+    <string name="fallback_1">Привет! Чем могу помочь?</string>
+    <string name="fallback_2">Здравствуй!</string>
+    <string name="fallback_3">Всё отлично, а у тебя?</string>
+    <string name="fallback_4">Нормально, как дела?</string>
+
+    <!-- Шаблоны -->
+    <string name="tpl_greeting_1">Привет! Чем могу помочь?</string>
+    <string name="tpl_greeting_2">Здравствуй!</string>
+    <string name="tpl_howareyou_1">Всё отлично, а у тебя?</string>
+    <string name="tpl_howareyou_2">Нормально, как дела?</string>
+    <string name="tpl_thanks_1">Рад, что помог!</string>
+    <string name="tpl_thanks_2">Всегда пожалуйста!</string>
+
+    <!-- Дефолтные ответы -->
+    <string name="dummy_greeting">Привет! Я пока учусь отвечать.</string>
+    <string name="dummy_unknown">Не понял запрос. Попробуй другой вариант.</string>
 </resources>
