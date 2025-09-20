@@ -173,7 +173,7 @@ object MemoryManager {
 
         // Разрешаем возможные пробелы и пунктуацию в начале/конце
 val finalRegex = ".*" + sb.toString() + ".*"
-val kotlinRegex = Regex(finalRegex, RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL)
+val kotlinRegex = Regex(finalRegex, setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
 
         // Если это слот, попробуем извлечь ключ из шаблона (например "моего питомца зовут <name>") -> targetSlot=name
         val targetSlot = if (isSlot && placeholders.size == 1 && placeholders[0] in knownSlots) placeholders[0] else null
