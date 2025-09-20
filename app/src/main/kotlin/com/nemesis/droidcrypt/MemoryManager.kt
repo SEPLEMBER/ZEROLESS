@@ -139,7 +139,7 @@ object MemoryManager {
                 context.contentResolver.openInputStream(file.uri)?.bufferedReader()?.useLines { lines ->
                     lines.forEach { raw ->
                         val l = raw.trim()
-                        if (l.isEmpty()) return@forEachLine
+                        if (l.isEmpty()) return@forEach
                         try {
                             val parts = l.split("=", limit = 2).map { it.trim() }
                             val pattern = parts[0]
