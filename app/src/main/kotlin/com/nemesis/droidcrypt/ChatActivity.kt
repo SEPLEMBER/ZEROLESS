@@ -168,7 +168,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         btnLock?.setOnClickListener { finish() }
         btnTrash?.setOnClickListener { clearChat() }
         btnSettings?.setOnClickListener { startActivity(Intent(this, SettingsActivity::class.java)) }
-        btnEnvelopeTop?.setOnClickListener { startActivity(Intent(this, PostsActivity::class.java)) }
+        btnEnvelopeTop?.setOnClickListener { startActivity(Intent(this, SetupActivity::class.java)) }
 
         envelopeInputButton?.setOnClickListener {
             val now = System.currentTimeMillis()
