@@ -38,18 +38,33 @@ object ChatCore {
         get() {
             val c = appContext
             return if (c != null) {
-                listOf(
-                    c.getString(R.string.antispam_1),
-                    c.getString(R.string.antispam_2),
-                    c.getString(R.string.antispam_3),
-                    c.getString(R.string.antispam_4),
-                    c.getString(R.string.antispam_5),
-                    c.getString(R.string.antispam_6),
-                    c.getString(R.string.antispam_7),
-                    c.getString(R.string.antispam_8),
-                    c.getString(R.string.antispam_9),
-                    c.getString(R.string.antispam_10)
-                )
+                try {
+                    listOf(
+                        c.getString(R.string.antispam_1),
+                        c.getString(R.string.antispam_2),
+                        c.getString(R.string.antispam_3),
+                        c.getString(R.string.antispam_4),
+                        c.getString(R.string.antispam_5),
+                        c.getString(R.string.antispam_6),
+                        c.getString(R.string.antispam_7),
+                        c.getString(R.string.antispam_8),
+                        c.getString(R.string.antispam_9),
+                        c.getString(R.string.antispam_10)
+                    )
+                } catch (e: Exception) {
+                    listOf(
+                        "Ты надоел, давай что-то новенького!",
+                        "Спамить нехорошо, попробуй другой запрос.",
+                        "Я устал от твоих повторений!",
+                        "Хватит спамить, придумай что-то интересное.",
+                        "Эй, не зацикливайся, попробуй другой вопрос!",
+                        "Повторяешь одно и то же? Давай разнообразие!",
+                        "Слишком много повторов, я же не робот... ну, почти.",
+                        "Не спамь, пожалуйста, задай новый вопрос!",
+                        "Пять раз одно и то же? Попробуй что-то другое.",
+                        "Я уже ответил, давай новый запрос!"
+                    )
+                }
             } else {
                 listOf(
                     "Ты надоел, давай что-то новенького!",
@@ -66,24 +81,113 @@ object ChatCore {
             }
         }
 
-    // публичный удобный вызов (с совместимостью — можно вызывать без аргументов)
     fun getAntiSpamResponse(): String = antiSpamResponses.random()
 
-    // fallback replies (используется где-то в UI)
     val fallbackReplies: List<String>
         get() {
             val c = appContext
             return if (c != null) {
-                listOf(
-                    c.getString(R.string.fallback_1),
-                    c.getString(R.string.fallback_2),
-                    c.getString(R.string.fallback_3),
-                    c.getString(R.string.fallback_4)
-                )
+                try {
+                    listOf(
+                        c.getString(R.string.fallback_1),
+                        c.getString(R.string.fallback_2),
+                        c.getString(R.string.fallback_3),
+                        c.getString(R.string.fallback_4)
+                    )
+                } catch (e: Exception) {
+                    listOf("Привет!", "Как дела?", "Расскажи о себе", "Выход")
+                }
             } else {
                 listOf("Привет!", "Как дела?", "Расскажи о себе", "Выход")
             }
         }
+
+    // --- Context.txt / temporary topic in RAM support ---
+    // ContextPattern: left tokens before {}, right tokens after {}
+    private data class ContextPattern(val left: List<String>, val right: List<String>, val response: String?)
+
+    // cached context patterns (reloaded per findBestResponse call)
+    private val contextPatterns: MutableList<ContextPattern> = mutableListOf()
+
+    // recall map (canonical key -> response template with {topic})
+    private val contextRecallMap: MutableMap<String, String> = HashMap()
+
+    // temporary topic in RAM (ОЗУ)
+    private var currentTopic: String? = null
+
+    // Helper to match a context pattern against input tokens, returns captured topic or null
+    private fun matchContextPattern(p: ContextPattern, tokens: List<String>): String? {
+        // require at least one token captured
+        if (p.left.isNotEmpty()) {
+            if (tokens.size <= p.left.size) return null
+            if (tokens.subList(0, p.left.size) != p.left) return null
+            if (p.right.isEmpty()) {
+                val captured = tokens.drop(p.left.size).joinToString(" ")
+                return captured.ifBlank { null }
+            } else {
+                if (tokens.size <= p.left.size + p.right.size) return null
+                val tail = tokens.takeLast(p.right.size)
+                if (tail != p.right) return null
+                val captured = tokens.drop(p.left.size).dropLast(p.right.size).joinToString(" ")
+                return captured.ifBlank { null }
+            }
+        } else {
+            // left empty -> require right at end
+            if (p.right.isEmpty()) return null
+            if (tokens.size <= p.right.size) return null
+            val tail = tokens.takeLast(p.right.size)
+            if (tail != p.right) return null
+            val captured = tokens.dropLast(p.right.size).joinToString(" ")
+            return captured.ifBlank { null }
+        }
+    }
+
+    // load context.txt (and recall lines starting with $) into memory (lightweight)
+    private fun loadContextTemplatesFromFolder(context: Context, folderUri: Uri?, synonymsSnapshot: Map<String, String>, stopwordsSnapshot: Set<String>) {
+        contextPatterns.clear()
+        contextRecallMap.clear()
+        currentTopic = currentTopic // keep existing topic
+        val uri = folderUri ?: return
+        try {
+            val dir = DocumentFile.fromTreeUri(context, uri) ?: return
+            val file = dir.findFile("context.txt") ?: return
+            if (!file.exists()) return
+            context.contentResolver.openInputStream(file.uri)?.bufferedReader()?.useLines { lines ->
+                lines.forEach { raw ->
+                    val l = raw.trim()
+                    if (l.isEmpty()) return@forEach
+                    try {
+                        if (l.startsWith("$")) {
+                            // recall line: $key=resp (key uses natural language)
+                            val parts = l.substring(1).split("=", limit = 2).map { it.trim() }
+                            if (parts.size == 2) {
+                                val keyNorm = Engine.normalizeText(parts[0])
+                                val keyTokens = Engine.filterStopwordsAndMapSynonymsStatic(keyNorm, synonymsSnapshot, stopwordsSnapshot).first
+                                val keyCanon = keyTokens.sorted().joinToString(" ")
+                                if (keyCanon.isNotEmpty()) contextRecallMap[keyCanon] = parts[1]
+                            }
+                        } else {
+                            // pattern line: patternWith{} optionally = response (response may contain {topic})
+                            val parts = l.split("=", limit = 2).map { it.trim() }
+                            val patternRaw = parts[0]
+                            val response = parts.getOrNull(1)
+                            if (!patternRaw.contains("{}")) return@forEach
+                            val segs = patternRaw.split("{}", limit = 2)
+                            val leftNorm = Engine.normalizeText(segs[0])
+                            val rightNorm = Engine.normalizeText(segs.getOrNull(1) ?: "")
+                            val leftTokens = Engine.filterStopwordsAndMapSynonymsStatic(leftNorm, synonymsSnapshot, stopwordsSnapshot).first
+                            val rightTokens = Engine.filterStopwordsAndMapSynonymsStatic(rightNorm, synonymsSnapshot, stopwordsSnapshot).first
+                            contextPatterns.add(ContextPattern(leftTokens, rightTokens, response))
+                        }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Failed parse context.txt line: $l", e)
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Error loading context.txt", e)
+        }
+    }
 
     // --- Загрузка синонимов и стоп-слов ---
     fun loadSynonymsAndStopwords(
@@ -214,8 +318,15 @@ object ChatCore {
                 val ph = Regex("<([a-zA-Z0-9_]+)>")
                 ph.findAll(resp).forEach { m ->
                     val name = m.groupValues[1]
-                    val value = try { MemoryManager.readSlot(name) } catch (_: Exception) { null }
-                    out = out.replace("<$name>", value ?: "")
+                    val value = try {
+                        // special-case: topic uses ChatCore.currentTopic first, then memory slot
+                        if (name.equals("topic", ignoreCase = true)) currentTopic ?: MemoryManager.readSlot(name)
+                        else MemoryManager.readSlot(name)
+                    } catch (_: Exception) {
+                        null
+                    }
+                    // fallback if not found
+                    out = out.replace("<$name>", value?.takeIf { it.isNotBlank() } ?: "неизвестно")
                 }
                 // support | alternatives
                 if (out.contains("|")) {
@@ -367,6 +478,42 @@ object ChatCore {
             Log.w(TAG, "MemoryManager init/load failed (continuing): ${e.message}")
         }
 
+        // --- load context.txt templates (lightweight) ---
+        try {
+            loadContextTemplatesFromFolder(context, folderUri, engine.synonymsMap, engine.stopwords)
+        } catch (e: Exception) {
+            Log.w(TAG, "loadContextTemplatesFromFolder failed: ${e.message}")
+        }
+
+        // Normalize & tokens
+        val normalized = Engine.normalizeText(userInput)
+        val tokens = Engine.tokenizeStatic(normalized)
+
+        // 1) Try context patterns ({} templates) — if matched, set currentTopic and return response
+        try {
+            for (p in contextPatterns) {
+                val topic = matchContextPattern(p, tokens)
+                if (topic != null) {
+                    // remember in RAM
+                    currentTopic = topic
+                    // also save to memory slot 'topic' for persistence if desired
+                    try { MemoryManager.processIncoming(context, topic) } catch (_: Exception) {}
+                    val resp = p.response?.replace("{topic}", topic) ?: "Запомнил тему: $topic"
+                    return resp
+                }
+            }
+            // 2) Check recall keys from contextRecallMap
+            if (currentTopic != null && contextRecallMap.isNotEmpty()) {
+                val normForKey = Engine.filterStopwordsAndMapSynonymsStatic(normalized, engine.synonymsMap, engine.stopwords).first.sorted().joinToString(" ")
+                contextRecallMap[normForKey]?.let { templ ->
+                    return templ.replace("{topic}", currentTopic ?: "неизвестно")
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Context pattern handling failed: ${e.message}")
+        }
+
+        // Memory recall intent
         try {
             if (MemoryManager.isRecallIntent(userInput)) {
                 MemoryManager.recallRecentConversation()?.let { recallResp ->
@@ -377,14 +524,14 @@ object ChatCore {
             Log.w(TAG, "MemoryManager recall check failed: ${e.message}")
         }
 
-        val normalized = Engine.normalizeText(userInput)
-        val tokens = Engine.tokenizeStatic(normalized)
+        val normalizedForSearch = normalized
+        val tokensForSearch = tokens
 
         val resp = searchInCoreFiles(
             context,
             folderUri,
-            normalized,
-            tokens,
+            normalizedForSearch,
+            tokensForSearch,
             engine,
             engine.synonymsMap,
             engine.stopwords,
@@ -444,25 +591,22 @@ object ChatCore {
 
     // --- Заглушки ---
     fun loadFallbackTemplates(
-        context: Context?,
-        keywordResponses: MutableMap<String, MutableList<String>>,
         templatesMap: MutableMap<String, MutableList<String>>,
+        keywordResponses: MutableMap<String, MutableList<String>>,
         mascotList: MutableList<Map<String, String>>,
         contextMap: MutableMap<String, String>
     ) {
         templatesMap.clear(); keywordResponses.clear(); mascotList.clear(); contextMap.clear()
-        val c = context ?: appContext
-        // greeting
+        val c = appContext
+
         templatesMap[Engine.normalizeText("привет")] = mutableListOf(
             safeGetString(c, R.string.tpl_greeting_1, "Привет! Чем могу помочь?"),
             safeGetString(c, R.string.tpl_greeting_2, "Здравствуй!")
         )
-        // how are you
         templatesMap[Engine.normalizeText("как дела")] = mutableListOf(
             safeGetString(c, R.string.tpl_howareyou_1, "Всё отлично, а у тебя?"),
             safeGetString(c, R.string.tpl_howareyou_2, "Нормально, как дела?")
         )
-        // thanks -> keywordResponses
         keywordResponses[Engine.normalizeText("спасибо")] = mutableListOf(
             safeGetString(c, R.string.tpl_thanks_1, "Рад, что помог!"),
             safeGetString(c, R.string.tpl_thanks_2, "Всегда пожалуйста!")
@@ -475,7 +619,6 @@ object ChatCore {
         return getDummyResponse(c, query)
     }
 
-    // overload с контекстом (используется из findBestResponse и других мест)
     fun getDummyResponse(context: Context?, query: String): String {
         val greeting = safeGetString(context, R.string.dummy_greeting, "Привет! Чем могу помочь?")
         val unknown = safeGetString(context, R.string.dummy_unknown, "Не понял запрос. Попробуй другой вариант.")
