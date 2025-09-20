@@ -151,15 +151,13 @@ object MemoryManager {
     }
 
     // Создаёт Template из строкового шаблона: поддерживает <name>, <age>, <petname>, <any>
+    // ВАЖНО: использует обычные численные группы (без именованных), чтобы работать корректно с Kotlin Regex
     private fun buildTemplateFromPattern(pattern: String, response: String?, isSlot: Boolean): Template {
         // Найдём плейсхолдеры
         val placeholderRegex = Regex("<([a-zA-Z0-9_]+)>")
         val placeholders = placeholderRegex.findAll(pattern).map { it.groupValues[1] }.toList()
 
-        // Экранируем текст, затем заменим плейсхолдеры на захватывающие группы
-        var escaped = Pattern.quote(pattern)
-        // Pattern.quote экранирует весь текст, но нам нужно заменить экранированные плейсхолдеры
-        // Поэтому пройдём по исходной строке и построим regex вручную
+        // Построим regex, где каждый плейсхолдер заменяется на захватывающую группу (.*?) — ленивую
         val sb = StringBuilder()
         var last = 0
         for (m in placeholderRegex.findAll(pattern)) {
@@ -167,16 +165,16 @@ object MemoryManager {
             val end = m.range.last
             // добавить предыдущее текстовое содержимое (экранированное)
             sb.append(Pattern.quote(pattern.substring(last, start)))
-            val name = m.groupValues[1]
-            // заменяем на ненасытную группу (lazy) - пусть захватывает минимально
-            sb.append("(?<" + name + ">.+?)")
+            // заменяем на ленивую захватывающую группу (негребущую)
+            sb.append("(.+?)")
             last = end + 1
         }
         if (last < pattern.length) sb.append(Pattern.quote(pattern.substring(last)))
 
         // Разрешаем возможные пробелы и пунктуацию в начале/конце
-val finalRegex = ".*" + sb.toString() + ".*"
-val kotlinRegex = Regex(finalRegex, setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
+        val finalRegex = ".*" + sb.toString() + ".*"
+        // Используем vararg опции (не setOf)
+        val kotlinRegex = Regex(finalRegex, RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL)
 
         // Если это слот, попробуем извлечь ключ из шаблона (например "моего питомца зовут <name>") -> targetSlot=name
         val targetSlot = if (isSlot && placeholders.size == 1 && placeholders[0] in knownSlots) placeholders[0] else null
@@ -198,6 +196,36 @@ val kotlinRegex = Regex(finalRegex, setOf(RegexOption.IGNORE_CASE, RegexOption.D
         return res
     }
 
+    // Вспомогательная функция: получить значение захваченной группы по имени плейсхолдера (placeholders - порядок плейсхолдеров)
+    private fun getCapturedValue(match: MatchResult, placeholders: List<String>, name: String): String? {
+        val idx = placeholders.indexOf(name)
+        if (idx >= 0) {
+            // группы нумеруются с 1
+            return match.groupValues.getOrNull(idx + 1)?.takeIf { it.isNotBlank() }
+        }
+        // fallback: если нет такого плейсхолдера — вернём первую группу
+        return match.groupValues.getOrNull(1)?.takeIf { it.isNotBlank() }
+    }
+
+    // Рендер ответа, подставляя захваченные группы (по имени плейсхолдера) и при необходимости
+    // выполняя минимальные преобразования (например, <name> -> значение слота)
+    private fun renderResponseWithPlaceholders(template: String, match: MatchResult, placeholders: List<String>): String {
+        var out = template
+        val placeholderRegex = Regex("<([a-zA-Z0-9_]+)>")
+        // Найдём все плейсхолдеры в шаблоне и подставим значение
+        placeholderRegex.findAll(template).forEach { m ->
+            val name = m.groupValues[1]
+            val valFromMatch = getCapturedValue(match, placeholders, name)
+            val replacement = when {
+                !valFromMatch.isNullOrBlank() -> valFromMatch
+                knownSlots.contains(name) -> readSlot(name) ?: ""
+                else -> ""
+            }
+            out = out.replace("<${name}>", replacement)
+        }
+        return out
+    }
+
     // Добавить входящее сообщение и попытаться извлечь память / слоты
     fun processIncoming(context: Context, text: String): String? {
         val normalized = Engine.normalizeText(text)
@@ -210,23 +238,26 @@ val kotlinRegex = Regex(finalRegex, setOf(RegexOption.IGNORE_CASE, RegexOption.D
             if (m != null) {
                 // если шаблон предназначен для слота
                 if (tpl.targetSlot != null) {
-                    val slotValue = m.groups[tpl.targetSlot]?.value ?: m.groupValues.getOrNull(1)
+                    val slotValue = getCapturedValue(m, tpl.placeholders, tpl.targetSlot)
                     if (!slotValue.isNullOrBlank()) {
                         saveSlot(tpl.targetSlot, slotValue)
-                        // сформируем ответ: если в шаблоне указан ответTemplate -- используем
-                        val resp = tpl.responseTemplate?.let { renderResponseWithPlaceholders(it, m) }
+                        // сформируем ответ: если в шаблоне указан responseTemplate -- используем
+                        val resp = tpl.responseTemplate?.let { renderResponseWithPlaceholders(it, m, tpl.placeholders) }
                             ?: "Запомнил."
                         return resp
                     }
                 } else {
-                    // общий zapominanie: берем первую группу
+                    // общий zapominanie: берем первую группу и, если шаблон содержит имя — сохраним
                     val val0 = m.groupValues.getOrNull(1)
                     if (!val0.isNullOrBlank()) {
-                        // имя интерпретируем как <name> если встречается
                         if (tpl.placeholders.contains("name")) {
                             saveSlot("name", val0)
-                            val resp = tpl.responseTemplate?.let { renderResponseWithPlaceholders(it, m) } ?: "Запомню это."
+                            val resp = tpl.responseTemplate?.let { renderResponseWithPlaceholders(it, m, tpl.placeholders) } ?: "Запомню это."
                             return resp
+                        } else {
+                            // Если шаблон не явно слот, но есть ответ — отдадим ответ
+                            val resp = tpl.responseTemplate?.let { renderResponseWithPlaceholders(it, m, tpl.placeholders) }
+                            if (!resp.isNullOrBlank()) return resp
                         }
                     }
                 }
@@ -239,8 +270,8 @@ val kotlinRegex = Regex(finalRegex, setOf(RegexOption.IGNORE_CASE, RegexOption.D
             if (m != null) {
                 // постараемся классифицировать как state/event/fact
                 val placeholders = tpl.placeholders
-                val mainCaptured = if (placeholders.isNotEmpty()) m.groups[placeholders[0]]?.value ?: m.groupValues.getOrNull(1) else null
-                val obj = if (placeholders.size > 1) m.groups[placeholders[1]]?.value else null
+                val mainCaptured = if (placeholders.isNotEmpty()) getCapturedValue(m, placeholders, placeholders[0]) else m.groupValues.getOrNull(1)
+                val obj = if (placeholders.size > 1) getCapturedValue(m, placeholders, placeholders[1]) else null
 
                 val entry = MemoryEntry(
                     type = "event",
@@ -250,7 +281,7 @@ val kotlinRegex = Regex(finalRegex, setOf(RegexOption.IGNORE_CASE, RegexOption.D
                     mood = detectMood(corrected)
                 )
                 pushMemory(entry)
-                val resp = tpl.responseTemplate?.let { renderResponseWithPlaceholders(it, m) } ?: "Понял, запомню."
+                val resp = tpl.responseTemplate?.let { renderResponseWithPlaceholders(it, m, tpl.placeholders) } ?: "Понял, запомню."
                 return resp
             }
         }
@@ -284,24 +315,6 @@ val kotlinRegex = Regex(finalRegex, setOf(RegexOption.IGNORE_CASE, RegexOption.D
     fun readSlot(slot: String): String? {
         if (!this::prefs.isInitialized) return null
         return prefs.getString(slot, null)
-    }
-
-    // Рендер ответа, подставляя захваченные группы (по имени плейсхолдера) и при необходимости
-    // выполняя минимальные преобразования (например, <name> -> значение слота)
-    private fun renderResponseWithPlaceholders(template: String, match: MatchResult): String {
-        var out = template
-        val placeholderRegex = Regex("<([a-zA-Z0-9_]+)>")
-        placeholderRegex.findAll(template).forEach { m ->
-            val name = m.groupValues[1]
-            val valFromMatch = match.groups[name]?.value
-            val replacement = when {
-                !valFromMatch.isNullOrBlank() -> valFromMatch
-                knownSlots.contains(name) -> readSlot(name) ?: ""
-                else -> ""
-            }
-            out = out.replace("<${name}>", replacement ?: "")
-        }
-        return out
     }
 
     // Очень простая эвристика для извлечения эмоций/событий
@@ -341,7 +354,8 @@ val kotlinRegex = Regex(finalRegex, setOf(RegexOption.IGNORE_CASE, RegexOption.D
     // Определение намерения "вспомнить"
     fun isRecallIntent(input: String): Boolean {
         val norm = Engine.normalizeText(input)
-        return listOf("о чем мы говорили", "о чем говорили", "что мы обсуждали", "что мы говорили", "что мы обсуждали").any { norm.contains(Engine.normalizeText(it)) }
+        return listOf("о чем мы говорили", "о чем говорили", "что мы обсуждали", "что мы говорили", "что мы обсуждали")
+            .any { norm.contains(Engine.normalizeText(it)) }
     }
 
     // Вернуть наиболее релевантную память для ответа на "о чём мы говорили"
@@ -349,7 +363,7 @@ val kotlinRegex = Regex(finalRegex, setOf(RegexOption.IGNORE_CASE, RegexOption.D
         // ищем первую память типа state/event/fact
         val mem = memories.firstOrNull { it.type in setOf("state", "event", "fact") }
         if (mem != null) return renderMemoryAsReply(mem)
-        // fallback: посмотрим последние сообщения и попытаемся вернуть последнее первое лицo
+        // fallback: посмотрим последние сообщения и попытаемся вернуть последнее первое лицо
         val fromRecent = recentMessages.firstOrNull { it.normalized.contains("я ") || it.normalized.startsWith("я") }
         if (fromRecent != null) {
             return transformFirstPersonToYou(fromRecent.text)
@@ -360,17 +374,16 @@ val kotlinRegex = Regex(finalRegex, setOf(RegexOption.IGNORE_CASE, RegexOption.D
     // Простейшая трансформация "я ..." -> "тебе ..." / "ты ..."
     private fun transformFirstPersonToYou(s: String): String {
         var res = s
-        // Набор базовых замен (нижний регистр для поиска)
+        // Набор базовых замен (используем корректные регулярные границы слова "\\b")
         val subs = listOf(
-            Pair("\bя\b", "ты"),
-            Pair("\bмне\b", "тебе"),
-            Pair("\bменя\b", "тебя"),
-            Pair("\bмой\b", "твой"),
-            Pair("\bмоя\b", "твоя"),
-            Pair("\bмоё\b", "твоё"),
-            Pair("\bмои\b", "твои")
+            Pair("\\bя\\b", "ты"),
+            Pair("\\bмне\\b", "тебе"),
+            Pair("\\bменя\\b", "тебя"),
+            Pair("\\bмой\\b", "твой"),
+            Pair("\\bмоя\\b", "твоя"),
+            Pair("\\bмоё\\b", "твоё"),
+            Pair("\\bмои\\b", "твои")
         )
-        var lower = res
         for ((from, to) in subs) {
             try {
                 res = res.replace(Regex(from, RegexOption.IGNORE_CASE), to)
@@ -378,7 +391,6 @@ val kotlinRegex = Regex(finalRegex, setOf(RegexOption.IGNORE_CASE, RegexOption.D
             }
         }
         // Мелкие коррекции: если предложение начинается с "ты " -> лучше: "Тебе было..."
-        val n = Engine.normalizeText(res)
         return res
     }
 
@@ -388,13 +400,12 @@ val kotlinRegex = Regex(finalRegex, setOf(RegexOption.IGNORE_CASE, RegexOption.D
         mem.predicate?.let { pred ->
             when (mem.type) {
                 "state" -> {
-                    // "Тебе было грустно" / "Ты был(а) ..." — используем нейтральную конструкцию
+                    // "Тебе было грустно" — нейтрально
                     val humanPred = pred
                     return "Тебе было $humanPred."
                 }
                 "event" -> {
                     val objPart = if (!mem.obj.isNullOrBlank()) " ${mem.obj}" else ""
-                    // Постараемся вернуть в более человеческой форме, используя rawText при необходимости
                     return "Произошло: ${mem.predicate}$objPart."
                 }
                 "fact" -> {
