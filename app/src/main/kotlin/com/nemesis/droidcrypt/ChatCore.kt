@@ -1,4 +1,4 @@
-package com.nemesis.pawscribe
+package com.nemesis.droidcrypt
 
 import android.content.Context
 import android.net.Uri
@@ -6,7 +6,7 @@ import android.util.Log
 import androidx.documentfile.provider.DocumentFile
 import java.util.*
 import kotlin.collections.HashMap
-import com.nemesis.pawscribe.Engine
+import com.nemesis.droidcrypt.Engine
 import com.nemesis.droidcrypt.MemoryManager // added: lightweight memory manager integration
 
 object ChatCore {
