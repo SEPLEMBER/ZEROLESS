@@ -21,8 +21,8 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:textColor="@color/neon_cyan"
-        android:textSize="24sp"
-        android:layout_marginBottom="32dp"
+        android:textSize="28sp"
+        android:layout_marginBottom="48dp"
         app:layout_constraintBottom_toTopOf="@id/buttonContainer"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent" />
@@ -40,10 +40,11 @@
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/setupButton"
-            android:layout_width="200dp"
-            android:layout_height="wrap_content"
+            android:layout_width="240dp"
+            android:layout_height="64dp"
             android:text="@string/setup"
             android:textColor="@android:color/white"
+            android:textSize="20sp"
             app:strokeColor="@color/neon_pink"
             app:strokeWidth="2dp"
             app:backgroundTint="@color/matte_black"
@@ -53,10 +54,11 @@
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/startChatButton"
-            android:layout_width="200dp"
-            android:layout_height="wrap_content"
+            android:layout_width="240dp"
+            android:layout_height="64dp"
             android:text="@string/start_chat"
             android:textColor="@android:color/white"
+            android:textSize="20sp"
             app:strokeColor="@color/neon_brown"
             app:strokeWidth="2dp"
             app:backgroundTint="@color/matte_black"
@@ -66,10 +68,11 @@
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/openSettingsButton"
-            android:layout_width="200dp"
-            android:layout_height="wrap_content"
+            android:layout_width="240dp"
+            android:layout_height="64dp"
             android:text="@string/open_settings"
             android:textColor="@android:color/white"
+            android:textSize="20sp"
             app:strokeColor="@color/neon_blue"
             app:strokeWidth="2dp"
             app:backgroundTint="@color/matte_black"
