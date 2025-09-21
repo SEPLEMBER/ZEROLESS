@@ -46,8 +46,8 @@ class MainActivity : AppCompatActivity() {
         val setupButton = findViewById<MaterialButton>(R.id.setupButton)
 
         startChat.setOnClickListener {
-            val sharedPrefs = getSharedPreferences("my_prefs", MODE_PRIVATE)
-            val folderUri = sharedPrefs.getString("pref_folder_uri", null)
+            val sharedPrefs = getSharedPreferences("PawsTribePrefs", MODE_PRIVATE)
+            val folderUri = sharedPrefs.getString("folderUri", null)
             if (folderUri != null) {
                 val i = Intent(this@MainActivity, SplashActivity::class.java)
                 startActivity(i)
