@@ -1,16 +1,24 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<com.google.android.material.card.MaterialCardView
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="wrap_content"
     android:layout_height="wrap_content"
-    android:orientation="horizontal"
-    android:padding="12dp"
-    android:background="#444444">
+    android:layout_margin="8dp"
+    app:cardBackgroundColor="?attr/colorSurface"
+    app:cardCornerRadius="8dp"
+    app:cardElevation="4dp"
+    app:strokeColor="@color/neon_cyan"
+    app:strokeWidth="1dp">
 
     <TextView
         android:id="@+id/customToastText"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:textColor="#FFFFFF"
+        android:padding="12dp"
+        android:textColor="?attr/colorOnSurface"
         android:textSize="16sp"
+        android:fontFamily="@font/roboto_mono"
         android:text="Toast" />
-</LinearLayout>
+
+</com.google.android.material.card.MaterialCardView>
