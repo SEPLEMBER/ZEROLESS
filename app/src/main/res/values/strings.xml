@@ -81,7 +81,7 @@
     <string name="error_loading_mascot_metadata">Ошибка загрузки метаданных маскота: %1$s</string>
     <string name="error_loading_batterycare">Ошибка загрузки batterycare.txt: %1$s</string>
 
-    <!-- Строки, используемые в SetupActivity (недостающие ранее) -->
+    <!-- Строки, используемые в SetupActivity -->
     <string name="error_no_permission">Нет прав для доступа к выбранной папке.</string>
     <string name="error_no_folder_selected">Папка не выбрана. Пожалуйста, укажите папку с шаблонами.</string>
     <string name="error_folder_unavailable">Указанная папка недоступна или была удалена.</string>
@@ -106,4 +106,13 @@
     <!-- Дефолтные ответы -->
     <string name="dummy_greeting">Привет! Я пока учусь отвечать.</string>
     <string name="dummy_unknown">Не понял запрос. Попробуй другой вариант.</string>
+
+    <!-- Случайные приветствия для MainActivity -->
+    <string-array name="greetings">
+        <item>Говорящие кибер-звери!m>
+        <item>Сейчас 2017, инфа 100%!</item>
+        <item>Математику не заказывали?</item>
+        <item>Здесь ничего нет, честно!</item>
+        <item>Запускаем матрицу...</item>
+    </string-array>
 </resources>
