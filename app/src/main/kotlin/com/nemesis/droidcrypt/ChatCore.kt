@@ -116,31 +116,80 @@ object ChatCore {
     private var currentTopic: String? = null
 
     // Helper to match a context pattern against input tokens, returns captured topic or null
+    // Improved algorithm: first tries strict prefix/suffix (fast), then falls back to more flexible search
     private fun matchContextPattern(p: ContextPattern, tokensMapped: List<String>): String? {
         // require at least one token captured
-        // FIX: We expect tokensMapped already to be filtered/mapped (same format as p.left/p.right)
+        // First: fast path — strict prefix/suffix (existing behaviour)
         if (p.left.isNotEmpty()) {
-            if (tokensMapped.size <= p.left.size) return null
-            if (tokensMapped.subList(0, p.left.size) != p.left) return null
-            if (p.right.isEmpty()) {
-                val captured = tokensMapped.drop(p.left.size).joinToString(" ")
-                return captured.ifBlank { null }
-            } else {
-                if (tokensMapped.size <= p.left.size + p.right.size) return null
-                val tail = tokensMapped.takeLast(p.right.size)
-                if (tail != p.right) return null
-                val captured = tokensMapped.drop(p.left.size).dropLast(p.right.size).joinToString(" ")
-                return captured.ifBlank { null }
+            if (tokensMapped.size > p.left.size) {
+                if (tokensMapped.subList(0, p.left.size) == p.left) {
+                    if (p.right.isEmpty()) {
+                        val captured = tokensMapped.drop(p.left.size).joinToString(" ")
+                        if (captured.isNotBlank()) return captured
+                    } else {
+                        if (tokensMapped.size > p.left.size + p.right.size) {
+                            val tail = tokensMapped.takeLast(p.right.size)
+                            if (tail == p.right) {
+                                val captured = tokensMapped.drop(p.left.size).dropLast(p.right.size).joinToString(" ")
+                                if (captured.isNotBlank()) return captured
+                            }
+                        }
+                    }
+                }
+            }
+            // Fallback: try to find left anywhere and right after it
+            for (i in 0..(tokensMapped.size - p.left.size)) {
+                if (tokensMapped.subList(i, i + p.left.size) == p.left) {
+                    val startAfterLeft = i + p.left.size
+                    if (p.right.isEmpty()) {
+                        if (startAfterLeft < tokensMapped.size) {
+                            val captured = tokensMapped.subList(startAfterLeft, tokensMapped.size).joinToString(" ")
+                            if (captured.isNotBlank()) {
+                                Log.d(TAG, "matchContextPattern: found by inner-left match at pos $i, captured='$captured'")
+                                return captured
+                            }
+                        }
+                    } else {
+                        // find right sequence after startAfterLeft
+                        for (j in startAfterLeft..(tokensMapped.size - p.right.size)) {
+                            if (tokensMapped.subList(j, j + p.right.size) == p.right) {
+                                if (j > startAfterLeft) {
+                                    val captured = tokensMapped.subList(startAfterLeft, j).joinToString(" ")
+                                    if (captured.isNotBlank()) {
+                                        Log.d(TAG, "matchContextPattern: found by inner-left/right at positions $i..$j, captured='$captured'")
+                                        return captured
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         } else {
-            // left empty -> require right at end
-            if (p.right.isEmpty()) return null
-            if (tokensMapped.size <= p.right.size) return null
-            val tail = tokensMapped.takeLast(p.right.size)
-            if (tail != p.right) return null
-            val captured = tokensMapped.dropLast(p.right.size).joinToString(" ")
-            return captured.ifBlank { null }
+            // left empty -> require right at end (fast path)
+            if (p.right.isNotEmpty()) {
+                if (tokensMapped.size > p.right.size) {
+                    val tail = tokensMapped.takeLast(p.right.size)
+                    if (tail == p.right) {
+                        val captured = tokensMapped.dropLast(p.right.size).joinToString(" ")
+                        if (captured.isNotBlank()) return captured
+                    }
+                }
+                // fallback: find right anywhere, capture everything before it
+                for (j in 0..(tokensMapped.size - p.right.size)) {
+                    if (tokensMapped.subList(j, j + p.right.size) == p.right) {
+                        if (j > 0) {
+                            val captured = tokensMapped.subList(0, j).joinToString(" ")
+                            if (captured.isNotBlank()) {
+                                Log.d(TAG, "matchContextPattern: found by right-anywhere at pos $j, captured='$captured'")
+                                return captured
+                            }
+                        }
+                    }
+                }
+            }
         }
+        return null
     }
 
     // load context.txt (and recall lines starting with $) into memory (lightweight)
@@ -166,7 +215,10 @@ object ChatCore {
                                 val keyNorm = Engine.normalizeText(parts[0])
                                 val keyTokens = Engine.filterStopwordsAndMapSynonymsStatic(keyNorm, synonymsSnapshot, stopwordsSnapshot).first
                                 val keyCanon = keyTokens.sorted().joinToString(" ")
-                                if (keyCanon.isNotEmpty()) contextRecallMap[keyCanon] = parts[1]
+                                if (keyCanon.isNotEmpty()) {
+                                    contextRecallMap[keyCanon] = parts[1]
+                                    Log.d(TAG, "Loaded context recall: key='$keyCanon' -> resp='${parts[1]}'")
+                                }
                             }
                         } else {
                             // pattern line: patternWith{} optionally = response (response may contain {topic})
@@ -180,6 +232,7 @@ object ChatCore {
                             val leftTokens = Engine.filterStopwordsAndMapSynonymsStatic(leftNorm, synonymsSnapshot, stopwordsSnapshot).first
                             val rightTokens = Engine.filterStopwordsAndMapSynonymsStatic(rightNorm, synonymsSnapshot, stopwordsSnapshot).first
                             contextPatterns.add(ContextPattern(leftTokens, rightTokens, response))
+                            Log.d(TAG, "Loaded context pattern: left='${leftTokens.joinToString(" ")}' right='${rightTokens.joinToString(" ")}' -> resp='${response ?: ""}'")
                         }
                     } catch (e: Exception) {
                         Log.w(TAG, "Failed parse context.txt line: $l", e)
@@ -639,28 +692,29 @@ object ChatCore {
             unknown
     }
 
+    // detectContext: used by UI flow to pick context file by keywords (returns context filename or null)
     fun detectContext(input: String, contextMap: Map<String, String>, engine: Engine): String? {
-    try {
-        // Нормализуем и применяем mapping/stopwords — та же pipeline, что использовалась при создании ключей contextMap
-        val (mappedTokens, _) = Engine.filterStopwordsAndMapSynonymsStatic(
-            Engine.normalizeText(input),
-            engine.synonymsMap,
-            engine.stopwords
-        )
+        try {
+            // Нормализуем и применяем mapping/stopwords — та же pipeline, что использовалась при создании ключей contextMap
+            val (mappedTokens, _) = Engine.filterStopwordsAndMapSynonymsStatic(
+                Engine.normalizeText(input),
+                engine.synonymsMap,
+                engine.stopwords
+            )
 
-        if (mappedTokens.isEmpty()) return null
-        val mappedSet = mappedTokens.toSet()
+            if (mappedTokens.isEmpty()) return null
+            val mappedSet = mappedTokens.toSet()
 
-        // Ключи в contextMap ожидаются в canonical форме: tokens sorted (space-separated).
-        return contextMap.maxByOrNull { (k, _) ->
-            if (k.isBlank()) return@maxByOrNull 0
-            val keyTokens = k.split(" ").filter { it.isNotEmpty() }.toSet()
-            // считаем пересечение mappedTokens с токенами ключа
-            mappedSet.count { it in keyTokens }
-        }?.value
-    } catch (e: Exception) {
-        Log.w(TAG, "detectContext failed: ${e.message}")
-        return null
-    }
+            // Ключи в contextMap ожидаются в canonical форме: tokens sorted (space-separated).
+            return contextMap.maxByOrNull { (k, _) ->
+                if (k.isBlank()) return@maxByOrNull 0
+                val keyTokens = k.split(" ").filter { it.isNotEmpty() }.toSet()
+                // считаем пересечение mappedTokens с токенами ключа
+                mappedSet.count { it in keyTokens }
+            }?.value
+        } catch (e: Exception) {
+            Log.w(TAG, "detectContext failed: ${e.message}")
+            return null
+        }
     }
 }
