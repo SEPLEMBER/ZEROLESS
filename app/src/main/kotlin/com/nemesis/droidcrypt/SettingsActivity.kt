@@ -1,6 +1,7 @@
 package com.nemesis.droidcrypt
 
 import android.content.Intent
+import android.content.SharedPreferences
 import android.net.Uri
 import android.os.Bundle
 import android.view.WindowManager
@@ -28,25 +29,27 @@ class SettingsActivity : AppCompatActivity() {
 
     private val folderPickerLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-            if (result.resultCode == RESULT_OK) {
-                result.data?.data?.let { uri ->
-                    folderUri = uri
-                    try {
-                        contentResolver.takePersistableUriPermission(
-                            uri,
-                            Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-                        )
-                        prefs.edit().putString(PREF_KEY_FOLDER_URI, uri.toString()).apply()
-                        withContext(Dispatchers.Main) {
-                            Toast.makeText(this@SettingsActivity, R.string.folder_selected, Toast.LENGTH_SHORT).show()
+            lifecycleScope.launch {
+                if (result.resultCode == RESULT_OK) {
+                    result.data?.data?.let { uri ->
+                        folderUri = uri
+                        try {
+                            contentResolver.takePersistableUriPermission(
+                                uri,
+                                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                            )
+                            prefs.edit().putString(PREF_KEY_FOLDER_URI, uri.toString()).apply()
+                            withContext(Dispatchers.Main) {
+                                Toast.makeText(this@SettingsActivity, R.string.folder_selected, Toast.LENGTH_SHORT).show()
+                            }
+                        } catch (e: SecurityException) {
+                            withContext(Dispatchers.Main) {
+                                Toast.makeText(this@SettingsActivity, R.string.error_no_permission, Toast.LENGTH_SHORT).show()
+                            }
                         }
-                    } catch (e: SecurityException) {
-                        withContext(Dispatchers.Main) {
-                            Toast.makeText(this@SettingsActivity, R.string.error_no_permission, Toast.LENGTH_SHORT).show()
-                        }
+                    } ?: withContext(Dispatchers.Main) {
+                        Toast.makeText(this@SettingsActivity, R.string.error_no_folder_selected, Toast.LENGTH_SHORT).show()
                     }
-                } ?: withContext(Dispatchers.Main) {
-                    Toast.makeText(this@SettingsActivity, R.string.error_no_folder_selected, Toast.LENGTH_SHORT).show()
                 }
             }
         }
@@ -76,7 +79,7 @@ class SettingsActivity : AppCompatActivity() {
 
         // Восстанавливаем настройки
         disableScreenshotsSwitch.isChecked = prefs.getBoolean(PREF_KEY_DISABLE_SCREENSHOTS, false)
-        prefs.getString(PREF_KEY_FOLDER_URI, null)?.let { saved ->
+        prefs.getString(PREF_KEY_FOLDER_URI, null)?.let { saved: String ->
             try {
                 folderUri = Uri.parse(saved)
                 contentResolver.takePersistableUriPermission(
