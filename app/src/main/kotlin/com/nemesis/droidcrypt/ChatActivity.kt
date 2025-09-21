@@ -341,7 +341,6 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         val qKeyForCount = qCanonical
 
         if (qFiltered.isEmpty()) return
-         }
 
         lastUserInputTime = System.currentTimeMillis()
         userActivityCount++
