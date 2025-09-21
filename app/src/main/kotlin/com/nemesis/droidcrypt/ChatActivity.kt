@@ -28,10 +28,10 @@ import java.util.*
 import kotlin.collections.ArrayList
 import kotlin.collections.HashMap
 import kotlin.math.roundToInt
-import com.nemesis.pawscribe.Engine
-import com.nemesis.pawscribe.ChatCore
-import com.nemesis.pawscribe.MemoryManager
-import com.nemesis.pawscribe.R
+import com.nemesis.droidcrypt.Engine
+import com.nemesis.droidcrypt.ChatCore
+import com.nemesis.droidcrypt.MemoryManager
+import com.nemesis.droidcrypt.R
 
 class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
