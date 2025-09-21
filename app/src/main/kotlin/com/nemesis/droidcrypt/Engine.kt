@@ -4,14 +4,14 @@ import kotlin.math.abs
 import kotlin.math.min
 import kotlin.math.log10
 import kotlin.math.max
+import kotlin.collections.HashMap
 import java.util.Locale
+import kotlin.math.roundToInt
 
 class Engine(
     val templatesMap: MutableMap<String, MutableList<String>>,
     val synonymsMap: MutableMap<String, String>,
-    val stopwords: MutableSet<String>,
-    // optional tokenizer injection: if provided, instance tokenize(...) will use it
-    private val tokenizer: ((String) -> List<String>)? = null
+    val stopwords: MutableSet<String>
 ) {
 
     companion object {
@@ -34,89 +34,37 @@ class Engine(
         const val MAX_MEMORY_QUERIES = 5
         const val CONTEXT_BOOST = 0.35  // multiplicative bonus for context overlap
         // END companion
-
-        /**
-         * Нормализация текста: удаляем BOM/NBSP/zero-width, приводим к нижнему регистру
-         * и оставляем только буквы (всех скриптов), цифры и пробелы.
-         *
-         * Используем Locale.ROOT для детерминированного lowercasing на всех платформах.
-         */
         fun normalizeText(s: String): String {
+            // Убираем BOM, NBSP, zero-width / format chars и остальное "мусорное"
             var str = s.replace("\uFEFF", "") // BOM
             str = str.replace('\u00A0', ' ') // NBSP -> space
             // Zero-width and formatting characters
             str = str.replace(Regex("[\\u200B-\\u200F\\u2060-\\u206F]"), "")
-            val lower = str.lowercase(Locale.ROOT)
-            // Убираем всё кроме букв/цифр/пробелов (Unicode-aware)
+            val lower = str.lowercase(Locale.getDefault())
+            // Убираем всё кроме букв/цифр/пробелов
             val cleaned = lower.replace(Regex("[^\\p{L}\\p{Nd}\\s]"), " ")
             val collapsed = cleaned.replace(Regex("\\s+"), " ").trim()
             return collapsed
         }
 
-        /**
-         * Токенизация: по умолчанию делим по пробелам (как раньше).
-         * Если строка не содержит пробелов и содержит CJK символы, применяем простой
-         * N-gram fallback (би- и триграммы) — базовая поддержка китайского/японского/корейского.
-         *
-         * Это **не** заменяет полноценный сегментатор (MeCab/Kuromoji/ICU), но даёт работоспособность
-         * без внешних зависимостей.
-         */
         fun tokenizeStatic(s: String): List<String> {
             if (s.isBlank()) return emptyList()
-            // если в строке есть пробелы, используем привычный split — это сохраняет поведение для латиницы/кириллицы
-            if (s.contains(Regex("\\s"))) {
-                return s.split(Regex("\\s+")).map { it.trim() }.filter { it.isNotEmpty() }
-            }
-
-            // если нет пробелов, проверим наличие CJK символов (Han/Hiragana/Katakana/Hangul)
-            val containsCJK = Regex("[\\p{IsHan}\\p{IsHiragana}\\p{IsKatakana}\\p{IsHangul}]").containsMatchIn(s)
-            if (containsCJK) {
-                val out = mutableSetOf<String>()
-                val normalized = s.trim()
-                // generate 2-grams and 3-grams as fallback segmentation
-                val ngramLens = listOf(2, 3)
-                for (n in ngramLens) {
-                    if (normalized.length >= n) {
-                        for (i in 0..(normalized.length - n)) {
-                            out.add(normalized.substring(i, i + n))
-                        }
-                    }
-                }
-                // return in stable order
-                return out.toList()
-            }
-
-            // fallback: return the whole string as single token (keeps compatibility)
-            return listOf(s.trim())
+            return s.split(Regex("\\s+")).map { it.trim() }.filter { it.isNotEmpty() }
         }
 
-        /**
-         * Фильтрация стоп-слов и применение маппинга синонимов.
-         * Возвращает Pair(mappedTokensList, joinedString).
-         *
-         * Важно: функция ожидает "сырой" input; внутри она вызывает tokenizeStatic и normalizeText на токенах.
-         */
-        fun filterStopwordsAndMapSynonymsStatic(
-            input: String,
-            synonymsSnapshot: Map<String, String>,
-            stopwordsSnapshot: Set<String>
-        ): Pair<List<String>, String> {
+        fun filterStopwordsAndMapSynonymsStatic(input: String, synonymsSnapshot: Map<String, String>, stopwordsSnapshot: Set<String>): Pair<List<String>, String> {
             val toks = tokenizeStatic(input)
-            val mapped = toks.mapNotNull { tok ->
+            val mapped = toks.map { tok ->
                 val n = normalizeText(tok)
-                if (n.isEmpty()) return@mapNotNull null
                 val s = synonymsSnapshot[n] ?: n
-                if (s.isNotEmpty() && !stopwordsSnapshot.contains(s)) s else null
-            }
+                s
+            }.filter { it.isNotEmpty() && !stopwordsSnapshot.contains(it) }
             val joined = mapped.joinToString(" ")
             return Pair(mapped, joined)
         }
     }
 
-    // instance-tokenizer: если инжектирован — использовать его, иначе fallback на tokenizeStatic
-    fun tokenize(s: String): List<String> = tokenizer?.invoke(s) ?: tokenizeStatic(s)
-
-    val tokenWeights: MutableMap<String, Double> = mutableMapOf()
+    val tokenWeights: MutableMap<String, Double> = HashMap()
 
     // --- short-term memory ---
     private val lastUserQueries: ArrayDeque<Set<String>> = ArrayDeque()
@@ -149,7 +97,6 @@ class Engine(
     // --- end memory ---
 
     fun filterStopwordsAndMapSynonyms(input: String): Pair<List<String>, String> {
-        // instance wrapper — по умолчанию использует static реализацию, но можно в будущем заменить
         return filterStopwordsAndMapSynonymsStatic(input, synonymsMap, stopwords)
     }
 
@@ -164,8 +111,6 @@ class Engine(
     /**
      * Levenshtein distance with early exits but using symmetric fuzzy threshold:
      * threshold is max(getFuzzyDistance(s), getFuzzyDistance(t))
-     *
-     * НЕ менял — как просил, оставил прежнюю реализацию.
      */
     fun levenshtein(s: String, t: String, qFiltered: String): Int {
         if (s == t) return 0
@@ -214,7 +159,7 @@ class Engine(
 
     fun computeTokenWeights() {
         tokenWeights.clear()
-        val tokenCounts: MutableMap<String, Int> = mutableMapOf()
+        val tokenCounts = HashMap<String, Int>()
         var totalTokens = 0
         for (key in templatesMap.keys) {
             val tokens = filterStopwordsAndMapSynonyms(key).first
@@ -233,7 +178,7 @@ class Engine(
         minTokenLength: Int = MIN_TOKEN_LENGTH,
         maxTokensPerIndex: Int = MAX_TOKENS_PER_INDEX
     ): MutableMap<String, MutableList<String>> {
-        val invertedIndex: MutableMap<String, MutableList<String>> = mutableMapOf()
+        val invertedIndex = HashMap<String, MutableList<String>>()
         for (key in templatesMap.keys) {
             val toks = filterStopwordsAndMapSynonyms(key).first.filter { it.length >= minTokenLength }
             for (t in toks) {
