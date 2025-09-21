@@ -28,7 +28,9 @@
     <string name="user_label">Пользователь</string>
     <string name="setup">Установить</string>
     <string name="connecting">Подключение...</string>
-
+    <string name="choose_template_version">Выберите версию шаблонов:</string> <!-- Просьба бота -->
+    <string name="select_folder_instruction">Выберите папку для сохранения шаблонов</string> <!-- Инструкция -->
+    
     <!-- Диалоговые сообщения -->
     <string name="welcome_message">Добро пожаловать!</string>
     <string name="typing">печатает...</string>
