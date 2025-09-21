@@ -1,16 +1,16 @@
 package com.nemesis.droidcrypt
 
 import android.content.Intent
-import android.content.SharedPreferences
-import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
-import android.widget.ImageView
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.documentfile.provider.DocumentFile
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.BufferedReader
 import java.io.FileInputStream
 import java.io.InputStreamReader
@@ -18,7 +18,6 @@ import java.io.InputStreamReader
 class SplashActivity : AppCompatActivity() {
     private lateinit var prefs: SharedPreferences
     private var folderUri: Uri? = null
-    private lateinit var splashImage: ImageView
     private lateinit var statusText: TextView
     private lateinit var metadataText: TextView
 
@@ -26,12 +25,17 @@ class SplashActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_splash)
 
-        splashImage = findViewById(R.id.splashImage)
+        // Скрытие статус-бара
+        window.setFlags(
+            android.view.WindowManager.LayoutParams.FLAG_FULLSCREEN,
+            android.view.WindowManager.LayoutParams.FLAG_FULLSCREEN
+        )
+
         statusText = findViewById(R.id.statusText)
         metadataText = findViewById(R.id.metadataText)
 
-        prefs = getSharedPreferences("my_prefs", MODE_PRIVATE)
-        prefs.getString("pref_folder_uri", null)?.let { saved ->
+        prefs = getSharedPreferences("PawsTribePrefs", MODE_PRIVATE)
+        prefs.getString("folderUri", null)?.let { saved ->
             try {
                 folderUri = Uri.parse(saved)
                 contentResolver.takePersistableUriPermission(
@@ -40,58 +44,39 @@ class SplashActivity : AppCompatActivity() {
                 )
             } catch (e: Exception) {
                 folderUri = null
-                // Опционально: Покажите Toast или лог об ошибке
             }
         }
 
-        // Устанавливаем статус "подключение"
-        statusText.text = "Подключение..."
+        // Устанавливаем статус "Подключение..."
+        statusText.text = getString(R.string.connecting)
 
-        // Загружаем только сплэш и метаданные
-        loadImageFromSAF("splash_engine.png", splashImage)
-        val engineMeta = loadTextFromSAF("engine_metadata.txt")
-        val uiMeta = loadTextFromSAF("UI_metadata.txt")
-        metadataText.text = (engineMeta + "\n" + uiMeta).trim()
+        // Асинхронно загружаем метаданные
+        lifecycleScope.launch {
+            val engineMeta = loadTextFromSAF("engine_metadata.txt")
+            val uiMeta = loadTextFromSAF("UI_metadata.txt")
+            metadataText.text = (engineMeta + "\n" + uiMeta).trim()
+        }
 
-        // Сразу переходим в чат после загрузки
-        Handler(Looper.getMainLooper()).postDelayed({
-            val intent = Intent(this, ChatActivity::class.java)
-            if (folderUri != null) {
-                intent.putExtra("folderUri", folderUri)
-            }
+        // Переход в ChatActivity через 50 мс
+        lifecycleScope.launch {
+            delay(50)
+            val intent = Intent(this@SplashActivity, ChatActivity::class.java)
+            folderUri?.let { intent.putExtra("folderUri", it) }
             startActivity(intent)
             finish()
-        }, 50)
-    }
-
-    private fun loadImageFromSAF(filename: String, target: ImageView) {
-        try {
-            folderUri?.let { uri ->
-                val dir = DocumentFile.fromTreeUri(this, uri)
-                val file = dir?.findFile(filename)
-                if (file != null && file.exists()) {
-                    contentResolver.openFileDescriptor(file.uri, "r")?.use { pfd ->
-                        FileInputStream(pfd.fileDescriptor).use { fis ->
-                            val bmp = BitmapFactory.decodeStream(fis)
-                            runOnUiThread { target.setImageBitmap(bmp) }
-                        }
-                    }
-                }
-            }
-        } catch (_: Exception) {
         }
     }
 
-    private fun loadTextFromSAF(filename: String): String {
-        return try {
+    private suspend fun loadTextFromSAF(filename: String): String = withContext(Dispatchers.IO) {
+        try {
             folderUri?.let { uri ->
-                val dir = DocumentFile.fromTreeUri(this, uri)
+                val dir = DocumentFile.fromTreeUri(this@SplashActivity, uri)
                 val file = dir?.findFile(filename)
                 if (file != null && file.exists()) {
                     contentResolver.openFileDescriptor(file.uri, "r")?.use { pfd ->
                         FileInputStream(pfd.fileDescriptor).use { fis ->
                             BufferedReader(InputStreamReader(fis)).use { reader ->
-                                return reader.readText()
+                                return@withContext reader.readText()
                             }
                         }
                     }
