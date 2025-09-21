@@ -15,6 +15,9 @@ import kotlinx.coroutines.withContext
 import java.io.BufferedReader
 import java.io.FileInputStream
 import java.io.InputStreamReader
+import com.nemesis.droidcrypt.R
+import com.nemesis.droidcrypt.ChatActivity
+
 
 class SplashActivity : AppCompatActivity() {
     private lateinit var prefs: SharedPreferences
