@@ -1,26 +1,81 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical"
-    android:gravity="center"
-    android:background="@color/background_black"
-    android:padding="24dp">
+    android:background="@color/matte_black">
 
-    <Button
-        android:id="@+id/startChatButton"
-        android:layout_width="match_parent"
+    <TextView
+        android:id="@+id/batteryText"
+        android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="Перейти в чат"
-        android:textColor="@color/text_green"
-        android:background="@color/button_transparent"
-        android:layout_marginBottom="16dp"/>
+        android:layout_marginTop="16dp"
+        android:layout_marginEnd="16dp"
+        android:textColor="@color/battery_full"
+        android:textSize="16sp"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintTop_toTopOf="parent" />
 
-    <Button
-        android:id="@+id/openSettingsButton"
-        android:layout_width="match_parent"
+    <TextView
+        android:id="@+id/greetingText"
+        android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="Открыть настройки"
-        android:textColor="@color/text_green"
-        android:background="@color/button_transparent"/>
-</LinearLayout>
+        android:textColor="@color/neon_cyan"
+        android:textSize="20sp"
+        android:layout_marginBottom="32dp"
+        app:layout_constraintBottom_toTopOf="@id/buttonContainer"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
+
+    <LinearLayout
+        android:id="@+id/buttonContainer"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:gravity="center"
+        app:layout_constraintWidth_percent="0.8"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintBottom_toBottomOf="parent">
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/setupButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/setup"
+            android:textColor="@android:color/white"
+            app:strokeColor="@color/neon_pink"
+            app:strokeWidth="2dp"
+            app:backgroundTint="@color/matte_black"
+            app:cornerRadius="8dp"
+            app:rippleColor="@color/neon_cyan"
+            android:layout_margin="16dp" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/startChatButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/start_chat"
+            android:textColor="@android:color/white"
+            app:strokeColor="@color/neon_brown"
+            app:strokeWidth="2dp"
+            app:backgroundTint="@color/matte_black"
+            app:cornerRadius="8dp"
+            app:rippleColor="@color/neon_cyan"
+            android:layout_margin="16dp" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/openSettingsButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/open_settings"
+            android:textColor="@android:color/white"
+            app:strokeColor="@color/neon_blue"
+            app:strokeWidth="2dp"
+            app:backgroundTint="@color/matte_black"
+            app:cornerRadius="8dp"
+            app:rippleColor="@color/neon_cyan"
+            android:layout_margin="16dp" />
+    </LinearLayout>
+</androidx.constraintlayout.widget.ConstraintLayout>
