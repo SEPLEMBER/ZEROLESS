@@ -14,7 +14,7 @@ private const val TAG = "MemoryManager"
 /**
  * Простая реализация менеджера памяти на шаблонах (без сторонних библиотек).
  * Поддерживает произвольные плейсхолдеры <xxx>, сохранение слотов в SharedPreferences,
- * использование ncorrect.txt, и случайные варианты ответа через |.
+ * использование ncorrect.txt и recall: правил, и случайные варианты ответа через |.
  */
 
 object MemoryManager {
@@ -64,6 +64,9 @@ object MemoryManager {
     // corrections: неправильное -> правильное (из ncorrect.txt)
     private val corrections: MutableMap<String, String> = mutableMapOf()
 
+    // recall-specific corrections (используются только при transformFirstPersonToYou)
+    private val recallCorrections: MutableMap<String, String> = mutableMapOf()
+
     // дополнительные глобальные маппинги (передаются вызовом loadTemplatesFromFolder)
     private var synonymsGlobal: Map<String, String> = emptyMap()
 
@@ -85,6 +88,7 @@ object MemoryManager {
         vospominaniaTemplates.clear()
         zapominanieTemplates.clear()
         corrections.clear()
+        recallCorrections.clear()
         synonymsGlobal = synonyms
         val uri = folderUri ?: return
         try {
@@ -96,11 +100,15 @@ object MemoryManager {
                         val l = raw.trim()
                         if (l.isEmpty()) return@forEach
                         // формат: incorrect=correct
+                        // для правил recall: левые ключи могут начинаться с "recall:"
                         val parts = l.split("=", limit = 2).map { it.trim() }
                         if (parts.size == 2) {
                             val left = parts[0]
                             val right = parts[1]
-                            if (!left.startsWith("recall:")) {  // Игнорируем recall:
+                            if (left.startsWith("recall:")) {
+                                val key = left.substringAfter("recall:").lowercase(Locale.getDefault())
+                                recallCorrections[key] = right
+                            } else {
                                 corrections[left.lowercase(Locale.getDefault())] = right
                             }
                         }
@@ -145,7 +153,7 @@ object MemoryManager {
                 }
             }
 
-            Log.d(TAG, "Loaded templates: vosp=${vospominaniaTemplates.size}, zapom=${zapominanieTemplates.size}, corrections=${corrections.size}")
+            Log.d(TAG, "Loaded templates: vosp=${vospominaniaTemplates.size}, zapom=${zapominanieTemplates.size}, corrections=${corrections.size}, recall=${recallCorrections.size}")
 
         } catch (e: Exception) {
             Log.e(TAG, "Error loading templates from folder", e)
@@ -205,7 +213,7 @@ object MemoryManager {
         return toks.joinToString(" ")
     }
 
-    // Применить исправления из ncorrect.txt на нормализованную строку
+    // Применить исправления из ncorrect.txt на нормализованную строку (только corrections, без recall)
     private fun applyCorrections(s: String): String {
         if (corrections.isEmpty()) return s
         var res = s
@@ -232,32 +240,14 @@ object MemoryManager {
 
     // Рендер ответа, подставляя захваченные группы (по имени плейсхолдера), поддержка | (варианты)
     private fun renderResponseWithPlaceholders(template: String, match: MatchResult, placeholders: List<String>): String {
-        // Проверяем, есть ли в шаблоне плейсхолдеры, и все ли они заполнены
-        val placeholderRegex = Regex("<([a-zA-Z0-9_]+)>")
-        val hasEmptySlot = placeholderRegex.findAll(template).any { m ->
-            val name = m.groupValues[1]
-            val valFromMatch = getCapturedValue(match, placeholders, name)
-            val slotValue = readSlot(name)
-            valFromMatch.isNullOrBlank() && slotValue.isNullOrBlank()
-        }
-
-        // Если есть пустой слот, возвращаем альтернативный ответ
-        if (hasEmptySlot) {
-            return when {
-                template.contains("<name>") -> "Я не знаю твоего имени, как тебя зовут?"
-                template.contains("<age>") -> "Я не знаю твоего возраста, сколько тебе лет?"
-                template.contains("<petname>") -> "Я не знаю имени твоего питомца, как его зовут?"
-                else -> "Я не знаю этой информации, расскажи подробнее!"
-            }
-        }
-
-        // Оригинальная логика рендеринга
+        // если есть альтернативы через | — выберем одну случайно
         val chosen = if (template.contains("|")) {
             val parts = template.split("|").map { it.trim() }.filter { it.isNotEmpty() }
             if (parts.isEmpty()) template else parts.random()
         } else template
 
         var out = chosen
+        val placeholderRegex = Regex("<([a-zA-Z0-9_]+)>")
         placeholderRegex.findAll(chosen).forEach { m ->
             val name = m.groupValues[1]
             val valFromMatch = getCapturedValue(match, placeholders, name)
@@ -289,13 +279,10 @@ object MemoryManager {
                 if (tpl.targetSlot != null) {
                     val slotValue = getCapturedValue(m, tpl.placeholders, tpl.targetSlot)
                     if (!slotValue.isNullOrBlank()) {
-                        val originalValue = m.groupValues.getOrNull(tpl.placeholders.indexOf(tpl.targetSlot) + 1)?.trim()
-                        if (!originalValue.isNullOrBlank()) {
-                            saveSlot(tpl.targetSlot, originalValue)
-                            val resp = tpl.responseTemplate?.let { renderResponseWithPlaceholders(it, m, tpl.placeholders) }
-                                ?: "Запомнил."
-                            return resp
-                        }
+                        saveSlot(tpl.targetSlot, slotValue)
+                        val resp = tpl.responseTemplate?.let { renderResponseWithPlaceholders(it, m, tpl.placeholders) }
+                            ?: "Запомнил."
+                        return resp
                     }
                 } else {
                     // общий zapominanie: берем первую группу и, если шаблон содержит имя — сохраним
@@ -406,6 +393,76 @@ object MemoryManager {
             toks.any { t -> sadWords.any { t.contains(it) } } -> "sad"
             else -> null
         }
+    }
+
+    // Определение намерения "вспомнить"
+    fun isRecallIntent(input: String): Boolean {
+        val norm = Engine.normalizeText(input)
+        return listOf("о чем мы говорили", "о чем говорили", "что мы обсуждали", "что мы говорили", "что мы обсуждали")
+            .any { norm.contains(Engine.normalizeText(it)) }
+    }
+
+    // Вернуть наиболее релевантную память для ответа на "о чём мы говорили"
+    fun recallRecentConversation(): String? {
+        val mem = memories.firstOrNull { it.type in setOf("state", "event", "fact") }
+        if (mem != null) return renderMemoryAsReply(mem)
+        val fromRecent = recentMessages.firstOrNull { it.normalized.contains("я ") || it.normalized.startsWith("я") }
+        if (fromRecent != null) {
+            return transformFirstPersonToYou(fromRecent.text)
+        }
+        return null
+    }
+
+    // Используем recallCorrections (если есть) для трансформации "я" -> "ты", иначе fallback substitutions
+    private fun transformFirstPersonToYou(s: String): String {
+        var res = s
+        // сначала применяем правила recallCorrections (если они заданы в ncorrect.txt как recall:ключ=значение)
+        if (recallCorrections.isNotEmpty()) {
+            for ((bad, good) in recallCorrections) {
+                try {
+                    res = res.replace(Regex("\\b" + Regex.escape(bad) + "\\b", RegexOption.IGNORE_CASE), good)
+                } catch (_: Exception) {}
+            }
+            return res
+        }
+
+        // fallback — встроенные замены
+        val subs = listOf(
+            Pair("\\bя\\b", "ты"),
+            Pair("\\bмне\\b", "тебе"),
+            Pair("\\bменя\\b", "тебя"),
+            Pair("\\bмой\\b", "твой"),
+            Pair("\\bмоя\\b", "твоя"),
+            Pair("\\bмоё\\b", "твоё"),
+            Pair("\\bмои\\b", "твои"),
+            Pair("\\bмы\\b", "вы")
+        )
+        for ((from, to) in subs) {
+            try {
+                res = res.replace(Regex(from, RegexOption.IGNORE_CASE), to)
+            } catch (_: Exception) {}
+        }
+        return res
+    }
+
+    // Рендер памяти в ответ, бот обращается на "ты"
+    private fun renderMemoryAsReply(mem: MemoryEntry): String {
+        mem.predicate?.let { pred ->
+            when (mem.type) {
+                "state" -> {
+                    val humanPred = pred
+                    return "Тебе было $humanPred."
+                }
+                "event" -> {
+                    val objPart = if (!mem.obj.isNullOrBlank()) " ${mem.obj}" else ""
+                    return "Произошло: ${mem.predicate}$objPart."
+                }
+                "fact" -> {
+                    if (!mem.rawText.isNullOrBlank()) return transformFirstPersonToYou(mem.rawText)
+                }
+            }
+        }
+        return transformFirstPersonToYou(mem.rawText)
     }
 
     // Утилиты для дебага
