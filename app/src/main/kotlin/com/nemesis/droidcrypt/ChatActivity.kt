@@ -10,6 +10,7 @@ import android.media.MediaPlayer
 import android.net.Uri
 import android.os.*
 import android.speech.tts.TextToSpeech
+import android.util.Log
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
@@ -131,6 +132,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 if (saved != null) folderUri = Uri.parse(saved)
             }
         } catch (e: Exception) {
+            Log.e("ChatActivity", "Error loading folder URI", e)
         }
 
         // Загрузка синонимов/стоп-слов — нужно до инициализации engine
@@ -144,6 +146,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             MemoryManager.init(this)
             MemoryManager.loadTemplatesFromFolder(this, folderUri)
         } catch (e: Exception) {
+            Log.w("ChatActivity", "MemoryManager init/load failed: ${e.message}")
         }
 
         try {
@@ -153,6 +156,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 WindowManager.LayoutParams.FLAG_SECURE
             )
         } catch (e: Exception) {
+            Log.e("ChatActivity", "Error setting screenshot flag", e)
         }
 
         loadToolbarIcons()
@@ -242,6 +246,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             tts?.setPitch(1.0f)
             tts?.setSpeechRate(1.0f)
         } else {
+            Log.e("ChatActivity", "TextToSpeech initialization failed with status $status")
         }
     }
 
@@ -260,6 +265,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         try {
             MemoryManager.loadTemplatesFromFolder(this, folderUri)
         } catch (e: Exception) {
+            Log.w("ChatActivity", "MemoryManager load onResume failed: ${e.message}")
         }
         rebuildInvertedIndex()
         engine.computeTokenWeights()
@@ -308,6 +314,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                         }
                     }
                 } catch (e: Exception) {
+                    Log.e("ChatActivity", "Error loading icon $name", e)
                 }
             }
             tryLoadToImageButton("lock.png", btnLock)
@@ -316,6 +323,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             tryLoadToImageButton("settings.png", btnSettings)
             tryLoadToImageButton("send.png", envelopeInputButton)
         } catch (e: Exception) {
+            Log.e("ChatActivity", "Error in loadToolbarIcons", e)
         }
     }
 
@@ -334,7 +342,24 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         if (qFiltered.isEmpty()) return
 
+        // --- Recall intent check (memory manager) ---
+        try {
+            if (MemoryManager.isRecallIntent(qOrigRaw)) {
+                MemoryManager.recallRecentConversation()?.let { recallResp ->
+                    if (!recallResp.isNullOrBlank()) {
+                        addChatMessage(currentMascotName, recallResp)
+                        // side-effect: let memory manager learn from this query
+                        try { MemoryManager.processIncoming(this, qOrigRaw) } catch (_: Exception) {}
+                        startIdleTimer()
+                        return
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.w("ChatActivity", "MemoryManager recall check failed: ${e.message}")
+        }
 
+        // Кэш: проверка на повторный запрос (используем canonical)
         queryCache[qKeyForCount]?.let { cachedResponse ->
             // side-effect: обновим память асинхронно/безопасно
             try { MemoryManager.processIncoming(this, qOrigRaw) } catch (_: Exception) {}
@@ -376,6 +401,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             try {
                 MemoryManager.processIncoming(this, inputText)
             } catch (e: Exception) {
+                Log.w("ChatActivity", "MemoryManager.processIncoming failed: ${e.message}")
             }
         }
 
@@ -875,6 +901,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 }
             }
         } catch (e: Exception) {
+            Log.e("ChatActivity", "Error loading ouch message", e)
             showCustomToast(getString(R.string.error_loading_ouch, e.message ?: ""))
         }
     }
@@ -895,10 +922,12 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 player.setOnCompletionListener { it.reset(); it.release() }
                 player.setOnErrorListener { mp, _, _ -> try { mp.reset(); mp.release() } catch (_: Exception) {}; true }
             } catch (e: Exception) {
+                Log.e("ChatActivity", "Error playing notification sound", e)
                 try { afd.close() } catch (_: Exception) {}
                 try { player.reset(); player.release() } catch (_: Exception) {}
             }
         } catch (e: Exception) {
+            Log.e("ChatActivity", "Error in playNotificationSound", e)
         }
     }
 
@@ -963,6 +992,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 }
             }
         } catch (e: Exception) {
+            Log.e("ChatActivity", "Error loading avatar", e)
         }
         target.setImageResource(android.R.color.transparent)
     }
@@ -1114,6 +1144,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             engine.computeTokenWeights()
             updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
         } catch (e: Exception) {
+            Log.e("ChatActivity", "Error loading templates from $filename", e)
             showCustomToast(getString(R.string.error_reading_file, e.message ?: ""))
             ChatCore.loadFallbackTemplates(templatesMap, keywordResponses, mascotList, contextMap)
             rebuildInvertedIndex()
@@ -1168,6 +1199,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
                 }
             } catch (e: Exception) {
+                Log.e("ChatActivity", "Error loading mascot metadata", e)
                 showCustomToast(getString(R.string.error_loading_mascot_metadata, e.message ?: ""))
             }
         }
@@ -1179,6 +1211,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             try {
                 messagesContainer.setBackgroundColor(Color.parseColor(themeBackground))
             } catch (e: Exception) {
+                Log.e("ChatActivity", "Error updating UI background", e)
             }
         }
     }
@@ -1194,6 +1227,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             toast.view = layout
             toast.show()
         } catch (e: Exception) {
+            Log.e("ChatActivity", "Error showing custom toast", e)
             Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
         }
     }
