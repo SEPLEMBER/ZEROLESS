@@ -1,24 +1,28 @@
 package com.nemesis.droidcrypt
 
-import com.nemesis.droidcrypt.R
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.view.View
-import android.widget.Button
-import android.widget.ProgressBar
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.documentfile.provider.DocumentFile
+import androidx.lifecycle.lifecycleScope
+import com.google.android.material.button.MaterialButton
+import com.google.android.material.progressindicator.CircularProgressIndicator
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.InputStream
 import java.io.OutputStream
 
 class SetupActivity : AppCompatActivity() {
-
-    private lateinit var selectFolderButton: Button
-    private lateinit var progressBar: ProgressBar
+    private lateinit var russianButton: MaterialButton
+    private lateinit var englishButton: MaterialButton
+    private lateinit var progressBar: CircularProgressIndicator
     private var folderUri: Uri? = null
+    private var selectedLanguage: String? = null
 
     private val folderPickerLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -30,20 +34,26 @@ class SetupActivity : AppCompatActivity() {
                             uri,
                             Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
                         )
-                        copyAssetsToSafFolder(uri)
+                        // Сохраняем folderUri в SharedPreferences
+                        getSharedPreferences("PawsTribePrefs", MODE_PRIVATE)
+                            .edit()
+                            .putString("folderUri", uri.toString())
+                            .apply()
+                        // Копируем файлы
+                        copyAssetsToSafFolder(uri, selectedLanguage ?: "ru")
                     } catch (e: SecurityException) {
                         Toast.makeText(this, R.string.error_no_permission, Toast.LENGTH_SHORT).show()
                         progressBar.visibility = View.GONE
-                        selectFolderButton.isEnabled = true
+                        enableButtons(true)
                     }
                 } ?: run {
                     Toast.makeText(this, R.string.error_no_folder_selected, Toast.LENGTH_SHORT).show()
                     progressBar.visibility = View.GONE
-                    selectFolderButton.isEnabled = true
+                    enableButtons(true)
                 }
             } else {
                 progressBar.visibility = View.GONE
-                selectFolderButton.isEnabled = true
+                enableButtons(true)
             }
         }
 
@@ -51,14 +61,36 @@ class SetupActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_setup)
 
-        selectFolderButton = findViewById(R.id.selectFolderButton)
+        // Скрытие статус-бара
+        window.setFlags(
+            android.view.WindowManager.LayoutParams.FLAG_FULLSCREEN,
+            android.view.WindowManager.LayoutParams.FLAG_FULLSCREEN
+        )
+
+        russianButton = findViewById(R.id.russianButton)
+        englishButton = findViewById(R.id.englishButton)
         progressBar = findViewById(R.id.progressBar)
 
-        selectFolderButton.setOnClickListener {
-            selectFolderButton.isEnabled = false
+        russianButton.setOnClickListener {
+            selectedLanguage = "ru"
+            enableButtons(false)
             progressBar.visibility = View.VISIBLE
+            Toast.makeText(this, R.string.select_folder_instruction, Toast.LENGTH_SHORT).show()
             openFolderPicker()
         }
+
+        englishButton.setOnClickListener {
+            selectedLanguage = "en"
+            enableButtons(false)
+            progressBar.visibility = View.VISIBLE
+            Toast.makeText(this, R.string.select_folder_instruction, Toast.LENGTH_SHORT).show()
+            openFolderPicker()
+        }
+    }
+
+    private fun enableButtons(enabled: Boolean) {
+        russianButton.isEnabled = enabled
+        englishButton.isEnabled = enabled
     }
 
     private fun openFolderPicker() {
@@ -69,58 +101,57 @@ class SetupActivity : AppCompatActivity() {
         }
     }
 
-    private fun copyAssetsToSafFolder(folderUri: Uri) {
-        try {
-            val documentFile = DocumentFile.fromTreeUri(this, folderUri)
-            if (documentFile == null || !documentFile.isDirectory) {
-                Toast.makeText(this, R.string.error_folder_unavailable, Toast.LENGTH_SHORT).show()
-                progressBar.visibility = View.GONE
-                selectFolderButton.isEnabled = true
-                return
-            }
-
-            // Копируем файлы из assets (.txt, .png, .ogg)
-            val assetFiles = assets.list("")?.filter {
-                it.endsWith(".txt", true) || it.endsWith(".png", true) || it.endsWith(".ogg", true)
-            } ?: emptyList()
-
-            if (assetFiles.isEmpty()) {
-                Toast.makeText(this, R.string.no_supported_files_in_assets, Toast.LENGTH_SHORT).show()
-                progressBar.visibility = View.GONE
-                selectFolderButton.isEnabled = true
-                return
-            }
-
-            for (fileName in assetFiles) {
-                val inputStream: InputStream = assets.open(fileName)
-                val mimeType = when {
-                    fileName.endsWith(".txt", true) -> "text/plain"
-                    fileName.endsWith(".png", true) -> "image/png"
-                    fileName.endsWith(".ogg", true) -> "audio/ogg"
-                    else -> "application/octet-stream" // Fallback, не должен использоваться
-                }
-                val newFile = documentFile.createFile(mimeType, fileName)
-
-                if (newFile != null) {
-                    contentResolver.openOutputStream(newFile.uri)?.use { outputStream: OutputStream ->
-                        inputStream.copyTo(outputStream)
+    private fun copyAssetsToSafFolder(folderUri: Uri, language: String) {
+        lifecycleScope.launch {
+            try {
+                val documentFile = DocumentFile.fromTreeUri(this@SetupActivity, folderUri)
+                if (documentFile == null || !documentFile.isDirectory) {
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(this@SetupActivity, R.string.error_folder_unavailable, Toast.LENGTH_SHORT).show()
+                        progressBar.visibility = View.GONE
+                        enableButtons(true)
                     }
+                    return@launch
                 }
-                inputStream.close()
-            }
 
-            // Показываем инструкцию пользователю
-            Toast.makeText(
-                this,
-                R.string.files_copied_successfully,
-                Toast.LENGTH_LONG
-            ).show()
-            finish()
-        } catch (e: Exception) {
-            e.printStackTrace()
-            Toast.makeText(this, getString(R.string.error_copying_files, e.message), Toast.LENGTH_LONG).show()
-            progressBar.visibility = View.GONE
-            selectFolderButton.isEnabled = true
+                // Копируем файлы из assets/<language>/
+                val assetFiles = assets.list(language) ?: emptyArray()
+                if (assetFiles.isEmpty()) {
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(this@SetupActivity, R.string.no_supported_files_in_assets, Toast.LENGTH_SHORT).show()
+                        progressBar.visibility = View.GONE
+                        enableButtons(true)
+                    }
+                    return@launch
+                }
+
+                for (fileName in assetFiles) {
+                    val inputStream: InputStream = assets.open("$language/$fileName")
+                    val newFile = documentFile.createFile("application/octet-stream", fileName)
+
+                    if (newFile != null) {
+                        contentResolver.openOutputStream(newFile.uri)?.use { outputStream: OutputStream ->
+                            inputStream.copyTo(outputStream)
+                        }
+                    }
+                    inputStream.close()
+                }
+
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(
+                        this@SetupActivity,
+                        R.string.files_copied_successfully,
+                        Toast.LENGTH_LONG
+                    ).show()
+                    finish()
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(this@SetupActivity, getString(R.string.error_copying_files, e.message), Toast.LENGTH_LONG).show()
+                    progressBar.visibility = View.GONE
+                    enableButtons(true)
+                }
+            }
         }
     }
 }
