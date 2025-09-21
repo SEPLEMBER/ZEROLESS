@@ -524,17 +524,6 @@ object ChatCore {
             Log.w(TAG, "Context pattern handling failed: ${e.message}")
         }
 
-        // Memory recall intent
-        try {
-            if (MemoryManager.isRecallIntent(userInput)) {
-                MemoryManager.recallRecentConversation()?.let { recallResp ->
-                    if (recallResp.isNotBlank()) return recallResp
-                }
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "MemoryManager recall check failed: ${e.message}")
-        }
-
         val normalizedForSearch = normalized
         val tokensForSearch = Engine.tokenizeStatic(normalized)
 
