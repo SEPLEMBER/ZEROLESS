@@ -2,7 +2,7 @@
 <resources>
     
     <color name="background_black">#000000</color> 
-    <color name="matte_black">#1C2526</color> <!-- Матово-чёрный для фона -->
+    <color name="matte_black">#141414</color> <!-- Матово-чёрный для фона -->
     <color name="text_green">#00FF00</color>
     <color name="button_transparent">#00000000</color>
     <color name="card_dark">#0A0A0A</color>
