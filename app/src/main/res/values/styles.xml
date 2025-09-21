@@ -10,4 +10,9 @@
         <item name="colorSecondaryVariant">@color/neon_cyan</item>
         <item name="colorOnSecondary">@color/matte_black</item>
     </style>
+
+    <style name="SplashTheme" parent="AppTheme">
+        <item name="android:windowBackground">@color/matte_black</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+    </style>
 </resources>
