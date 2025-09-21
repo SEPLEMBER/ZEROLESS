@@ -27,6 +27,7 @@
     <string name="open_settings">Открыть настройки</string>
     <string name="user_label">Пользователь</string>
     <string name="setup">Установить</string>
+    <string name="connecting">Подключение...</string>
 
     <!-- Диалоговые сообщения -->
     <string name="welcome_message">Добро пожаловать!</string>
