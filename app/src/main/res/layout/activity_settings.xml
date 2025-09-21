@@ -1,84 +1,55 @@
 <?xml version="1.0" encoding="utf-8"?>
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/background_black"
-    android:padding="16dp">
+    android:background="@color/matte_black">
 
-    <LinearLayout
-        android:layout_width="match_parent"
+    <com.google.android.material.switchmaterial.SwitchMaterial
+        android:id="@+id/disableScreenshotsSwitch"
+        android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:orientation="vertical">
+        android:text="@string/disable_screenshots"
+        android:textColor="@color/neon_cyan"
+        android:textSize="16sp"
+        app:thumbTint="@color/neon_accent"
+        app:trackTint="@color/neon_cyan"
+        android:layout_marginTop="32dp"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
 
-        <TextView
-            android:id="@+id/settingsTitle"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Настройки"
-            android:textColor="@color/text_green"
-            android:textSize="20sp"
-            android:layout_marginBottom="12dp" />
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/selectFolderButton"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="@string/select_folder"
+        android:textColor="@android:color/white"
+        android:textSize="16sp"
+        app:strokeColor="@color/neon_pink"
+        app:strokeWidth="2dp"
+        app:backgroundTint="@color/matte_black"
+        app:cornerRadius="8dp"
+        app:rippleColor="@color/neon_cyan"
+        android:layout_margin="16dp"
+        app:layout_constraintTop_toBottomOf="@id/disableScreenshotsSwitch"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
 
-        <!-- Кнопка выбора папки на SD -->
-        <Button
-            android:id="@+id/selectFolderButton"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Выбрать папку на SD"
-            android:textColor="@color/text_green"
-            android:background="@color/button_transparent"
-            android:layout_marginBottom="12dp" />
-
-        <EditText
-            android:id="@+id/templatesInput"
-            android:layout_width="match_parent"
-            android:layout_height="200dp"
-            android:gravity="top|start"
-            android:inputType="textMultiLine"
-            android:scrollbars="vertical"
-            android:hint="@string/templates_hint"
-            android:textColor="@color/text_green"
-            android:textColorHint="#809F809F"
-            android:background="@color/card_dark"
-            android:padding="8dp" />
-
-        <Button
-            android:id="@+id/saveTemplatesButton"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="@string/save_templates"
-            android:textColor="@color/text_green"
-            android:background="@color/button_transparent"
-            android:layout_marginTop="12dp" />
-
-        <Button
-            android:id="@+id/clearTemplatesButton"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Очистить шаблоны"
-            android:textColor="@color/text_green"
-            android:background="@color/button_transparent"
-            android:layout_marginTop="8dp" />
-
-        <!-- Переключатель для запрета/разрешения скриншотов -->
-        <Switch
-            android:id="@+id/disableScreenshotsSwitch"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Запретить скриншоты"
-            android:textColor="@color/text_green"
-            android:textSize="16sp"
-            android:layout_marginTop="12dp"
-            android:thumbTint="@color/text_green"
-            android:trackTint="#809F809F" />
-
-        <Button
-            android:id="@+id/backButton"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="@string/back"
-            android:textColor="@color/text_green"
-            android:background="@color/button_transparent"
-            android:layout_marginTop="8dp" />
-    </LinearLayout>
-</ScrollView>
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/backButton"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="@string/back"
+        android:textColor="@android:color/white"
+        android:textSize="16sp"
+        app:strokeColor="@color/neon_blue"
+        app:strokeWidth="2dp"
+        app:backgroundTint="@color/matte_black"
+        app:cornerRadius="8dp"
+        app:rippleColor="@color/neon_cyan"
+        android:layout_margin="16dp"
+        app:layout_constraintTop_toBottomOf="@id/selectFolderButton"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
+</androidx.constraintlayout.widget.ConstraintLayout>
