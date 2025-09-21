@@ -15,4 +15,14 @@
         <item name="android:windowBackground">@color/matte_black</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
     </style>
+
+    <style name="SetupTheme" parent="AppTheme">
+        <item name="android:windowBackground">@color/matte_black</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+    </style>
+
+    <style name="SettingsTheme" parent="AppTheme">
+        <item name="android:windowBackground">@color/matte_black</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+    </style>
 </resources>
