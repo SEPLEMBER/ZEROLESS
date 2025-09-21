@@ -420,7 +420,8 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 val kwTokens = keyword.split(" ").filter { it.isNotEmpty() }.toSet()
                 if (qTokenSet.intersect(kwTokens).isNotEmpty()) {
                     withContext(Dispatchers.Main) {
-                        addChatMessage(currentMascotName, responses.random())
+                        val resp = responses.random()
+                         addChatMessage(currentMascotName, resp)
                         recordMemorySideEffect(qOrigRaw)
                         startIdleTimer()
                     }
@@ -469,7 +470,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                         addChatMessage(currentMascotName, response)
                         recordMemorySideEffect(qOrigRaw)
                         startIdleTimer()
-                        cacheResponse(qKeyForCount, response)
+                        cacheResponse(qKeyForCount, response, cacheable = (possible.size <= 1))
                     }
                     return@launch
                 }
@@ -496,7 +497,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                         addChatMessage(currentMascotName, response)
                         recordMemorySideEffect(qOrigRaw)
                         startIdleTimer()
-                        cacheResponse(qKeyForCount, response)
+                        cacheResponse(qKeyForCount, response, cacheable = (possible.size <= 1))
                     }
                     return@launch
                 }
@@ -525,7 +526,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                             addChatMessage(currentMascotName, response)
                             recordMemorySideEffect(qOrigRaw)
                             startIdleTimer()
-                            cacheResponse(qKeyForCount, response)
+                            cacheResponse(qKeyForCount, response, cacheable = (possible.size <= 1))
                         }
                         return@launch
                     }
@@ -578,7 +579,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                             addChatMessage(currentMascotName, response)
                             recordMemorySideEffect(qOrigRaw)
                             startIdleTimer()
-                            cacheResponse(qKeyForCount, response)
+                            cacheResponse(qKeyForCount, response, cacheable = (possible.size <= 1))
                         }
                         return@launch
                     }
@@ -604,7 +605,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                             addChatMessage(currentMascotName, response)
                             recordMemorySideEffect(qOrigRaw)
                             startIdleTimer()
-                            cacheResponse(qKeyForCount, response)
+                            cacheResponse(qKeyForCount, response, cacheable = false
                         }
                         return@launch
                     }
@@ -678,9 +679,15 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
     }
 
-    private fun cacheResponse(qKey: String, response: String) {
-        queryCache[qKey] = response
-    }
+    private fun cacheResponse(qKey: String, response: String, cacheable: Boolean = true) {
+    if (!cacheable) return
+    val tmplList = templatesMap[qKey]
+    if (tmplList != null && tmplList.size > 1) return
+    val kwList = keywordResponses[qKey]
+    if (kwList != null && kwList.size > 1) return
+
+    queryCache[qKey] = response
+}
 
     private fun handleCommand(cmdRaw: String) {
         val cmd = cmdRaw.trim().lowercase(Locale.getDefault())
