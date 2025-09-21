@@ -341,32 +341,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         val qKeyForCount = qCanonical
 
         if (qFiltered.isEmpty()) return
-
-        // --- Recall intent check (memory manager) ---
-        try {
-            if (MemoryManager.isRecallIntent(qOrigRaw)) {
-                MemoryManager.recallRecentConversation()?.let { recallResp ->
-                    if (!recallResp.isNullOrBlank()) {
-                        addChatMessage(currentMascotName, recallResp)
-                        // side-effect: let memory manager learn from this query
-                        try { MemoryManager.processIncoming(this, qOrigRaw) } catch (_: Exception) {}
-                        startIdleTimer()
-                        return
-                    }
-                }
-            }
-        } catch (e: Exception) {
-            Log.w("ChatActivity", "MemoryManager recall check failed: ${e.message}")
-        }
-
-        // Кэш: проверка на повторный запрос (используем canonical)
-        queryCache[qKeyForCount]?.let { cachedResponse ->
-            // side-effect: обновим память асинхронно/безопасно
-            try { MemoryManager.processIncoming(this, qOrigRaw) } catch (_: Exception) {}
-            addChatMessage(currentMascotName, cachedResponse)
-            startIdleTimer()
-            return
-        }
+         }
 
         lastUserInputTime = System.currentTimeMillis()
         userActivityCount++
