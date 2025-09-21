@@ -1,4 +1,4 @@
-package com.nemesis.pawstribe
+package com.nemesis.droidcrypt
 
 import android.content.Intent
 import android.content.SharedPreferences
