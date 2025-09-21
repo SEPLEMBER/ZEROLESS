@@ -55,6 +55,7 @@
             android:name=".SettingsActivity"
             android:exported="false"
             android:parentActivityName=".MainActivity"
+            android:theme="@style/SettingsTheme"
             android:configChanges="orientation|screenSize" />
 
         <!-- PostsActivity -->
@@ -69,6 +70,7 @@
             android:name=".SplashActivity"
             android:exported="false"
             android:parentActivityName=".MainActivity"
+            android:theme="@style/SplashTheme"
             android:configChanges="orientation|screenSize" />
 
         <!-- SetupActivity -->
@@ -76,6 +78,7 @@
             android:name=".SetupActivity"
             android:exported="false"
             android:parentActivityName=".ChatActivity"
+            android:theme="@style/SetupTheme"
             android:configChanges="orientation|screenSize" />
 
     </application>
