@@ -1,4 +1,4 @@
-Давай пришлю тебе ChatActivity. Но он разделен на две половины. Сейчас я пришлю половину, ты скажи "жду вторую половину". И только после второй половины начни искать ошибку: package com.nemesis.pawscribe
+package com.nemesis.droidcrypt
 
 import android.animation.ObjectAnimator
 import android.content.Intent
