@@ -30,6 +30,12 @@
     <string name="connecting">Подключение...</string>
     <string name="choose_template_version">Выберите версию шаблонов:</string> <!-- Просьба бота -->
     <string name="select_folder_instruction">Выберите папку для сохранения шаблонов</string> <!-- Инструкция -->
+    <string name="select_folder">Выбрать папку</string>
+    <string name="disable_screenshots">Запретить скриншоты</string>
+    <string name="folder_selected">Папка выбрана</string>
+    <string name="screenshots_disabled">Скриншоты запрещены</string>
+    <string name="screenshots_enabled">Скриншоты разрешены</string>
+    <string name="folder_unavailable">Ошибка: папка недоступна</string>
     
     <!-- Диалоговые сообщения -->
     <string name="welcome_message">Добро пожаловать!</string>
