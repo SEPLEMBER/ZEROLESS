@@ -1,421 +1,207 @@
-package com.nemesis.pawscribe
+package com.nemesis.droidcrypt
 
-import android.content.Context
-import android.content.SharedPreferences
-import android.net.Uri
-import android.util.Log
-import androidx.documentfile.provider.DocumentFile
-import java.util.ArrayDeque
+import kotlin.math.abs
+import kotlin.math.min
+import kotlin.math.log10
+import kotlin.math.max
+import kotlin.collections.HashMap
 import java.util.Locale
-import java.util.regex.Pattern
+import kotlin.math.roundToInt
 
-private const val TAG = "MemoryManager"
+class Engine(
+    val templatesMap: MutableMap<String, MutableList<String>>,
+    val synonymsMap: MutableMap<String, String>,
+    val stopwords: MutableSet<String>
+) {
 
-/**
- * Простая реализация менеджера памяти на шаблонах (без сторонних библиотек).
- * Поддерживает произвольные плейсхолдеры <xxx>, сохранение слотов в SharedPreferences,
- * использование ncorrect.txt, и случайные варианты ответа через |.
- */
+    companion object {
+        const val MAX_CONTEXT_SWITCH = 6
+        const val MAX_MESSAGES = 250
+        const val CANDIDATE_TOKEN_THRESHOLD = 2
+        const val MAX_SUBQUERY_RESPONSES = 3
+        const val SUBQUERY_RESPONSE_DELAY = 1500L
+        const val MAX_CANDIDATES_FOR_LEV = 8
+        const val JACCARD_THRESHOLD = 0.75
+        const val SEND_DEBOUNCE_MS = 400L
+        const val IDLE_TIMEOUT_MS = 30000L
+        const val MAX_CACHE_SIZE = 100
+        const val SPAM_WINDOW_MS = 60000L
+        const val MAX_TOKENS_PER_INDEX = 50
+        const val MIN_TOKEN_LENGTH = 3
+        const val MAX_TEMPLATES_SIZE = 5000
 
-object MemoryManager {
+        // memory & context tuning
+        const val MAX_MEMORY_QUERIES = 5
+        const val CONTEXT_BOOST = 0.35  // multiplicative bonus for context overlap
+        // END companion
+        fun normalizeText(s: String): String {
+            // Убираем BOM, NBSP, zero-width / format chars и остальное "мусорное"
+            var str = s.replace("\uFEFF", "") // BOM
+            str = str.replace('\u00A0', ' ') // NBSP -> space
+            // Zero-width and formatting characters
+            str = str.replace(Regex("[\\u200B-\\u200F\\u2060-\\u206F]"), "")
+            val lower = str.lowercase(Locale.getDefault())
+            // Убираем всё кроме букв/цифр/пробелов
+            val cleaned = lower.replace(Regex("[^\\p{L}\\p{Nd}\\s]"), " ")
+            val collapsed = cleaned.replace(Regex("\\s+"), " ").trim()
+            return collapsed
+        }
 
-    // SharedPreferences
-    private const val PREFS_NAME = "pawscribe_memory"
+        fun tokenizeStatic(s: String): List<String> {
+            if (s.isBlank()) return emptyList()
+            return s.split(Regex("\\s+")).map { it.trim() }.filter { it.isNotEmpty() }
+        }
 
-    // Файлы-шаблоны
-    private const val FILE_VOSPOMINANIA = "vospominania.txt"
-    private const val FILE_ZAPOMINANIE = "zapominanie.txt"
-    private const val FILE_NCORRECT = "ncorrect.txt"
-
-    // Ограничения
-    private const val RECENT_MESSAGES_LIMIT = 10
-    private const val MEMORIES_LIMIT = 200
-
-    data class UserMessage(val text: String, val normalized: String, val ts: Long = System.currentTimeMillis())
-
-    data class MemoryEntry(
-        val type: String, // "state", "event", "fact"
-        val predicate: String?, // краткое описание (напр. "грустн", "женился")
-        val obj: String?, // дополнение/объект (напр. "брат")
-        val rawText: String,
-        val mood: String? = null, // "sad"/"neutral"/"happy"
-        val ts: Long = System.currentTimeMillis(),
-        var confidence: Double = 1.0
-    )
-
-    data class Template(
-        val raw: String,
-        val regex: Regex,
-        val placeholders: List<String>,
-        val responseTemplate: String? = null, // если шаблон содержит ответ
-        val targetSlot: String? = null // для zapominanie: ключ SharedPref
-    )
-
-    private lateinit var prefs: SharedPreferences
-
-    // runtime storage
-    private val recentMessages: ArrayDeque<UserMessage> = ArrayDeque()
-    private val memories: ArrayDeque<MemoryEntry> = ArrayDeque()
-
-    // loaded templates
-    private val vospominaniaTemplates: MutableList<Template> = mutableListOf()
-    private val zapominanieTemplates: MutableList<Template> = mutableListOf()
-
-    // corrections: неправильное -> правильное (из ncorrect.txt)
-    private val corrections: MutableMap<String, String> = mutableMapOf()
-
-    // дополнительные глобальные маппинги (передаются вызовом loadTemplatesFromFolder)
-    private var synonymsGlobal: Map<String, String> = emptyMap()
-
-    // простые списки чувств для эвристики
-    private val sadWords = setOf("грустн", "грустит", "плохо", "тоску", "одинок", "печаль")
-    private val happyWords = setOf("счастл", "рад", "весел", "восторг", "счастье", "радост")
-
-    // слот-плейсхолдеры, поддерживаемые по умолчанию (можно дополнять)
-    private val knownSlots = setOf("name", "age", "petname")
-
-    // Инициализация менеджера памяти
-    fun init(context: Context) {
-        prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-    }
-
-    // Загрузить шаблоны из директории (DocumentFile tree)
-    // `synonyms` — опциональная мапа canonical форм (передавать engine.synonymsMap для совместимости)
-    fun loadTemplatesFromFolder(context: Context, folderUri: Uri?, synonyms: Map<String, String> = emptyMap()) {
-        vospominaniaTemplates.clear()
-        zapominanieTemplates.clear()
-        corrections.clear()
-        synonymsGlobal = synonyms
-        val uri = folderUri ?: return
-        try {
-            val dir = DocumentFile.fromTreeUri(context, uri) ?: return
-
-            dir.findFile(FILE_NCORRECT)?.takeIf { it.exists() }?.let { file ->
-                context.contentResolver.openInputStream(file.uri)?.bufferedReader()?.useLines { lines ->
-                    lines.forEach { raw ->
-                        val l = raw.trim()
-                        if (l.isEmpty()) return@forEach
-                        // формат: incorrect=correct
-                        val parts = l.split("=", limit = 2).map { it.trim() }
-                        if (parts.size == 2) {
-                            val left = parts[0]
-                            val right = parts[1]
-                            if (!left.startsWith("recall:")) {  // Игнорируем recall:
-                                corrections[left.lowercase(Locale.getDefault())] = right
-                            }
-                        }
-                    }
-                }
-            }
-
-            dir.findFile(FILE_ZAPOMINANIE)?.takeIf { it.exists() }?.let { file ->
-                context.contentResolver.openInputStream(file.uri)?.bufferedReader()?.useLines { lines ->
-                    lines.forEach { raw ->
-                        val l = raw.trim()
-                        if (l.isEmpty()) return@forEach
-                        try {
-                            // формат: шаблон=ответ (для запоминания слота) или просто шаблон
-                            val parts = l.split("=", limit = 2).map { it.trim() }
-                            val pattern = parts[0]
-                            val response = parts.getOrNull(1)
-                            val template = buildTemplateFromPattern(pattern, response, isSlot = true)
-                            zapominanieTemplates.add(template)
-                        } catch (e: Exception) {
-                            Log.e(TAG, "Failed parse zapominanie line: $l", e)
-                        }
-                    }
-                }
-            }
-
-            dir.findFile(FILE_VOSPOMINANIA)?.takeIf { it.exists() }?.let { file ->
-                context.contentResolver.openInputStream(file.uri)?.bufferedReader()?.useLines { lines ->
-                    lines.forEach { raw ->
-                        val l = raw.trim()
-                        if (l.isEmpty()) return@forEach
-                        try {
-                            val parts = l.split("=", limit = 2).map { it.trim() }
-                            val pattern = parts[0]
-                            val response = parts.getOrNull(1)
-                            val template = buildTemplateFromPattern(pattern, response, isSlot = false)
-                            vospominaniaTemplates.add(template)
-                        } catch (e: Exception) {
-                            Log.e(TAG, "Failed parse vospominania line: $l", e)
-                        }
-                    }
-                }
-            }
-
-            Log.d(TAG, "Loaded templates: vosp=${vospominaniaTemplates.size}, zapom=${zapominanieTemplates.size}, corrections=${corrections.size}")
-
-        } catch (e: Exception) {
-            Log.e(TAG, "Error loading templates from folder", e)
+        fun filterStopwordsAndMapSynonymsStatic(input: String, synonymsSnapshot: Map<String, String>, stopwordsSnapshot: Set<String>): Pair<List<String>, String> {
+            val toks = tokenizeStatic(input)
+            val mapped = toks.map { tok ->
+                val n = normalizeText(tok)
+                val s = synonymsSnapshot[n] ?: n
+                s
+            }.filter { it.isNotEmpty() && !stopwordsSnapshot.contains(it) }
+            val joined = mapped.joinToString(" ")
+            return Pair(mapped, joined)
         }
     }
 
-    // Создаёт Template из строкового шаблона: поддерживает любые <placeholder>
-    // Строим regex по нормализованной/mapped форме (synonymsGlobal применяется к литеральным сегментам)
-    private fun buildTemplateFromPattern(pattern: String, response: String?, isSlot: Boolean): Template {
-        val placeholderRegex = Regex("<([a-zA-Z0-9_]+)>")
-        val placeholders = placeholderRegex.findAll(pattern).map { it.groupValues[1] }.toList()
+    val tokenWeights: MutableMap<String, Double> = HashMap()
 
-        // Если шаблон — ровно один плейсхолдер (например "<name>"), захватываем всю строку
-        val onlyPlaceholder = pattern.trim().matches(Regex("^<[^>]+>\$"))
+    // --- short-term memory ---
+    private val lastUserQueries: ArrayDeque<Set<String>> = ArrayDeque()
 
-        val sb = StringBuilder()
-        var last = 0
-        for (m in placeholderRegex.findAll(pattern)) {
-            val start = m.range.first
-            val end = m.range.last
-            if (start > last) {
-                val segment = pattern.substring(last, start)
-                val mapped = mapAndNormalizeSegment(segment)
-                if (mapped.isNotEmpty()) sb.append(Pattern.quote(mapped))
-            }
-            // заменяем на ленивую захватывающую группу — порядковые группы, не именованные
-            sb.append("(.+?)")
-            last = end + 1
-        }
-        if (last < pattern.length) {
-            val tail = pattern.substring(last)
-            val mappedTail = mapAndNormalizeSegment(tail)
-            if (mappedTail.isNotEmpty()) sb.append(Pattern.quote(mappedTail))
-        }
-
-        val finalRegex = if (onlyPlaceholder) {
-            "^\\s*(.+)\\s*\$"
-        } else {
-            "^\\s*" + sb.toString() + "\\s*\$"
-        }
-
-        val kotlinRegex = Regex(finalRegex, setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
-
-        val targetSlot = if (isSlot && placeholders.size == 1) placeholders[0] else null
-
-        return Template(raw = pattern, regex = kotlinRegex, placeholders = placeholders, responseTemplate = response, targetSlot = targetSlot)
+    /**
+     * Добавляем токены текущего запроса в память (FIFO, ограничение MAX_MEMORY_QUERIES)
+     */
+    fun updateMemory(tokens: List<String>) {
+        val set = tokens.toSet()
+        if (set.isEmpty()) return
+        if (lastUserQueries.size >= MAX_MEMORY_QUERIES) lastUserQueries.removeFirst()
+        lastUserQueries.addLast(set)
     }
 
-    // Нормализует и заменяет токены на canonical (synonymsGlobal) для кусочка текста шаблона
-    private fun mapAndNormalizeSegment(seg: String): String {
-        val norm = Engine.normalizeText(seg)
-        if (norm.isBlank()) return ""
-        val toks = norm.split(Regex("\\s+")).map { t ->
-            val k = t.lowercase(Locale.getDefault())
-            synonymsGlobal[k] ?: k
-        }
-        return toks.joinToString(" ")
-    }
-
-    // Применить исправления из ncorrect.txt на нормализованную строку
-    private fun applyCorrections(s: String): String {
-        if (corrections.isEmpty()) return s
-        var res = s
-        // Простая замена по границам слов
-        for ((bad, good) in corrections) {
-            try {
-                res = res.replace(Regex("\\b" + Regex.escape(bad) + "\\b", RegexOption.IGNORE_CASE), good)
-            } catch (_: Exception) {
-            }
-        }
-        return res
-    }
-
-    // Вспомогательная функция: получить значение захваченной группы по имени плейсхолдера (placeholders - порядок плейсхолдеров)
-    private fun getCapturedValue(match: MatchResult, placeholders: List<String>, name: String): String? {
-        val idx = placeholders.indexOf(name)
-        if (idx >= 0) {
-            // группы нумеруются с 1
-            return match.groupValues.getOrNull(idx + 1)?.trim()?.takeIf { it.isNotBlank() }
-        }
-        // fallback: если нет такого плейсхолдера — вернём первую группу
-        return match.groupValues.getOrNull(1)?.trim()?.takeIf { it.isNotBlank() }
-    }
-
-    // Рендер ответа, подставляя захваченные группы (по имени плейсхолдера), поддержка | (варианты)
-    private fun renderResponseWithPlaceholders(template: String, match: MatchResult, placeholders: List<String>): String {
-        // Проверяем, есть ли в шаблоне плейсхолдеры, и все ли они заполнены
-        val placeholderRegex = Regex("<([a-zA-Z0-9_]+)>")
-        val hasEmptySlot = placeholderRegex.findAll(template).any { m ->
-            val name = m.groupValues[1]
-            val valFromMatch = getCapturedValue(match, placeholders, name)
-            val slotValue = readSlot(name)
-            valFromMatch.isNullOrBlank() && slotValue.isNullOrBlank()
-        }
-
-        // Если есть пустой слот, возвращаем альтернативный ответ
-        if (hasEmptySlot) {
-            return when {
-                template.contains("<name>") -> "Я не знаю твоего имени, как тебя зовут?"
-                template.contains("<age>") -> "Я не знаю твоего возраста, сколько тебе лет?"
-                template.contains("<petname>") -> "Я не знаю имени твоего питомца, как его зовут?"
-                else -> "Я не знаю этой информации, расскажи подробнее!"
-            }
-        }
-
-        // Оригинальная логика рендеринга
-        val chosen = if (template.contains("|")) {
-            val parts = template.split("|").map { it.trim() }.filter { it.isNotEmpty() }
-            if (parts.isEmpty()) template else parts.random()
-        } else template
-
-        var out = chosen
-        placeholderRegex.findAll(chosen).forEach { m ->
-            val name = m.groupValues[1]
-            val valFromMatch = getCapturedValue(match, placeholders, name)
-            val replacement = when {
-                !valFromMatch.isNullOrBlank() -> valFromMatch
-                else -> readSlot(name) ?: ""
-            }
-            out = out.replace("<${name}>", replacement)
-        }
+    /**
+     * Возвращает объединённый набор токенов из short-term памяти
+     */
+    fun getContextTokens(): Set<String> {
+        val out = mutableSetOf<String>()
+        for (s in lastUserQueries) out.addAll(s)
         return out
     }
 
-    // Добавить входящее сообщение и попытаться извлечь память / слоты
-    fun processIncoming(context: Context, text: String): String? {
-        val normalized = Engine.normalizeText(text)
-        val corrected = applyCorrections(normalized)
-        // также подготовим mapped версию для поиска (synonyms)
-        val correctedMapped = corrected.split(Regex("\\s+")).map { t ->
-            val k = t.lowercase(Locale.getDefault())
-            synonymsGlobal[k] ?: k
-        }.joinToString(" ")
-        addRecentMessage(text, corrected)
+    /**
+     * Очистить память (если нужно)
+     */
+    fun clearMemory() {
+        lastUserQueries.clear()
+    }
+    // --- end memory ---
 
-        // 1) попытка сопоставления с zapominanie (сохранение слотов)
-        for (tpl in zapominanieTemplates) {
-            val m = tpl.regex.find(correctedMapped)
-            if (m != null) {
-                // если шаблон предназначен для слота
-                if (tpl.targetSlot != null) {
-                    val slotValue = getCapturedValue(m, tpl.placeholders, tpl.targetSlot)
-                    if (!slotValue.isNullOrBlank()) {
-                        val originalValue = m.groupValues.getOrNull(tpl.placeholders.indexOf(tpl.targetSlot) + 1)?.trim()
-                        if (!originalValue.isNullOrBlank()) {
-                            saveSlot(tpl.targetSlot, originalValue)
-                            val resp = tpl.responseTemplate?.let { renderResponseWithPlaceholders(it, m, tpl.placeholders) }
-                                ?: "Запомнил."
-                            return resp
-                        }
-                    }
-                } else {
-                    // общий zapominanie: берем первую группу и, если шаблон содержит имя — сохраним
-                    val val0 = m.groupValues.getOrNull(1)?.trim()
-                    if (!val0.isNullOrBlank()) {
-                        if (tpl.placeholders.contains("name")) {
-                            saveSlot("name", val0)
-                            val resp = tpl.responseTemplate?.let { renderResponseWithPlaceholders(it, m, tpl.placeholders) } ?: "Запомню это."
-                            return resp
-                        } else {
-                            val resp = tpl.responseTemplate?.let { renderResponseWithPlaceholders(it, m, tpl.placeholders) }
-                            if (!resp.isNullOrBlank()) return resp
-                        }
-                    }
-                }
-            }
-        }
-
-        // 2) попытка сопоставления с vospominania (создание памяти)
-        for (tpl in vospominaniaTemplates) {
-            val m = tpl.regex.find(correctedMapped)
-            if (m != null) {
-                // Сохраняем все захваченные плейсхолдеры в слоты (если есть)
-                for (ph in tpl.placeholders) {
-                    val captured = getCapturedValue(m, tpl.placeholders, ph)
-                    if (!captured.isNullOrBlank()) {
-                        saveSlot(ph, captured)
-                    }
-                }
-
-                val placeholders = tpl.placeholders
-                val mainCaptured = if (placeholders.isNotEmpty()) getCapturedValue(m, placeholders, placeholders[0]) else m.groupValues.getOrNull(1)
-                val obj = if (placeholders.size > 1) getCapturedValue(m, placeholders, placeholders[1]) else null
-
-                val entry = MemoryEntry(
-                    type = "event",
-                    predicate = mainCaptured?.takeIf { it.isNotBlank() } ?: tpl.raw,
-                    obj = obj,
-                    rawText = text,
-                    mood = detectMood(corrected)
-                )
-                pushMemory(entry)
-                val resp = tpl.responseTemplate?.let { renderResponseWithPlaceholders(it, m, tpl.placeholders) } ?: "Понял, запомню."
-                return resp
-            }
-        }
-
-        // 3) эвристическое извлечение эмоций/событий
-        val detected = heuristicExtract(corrected)
-        if (detected != null) {
-            pushMemory(detected)
-            return "Понял."
-        }
-
-        return null
+    fun filterStopwordsAndMapSynonyms(input: String): Pair<List<String>, String> {
+        return filterStopwordsAndMapSynonymsStatic(input, synonymsMap, stopwords)
     }
 
-    private fun addRecentMessage(original: String, normalized: String) {
-        recentMessages.addFirst(UserMessage(original, normalized))
-        while (recentMessages.size > RECENT_MESSAGES_LIMIT) recentMessages.removeLast()
-    }
-
-    private fun pushMemory(entry: MemoryEntry) {
-        memories.addFirst(entry)
-        while (memories.size > MEMORIES_LIMIT) memories.removeLast()
-    }
-
-    private fun saveSlot(slot: String, value: String) {
-        if (!this::prefs.isInitialized) return
-        val key = slot.trim()
-        val v = value.trim()
-        if (key.isEmpty() || v.isEmpty()) return
-        prefs.edit().putString(key, v).apply()
-        Log.d(TAG, "Saved slot: $key = $v")
-    }
-
-    fun readSlot(slot: String): String? {
-        if (!this::prefs.isInitialized) return null
-        return prefs.getString(slot, null)
-    }
-
-    // Очень простая эвристика для извлечения эмоций/событий
-    private fun heuristicExtract(corrected: String): MemoryEntry? {
-        val toks = Engine.tokenizeStatic(corrected)
-        val firstPerson = toks.any { it == "я" || it == "мне" || it == "мой" || it == "моя" }
-        if (!firstPerson) return null
-
-        val hasSad = toks.any { t -> sadWords.any { t.contains(it) } }
-        val hasHappy = toks.any { t -> happyWords.any { t.contains(it) } }
-
-        if (hasSad || hasHappy) {
-            val mood = if (hasHappy) "happy" else "sad"
-            return MemoryEntry(type = "state", predicate = if (hasHappy) "счастлив" else "грустн", obj = null, rawText = corrected, mood = mood)
-        }
-
-        val event = toks.find { it.endsWith("ся") || it.endsWith("лся") || it.endsWith("илась") || it.endsWith("ил") || it.endsWith("ился") }
-        if (event != null) {
-            return MemoryEntry(type = "event", predicate = event, obj = null, rawText = corrected, mood = null)
-        }
-
-        return null
-    }
-
-    private fun detectMood(corrected: String): String? {
-        val toks = Engine.tokenizeStatic(corrected)
+    fun getFuzzyDistance(word: String): Int {
         return when {
-            toks.any { t -> happyWords.any { t.contains(it) } } -> "happy"
-            toks.any { t -> sadWords.any { t.contains(it) } } -> "sad"
-            else -> null
+            word.length <= 4 -> 1
+            word.length <= 8 -> 2
+            else -> 3
         }
     }
 
-    // Утилиты для дебага
-    fun dumpMemories(): List<MemoryEntry> = memories.toList()
-    fun dumpRecents(): List<UserMessage> = recentMessages.toList()
+    /**
+     * Levenshtein distance with early exits but using symmetric fuzzy threshold:
+     * threshold is max(getFuzzyDistance(s), getFuzzyDistance(t))
+     */
+    fun levenshtein(s: String, t: String, qFiltered: String): Int {
+        if (s == t) return 0
+        val n = s.length
+        val m = t.length
+        if (n == 0) return m
+        if (m == 0) return n
+        val maxDist = max(getFuzzyDistance(qFiltered), getFuzzyDistance(t))
+        if (abs(n - m) > maxDist + 2) return Int.MAX_VALUE / 2
+        val prev = IntArray(m + 1) { it }
+        val curr = IntArray(m + 1)
+        for (i in 1..n) {
+            curr[0] = i
+            var minInRow = curr[0]
+            val si = s[i - 1]
+            for (j in 1..m) {
+                val cost = if (si == t[j - 1]) 0 else 1
+                val deletion = prev[j] + 1
+                val insertion = curr[j - 1] + 1
+                val substitution = prev[j - 1] + cost
+                curr[j] = min(min(deletion, insertion), substitution)
+                if (curr[j] < minInRow) minInRow = curr[j]
+            }
+            val maxDistRow = max(getFuzzyDistance(qFiltered), getFuzzyDistance(t))
+            if (minInRow > maxDistRow + 2) return Int.MAX_VALUE / 2
+            for (k in 0..m) prev[k] = curr[k]
+        }
+        return prev[m]
+    }
 
-    // Очищение памяти (для тестов)
-    fun clearAll() {
-        recentMessages.clear()
-        memories.clear()
-        if (this::prefs.isInitialized) prefs.edit().clear().apply()
+    fun getJaccardThreshold(query: String): Double {
+        return when {
+            query.length <= 10 -> 0.3
+            query.length <= 20 -> 0.4
+            else -> JACCARD_THRESHOLD
+        }
+    }
+
+    fun weightedJaccard(qSet: Set<String>, keyTokens: Set<String>): Double {
+        val intersection = qSet.intersect(keyTokens)
+        val union = qSet.union(keyTokens)
+        val interWeight = intersection.sumOf { tokenWeights.getOrDefault(it, 1.0) }
+        val unionWeight = union.sumOf { tokenWeights.getOrDefault(it, 1.0) }
+        return if (unionWeight == 0.0) 0.0 else interWeight / unionWeight
+    }
+
+    fun computeTokenWeights() {
+        tokenWeights.clear()
+        val tokenCounts = HashMap<String, Int>()
+        var totalTokens = 0
+        for (key in templatesMap.keys) {
+            val tokens = filterStopwordsAndMapSynonyms(key).first
+            for (token in tokens) {
+                tokenCounts[token] = tokenCounts.getOrDefault(token, 0) + 1
+                totalTokens++
+            }
+        }
+        tokenCounts.forEach { (token, count) ->
+            val weight = if (totalTokens == 0) 1.0 else log10(totalTokens.toDouble() / count)
+            tokenWeights[token] = max(0.1, weight)
+        }
+    }
+
+    fun rebuildInvertedIndex(
+        minTokenLength: Int = MIN_TOKEN_LENGTH,
+        maxTokensPerIndex: Int = MAX_TOKENS_PER_INDEX
+    ): MutableMap<String, MutableList<String>> {
+        val invertedIndex = HashMap<String, MutableList<String>>()
+        for (key in templatesMap.keys) {
+            val toks = filterStopwordsAndMapSynonyms(key).first.filter { it.length >= minTokenLength }
+            for (t in toks) {
+                val list = invertedIndex.getOrPut(t) { mutableListOf() }
+                if (!list.contains(key)) list.add(key)
+                if (list.size > maxTokensPerIndex) {
+                    list.sortByDescending { templatesMap[it]?.size ?: 0 }
+                    list.subList(maxTokensPerIndex, list.size).clear()
+                }
+            }
+        }
+        return invertedIndex
+    }
+
+    fun trimTemplatesMap(maxTemplatesSize: Int = MAX_TEMPLATES_SIZE, queryCountMap: Map<String, Int>): List<String> {
+        val removed = mutableListOf<String>()
+        if (templatesMap.size > maxTemplatesSize) {
+            val leastUsed = templatesMap.keys.sortedBy { queryCountMap.getOrDefault(it, 0) }.take(templatesMap.size - maxTemplatesSize)
+            leastUsed.forEach { k ->
+                templatesMap.remove(k)
+                removed.add(k)
+            }
+        }
+        return removed
     }
 }
