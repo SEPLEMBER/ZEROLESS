@@ -144,7 +144,6 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             MemoryManager.init(this)
             MemoryManager.loadTemplatesFromFolder(this, folderUri)
         } catch (e: Exception) {
-            Log.w("ChatActivity", "MemoryManager init/load failed: ${e.message}")
         }
 
         try {
@@ -261,7 +260,6 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         try {
             MemoryManager.loadTemplatesFromFolder(this, folderUri)
         } catch (e: Exception) {
-            Log.w("ChatActivity", "MemoryManager load onResume failed: ${e.message}")
         }
         rebuildInvertedIndex()
         engine.computeTokenWeights()
@@ -336,24 +334,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         if (qFiltered.isEmpty()) return
 
-        // --- Recall intent check (memory manager) ---
-        try {
-            if (MemoryManager.isRecallIntent(qOrigRaw)) {
-                MemoryManager.recallRecentConversation()?.let { recallResp ->
-                    if (!recallResp.isNullOrBlank()) {
-                        addChatMessage(currentMascotName, recallResp)
-                        // side-effect: let memory manager learn from this query
-                        try { MemoryManager.processIncoming(this, qOrigRaw) } catch (_: Exception) {}
-                        startIdleTimer()
-                        return
-                    }
-                }
-            }
-        } catch (e: Exception) {
-            Log.w("ChatActivity", "MemoryManager recall check failed: ${e.message}")
-        }
 
-        // Кэш: проверка на повторный запрос (используем canonical)
         queryCache[qKeyForCount]?.let { cachedResponse ->
             // side-effect: обновим память асинхронно/безопасно
             try { MemoryManager.processIncoming(this, qOrigRaw) } catch (_: Exception) {}
@@ -395,7 +376,6 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             try {
                 MemoryManager.processIncoming(this, inputText)
             } catch (e: Exception) {
-                Log.w("ChatActivity", "MemoryManager.processIncoming failed: ${e.message}")
             }
         }
 
