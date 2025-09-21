@@ -64,6 +64,9 @@ dependencies {
     // --- Для работы с Uri (AndroidX) ---
     implementation("androidx.documentfile:documentfile:1.0.1")
 
+    // --- Activity Result API для ActivityResultLauncher ---
+    implementation("androidx.activity:activity-ktx:1.9.3")
+
     testImplementation(libs.junit)
     androidTestImplementation(libs.ext.junit)
     androidTestImplementation(libs.espresso.core)
