@@ -102,33 +102,94 @@ object ChatCore {
             }
         }
 
-    // temporary topic in RAM (ОЗУ) — теперь хранит matched key из шаблона
-    private var lastMatchedKey: String? = null
+    // --- Context.txt / temporary topic in RAM support ---
+    // ContextPattern: left tokens before {}, right tokens after {}
+    private data class ContextPattern(val left: List<String>, val right: List<String>, val response: String?)
 
-    // Флаг, был ли последний ответ заглушкой
-    private var lastResponseWasDummy: Boolean = false
+    // cached context patterns (reloaded per findBestResponse call)
+    private val contextPatterns: MutableList<ContextPattern> = mutableListOf()
 
-    // Фразы для вопросов о контексте
-    private val contextPhrases = listOf(
-        "про что мы говорили",
-        "о чём мы говорили",
-        "что мы обсуждали",
-        "про что я спрашивал",
-        "про что мы говорим",
-        "о чём мы говорим",
-        "что мы обсуждаем",
-        "про что я спрашиваю"
-    )
+    // recall map (canonical key -> response template with {topic})
+    private val contextRecallMap: MutableMap<String, String> = HashMap()
 
-    private val dummyContextResponses = listOf(
-        "Да так, ничего важного.",
-        "У меня память как у рыбки."
-    )
+    // temporary topic in RAM (ОЗУ)
+    private var currentTopic: String? = null
 
-    // Проверка, является ли запрос вопросом о контексте
-    private fun isContextQuestion(input: String): Boolean {
-        val norm = Engine.normalizeText(input)
-        return contextPhrases.any { norm.contains(Engine.normalizeText(it)) }
+    // Helper to match a context pattern against input tokens, returns captured topic or null
+    private fun matchContextPattern(p: ContextPattern, tokensMapped: List<String>): String? {
+        // require at least one token captured
+        // FIX: We expect tokensMapped already to be filtered/mapped (same format as p.left/p.right)
+        if (p.left.isNotEmpty()) {
+            if (tokensMapped.size <= p.left.size) return null
+            if (tokensMapped.subList(0, p.left.size) != p.left) return null
+            if (p.right.isEmpty()) {
+                val captured = tokensMapped.drop(p.left.size).joinToString(" ")
+                return captured.ifBlank { null }
+            } else {
+                if (tokensMapped.size <= p.left.size + p.right.size) return null
+                val tail = tokensMapped.takeLast(p.right.size)
+                if (tail != p.right) return null
+                val captured = tokensMapped.drop(p.left.size).dropLast(p.right.size).joinToString(" ")
+                return captured.ifBlank { null }
+            }
+        } else {
+            // left empty -> require right at end
+            if (p.right.isEmpty()) return null
+            if (tokensMapped.size <= p.right.size) return null
+            val tail = tokensMapped.takeLast(p.right.size)
+            if (tail != p.right) return null
+            val captured = tokensMapped.dropLast(p.right.size).joinToString(" ")
+            return captured.ifBlank { null }
+        }
+    }
+
+    // load context.txt (and recall lines starting with $) into memory (lightweight)
+    private fun loadContextTemplatesFromFolder(context: Context, folderUri: Uri?, synonymsSnapshot: Map<String, String>, stopwordsSnapshot: Set<String>) {
+        contextPatterns.clear()
+        contextRecallMap.clear()
+        // currentTopic should be preserved across loads; no-op here
+
+        val uri = folderUri ?: return
+        try {
+            val dir = DocumentFile.fromTreeUri(context, uri) ?: return
+            val file = dir.findFile("context.txt") ?: return
+            if (!file.exists()) return
+            context.contentResolver.openInputStream(file.uri)?.bufferedReader()?.useLines { lines ->
+                lines.forEach { raw ->
+                    val l = raw.trim()
+                    if (l.isEmpty()) return@forEach
+                    try {
+                        if (l.startsWith("$")) {
+                            // recall line: $key=resp (key uses natural language)
+                            val parts = l.substring(1).split("=", limit = 2).map { it.trim() }
+                            if (parts.size == 2) {
+                                val keyNorm = Engine.normalizeText(parts[0])
+                                val keyTokens = Engine.filterStopwordsAndMapSynonymsStatic(keyNorm, synonymsSnapshot, stopwordsSnapshot).first
+                                val keyCanon = keyTokens.sorted().joinToString(" ")
+                                if (keyCanon.isNotEmpty()) contextRecallMap[keyCanon] = parts[1]
+                            }
+                        } else {
+                            // pattern line: patternWith{} optionally = response (response may contain {topic})
+                            val parts = l.split("=", limit = 2).map { it.trim() }
+                            val patternRaw = parts[0]
+                            val response = parts.getOrNull(1)
+                            if (!patternRaw.contains("{}")) return@forEach
+                            val segs = patternRaw.split("{}", limit = 2)
+                            val leftNorm = Engine.normalizeText(segs[0])
+                            val rightNorm = Engine.normalizeText(segs.getOrNull(1) ?: "")
+                            val leftTokens = Engine.filterStopwordsAndMapSynonymsStatic(leftNorm, synonymsSnapshot, stopwordsSnapshot).first
+                            val rightTokens = Engine.filterStopwordsAndMapSynonymsStatic(rightNorm, synonymsSnapshot, stopwordsSnapshot).first
+                            contextPatterns.add(ContextPattern(leftTokens, rightTokens, response))
+                        }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Failed parse context.txt line: $l", e)
+                    }
+                }
+            }
+            Log.d(TAG, "Loaded context patterns=${contextPatterns.size} recallKeys=${contextRecallMap.size}")
+        } catch (e: Exception) {
+            Log.w(TAG, "Error loading context.txt", e)
+        }
     }
 
     // --- Загрузка синонимов и стоп-слов ---
@@ -261,7 +322,9 @@ object ChatCore {
                 ph.findAll(resp).forEach { m ->
                     val name = m.groupValues[1]
                     val value = try {
-                        MemoryManager.readSlot(name)
+                        // special-case: topic uses ChatCore.currentTopic first, then memory slot
+                        if (name.equals("topic", ignoreCase = true)) currentTopic ?: MemoryManager.readSlot(name)
+                        else MemoryManager.readSlot(name)
                     } catch (_: Exception) {
                         null
                     }
@@ -277,7 +340,7 @@ object ChatCore {
             }
 
             // resolvePotentialFileResponse: попытка углубиться в referenced file
-            fun resolvePotentialFileResponse(respRaw: String, qSetLocal: Set<String>, qCanonicalLocal: String, matchedKey: String?): String {
+            fun resolvePotentialFileResponse(respRaw: String, qSetLocal: Set<String>, qCanonicalLocal: String): String {
                 val respTrim = respRaw.trim()
                 val resp = respTrim.trim(':', ' ', '\t')
                 val fileRegex = Regex("""([\w\-\._]+\.txt)""", RegexOption.IGNORE_CASE)
@@ -288,23 +351,16 @@ object ChatCore {
                         val (tpls, keywords) = parseTemplatesFromFile(context, folderUri, filename, synonymsSnapshot, stopwordsSnapshot)
 
                         if (qCanonicalLocal.isNotEmpty()) {
-                            tpls[qCanonicalLocal]?.let { 
-                                lastMatchedKey = qCanonicalLocal
-                                return substitutePlaceholdersWithMemory(it.random()) 
-                            }
+                            tpls[qCanonicalLocal]?.let { return substitutePlaceholdersWithMemory(it.random()) }
                         }
 
                         val rawKey = Engine.filterStopwordsAndMapSynonymsStatic(qFiltered, synonymsSnapshot, stopwordsSnapshot).second
-                        tpls[rawKey]?.let { 
-                            lastMatchedKey = rawKey
-                            return substitutePlaceholdersWithMemory(it.random()) 
-                        }
+                        tpls[rawKey]?.let { return substitutePlaceholdersWithMemory(it.random()) }
 
                         for ((k, v) in keywords) {
                             if (k.isBlank()) continue
                             val kTokens = k.split(" ").filter { it.isNotEmpty() }.toSet()
                             if (qSetLocal.intersect(kTokens).isNotEmpty()) {
-                                lastMatchedKey = k
                                 return substitutePlaceholdersWithMemory(v.random())
                             }
                         }
@@ -320,7 +376,6 @@ object ChatCore {
                             }
                         }
                         if (best != null && bestScore >= dynamicJaccardThreshold) {
-                            lastMatchedKey = best
                             return substitutePlaceholdersWithMemory(tpls[best]?.random() ?: respRaw)
                         }
 
@@ -335,17 +390,13 @@ object ChatCore {
                             }
                         }
                         if (bestLev != null && bestDist <= engine.getFuzzyDistance(qCanonicalLocal)) {
-                            lastMatchedKey = bestLev
                             return substitutePlaceholdersWithMemory(tpls[bestLev]?.random() ?: respRaw)
                         }
 
                         val allResponses = mutableListOf<String>()
                         tpls.values.forEach { allResponses.addAll(it) }
                         keywords.values.forEach { allResponses.addAll(it) }
-                        if (allResponses.isNotEmpty()) {
-                            lastMatchedKey = matchedKey  // Если ничего не нашли, сохраняем предыдущий ключ
-                            return substitutePlaceholdersWithMemory(allResponses.random())
-                        }
+                        if (allResponses.isNotEmpty()) return substitutePlaceholdersWithMemory(allResponses.random())
                     }
                 }
                 return substitutePlaceholdersWithMemory(respRaw)
@@ -360,15 +411,13 @@ object ChatCore {
                 if (qCanonical.isNotEmpty()) {
                     templates[qCanonical]?.let {
                         Log.d(TAG, "Exact (canonical) match in $filename for '$qCanonical'")
-                        lastMatchedKey = qCanonical
-                        return resolvePotentialFileResponse(it.random(), qSet, qCanonical, qCanonical)
+                        return resolvePotentialFileResponse(it.random(), qSet, qCanonical)
                     }
                 }
 
                 templates[qMappedRaw]?.let {
                     Log.d(TAG, "Exact (raw) match in $filename for '$qMappedRaw'")
-                    lastMatchedKey = qMappedRaw
-                    return resolvePotentialFileResponse(it.random(), qSet, qCanonical, qMappedRaw)
+                    return resolvePotentialFileResponse(it.random(), qSet, qCanonical)
                 }
 
                 for ((k, v) in keywords) {
@@ -376,8 +425,7 @@ object ChatCore {
                     val kTokens = k.split(" ").filter { it.isNotEmpty() }.toSet()
                     if (qSet.intersect(kTokens).isNotEmpty()) {
                         Log.d(TAG, "Keyword match in $filename: key='$k' tokens=$kTokens")
-                        lastMatchedKey = k
-                        return resolvePotentialFileResponse(v.random(), qSet, qCanonical, k)
+                        return resolvePotentialFileResponse(v.random(), qSet, qCanonical)
                     }
                 }
 
@@ -393,8 +441,7 @@ object ChatCore {
                 }
                 if (best != null && bestScore >= dynamicJaccardThreshold) {
                     Log.d(TAG, "Jaccard match in $filename: best='$best' score=$bestScore threshold=$dynamicJaccardThreshold")
-                    lastMatchedKey = best
-                    return resolvePotentialFileResponse(templates[best]?.random() ?: "", qSet, qCanonical, best)
+                    return resolvePotentialFileResponse(templates[best]?.random() ?: "", qSet, qCanonical)
                 }
 
                 var bestLev: String? = null
@@ -409,8 +456,7 @@ object ChatCore {
                 }
                 if (bestLev != null && bestDist <= engine.getFuzzyDistance(qCanonical)) {
                     Log.d(TAG, "Levenshtein match in $filename: bestLev='$bestLev' dist=$bestDist fuzzy=${engine.getFuzzyDistance(qCanonical)}")
-                    lastMatchedKey = bestLev
-                    return resolvePotentialFileResponse(templates[bestLev]?.random() ?: "", qSet, qCanonical, bestLev)
+                    return resolvePotentialFileResponse(templates[bestLev]?.random() ?: "", qSet, qCanonical)
                 }
             }
         } catch (e: Exception) {
@@ -435,16 +481,58 @@ object ChatCore {
             Log.w(TAG, "MemoryManager init/load failed (continuing): ${e.message}")
         }
 
+        // --- load context.txt templates (lightweight) ---
+        try {
+            loadContextTemplatesFromFolder(context, folderUri, engine.synonymsMap, engine.stopwords)
+        } catch (e: Exception) {
+            Log.w(TAG, "loadContextTemplatesFromFolder failed: ${e.message}")
+        }
+
         // Normalize & tokens
         val normalized = Engine.normalizeText(userInput)
 
-        // Проверяем, вопрос ли это о контексте
-        if (isContextQuestion(userInput)) {
-            if (lastResponseWasDummy || lastMatchedKey.isNullOrBlank()) {
-                return dummyContextResponses.random()
-            } else {
-                return "Мы говорили про \"$lastMatchedKey\"."
+        // FIX: получаем mapped tokens (те же самые, что использовались при загрузке contextPatterns)
+        val (mappedTokens, mappedRaw) = Engine.filterStopwordsAndMapSynonymsStatic(normalized, engine.synonymsMap, engine.stopwords)
+        val tokens = mappedTokens // use mapped tokens for context pattern matching
+
+        // 1) Try context patterns ({} templates) — if matched, set currentTopic and return response
+        try {
+            for (p in contextPatterns) {
+                val topicMapped = matchContextPattern(p, tokens)
+                if (topicMapped != null) {
+                    // remember in RAM (topic is mapped canonical tokens joined). If you want original surface form,
+                    // you'll need to reconstruct from userInput — currently we store mapped form.
+                    currentTopic = topicMapped
+                    // also save to memory slot 'topic' for persistence if desired
+                    try { MemoryManager.processIncoming(context, topicMapped) } catch (_: Exception) {}
+                    val resp = p.response?.replace("{topic}", topicMapped) ?: "Запомнил тему: $topicMapped"
+                    Log.d(TAG, "Context pattern matched. topic='$topicMapped' -> resp='$resp'")
+                    return resp
+                }
             }
+            // 2) Check recall keys from contextRecallMap
+            if (currentTopic != null && contextRecallMap.isNotEmpty()) {
+                val normForKeyTokens = Engine.filterStopwordsAndMapSynonymsStatic(normalized, engine.synonymsMap, engine.stopwords).first
+                val normForKey = normForKeyTokens.sorted().joinToString(" ")
+                contextRecallMap[normForKey]?.let { templ ->
+                    val result = templ.replace("{topic}", currentTopic ?: "неизвестно")
+                    Log.d(TAG, "Context recall matched key='$normForKey' -> '$result'")
+                    return result
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Context pattern handling failed: ${e.message}")
+        }
+
+        // Memory recall intent
+        try {
+            if (MemoryManager.isRecallIntent(userInput)) {
+                MemoryManager.recallRecentConversation()?.let { recallResp ->
+                    if (recallResp.isNotBlank()) return recallResp
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "MemoryManager recall check failed: ${e.message}")
         }
 
         val normalizedForSearch = normalized
@@ -460,8 +548,6 @@ object ChatCore {
             engine.stopwords,
             jaccardThreshold = Engine.JACCARD_THRESHOLD
         )
-
-        lastResponseWasDummy = resp == null
 
         if (resp != null) {
             try {
@@ -553,29 +639,28 @@ object ChatCore {
             unknown
     }
 
-    // detectContext: used by UI flow to pick context file by keywords (returns context filename or null)
     fun detectContext(input: String, contextMap: Map<String, String>, engine: Engine): String? {
-        try {
-            // Нормализуем и применяем mapping/stopwords — та же pipeline, что использовалась при создании ключей contextMap
-            val (mappedTokens, _) = Engine.filterStopwordsAndMapSynonymsStatic(
-                Engine.normalizeText(input),
-                engine.synonymsMap,
-                engine.stopwords
-            )
+    try {
+        // Нормализуем и применяем mapping/stopwords — та же pipeline, что использовалась при создании ключей contextMap
+        val (mappedTokens, _) = Engine.filterStopwordsAndMapSynonymsStatic(
+            Engine.normalizeText(input),
+            engine.synonymsMap,
+            engine.stopwords
+        )
 
-            if (mappedTokens.isEmpty()) return null
-            val mappedSet = mappedTokens.toSet()
+        if (mappedTokens.isEmpty()) return null
+        val mappedSet = mappedTokens.toSet()
 
-            // Ключи в contextMap ожидаются в canonical форме: tokens sorted (space-separated).
-            return contextMap.maxByOrNull { (k, _) ->
-                if (k.isBlank()) return@maxByOrNull 0
-                val keyTokens = k.split(" ").filter { it.isNotEmpty() }.toSet()
-                // считаем пересечение mappedTokens с токенами ключа
-                mappedSet.count { it in keyTokens }
-            }?.value
-        } catch (e: Exception) {
-            Log.w(TAG, "detectContext failed: ${e.message}")
-            return null
-        }
+        // Ключи в contextMap ожидаются в canonical форме: tokens sorted (space-separated).
+        return contextMap.maxByOrNull { (k, _) ->
+            if (k.isBlank()) return@maxByOrNull 0
+            val keyTokens = k.split(" ").filter { it.isNotEmpty() }.toSet()
+            // считаем пересечение mappedTokens с токенами ключа
+            mappedSet.count { it in keyTokens }
+        }?.value
+    } catch (e: Exception) {
+        Log.w(TAG, "detectContext failed: ${e.message}")
+        return null
+    }
     }
 }
