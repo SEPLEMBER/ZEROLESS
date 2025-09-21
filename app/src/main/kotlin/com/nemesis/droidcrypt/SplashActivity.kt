@@ -1,6 +1,7 @@
-package com.nemesis.droidcrypt
+package com.nemesis.pawstribe
 
 import android.content.Intent
+import android.content.SharedPreferences
 import android.net.Uri
 import android.os.Bundle
 import android.widget.TextView
@@ -35,7 +36,7 @@ class SplashActivity : AppCompatActivity() {
         metadataText = findViewById(R.id.metadataText)
 
         prefs = getSharedPreferences("PawsTribePrefs", MODE_PRIVATE)
-        prefs.getString("folderUri", null)?.let { saved ->
+        prefs.getString("folderUri", null)?.let { saved: String ->
             try {
                 folderUri = Uri.parse(saved)
                 contentResolver.takePersistableUriPermission(
