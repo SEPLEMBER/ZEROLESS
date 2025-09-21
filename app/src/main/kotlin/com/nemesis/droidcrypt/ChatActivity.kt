@@ -122,7 +122,6 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 if (saved != null) folderUri = Uri.parse(saved)
             }
         } catch (e: Exception) {
-            Log.e("ChatActivity", "Error loading folder URI", e)
         }
         
         ChatCore.loadSynonymsAndStopwords(this, folderUri, synonymsMap, stopwords)
