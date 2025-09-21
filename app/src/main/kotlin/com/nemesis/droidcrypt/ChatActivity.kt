@@ -605,7 +605,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                             addChatMessage(currentMascotName, response)
                             recordMemorySideEffect(qOrigRaw)
                             startIdleTimer()
-                            cacheResponse(qKeyForCount, response, cacheable = false
+                            cacheResponse(qKeyForCount, response, cacheable = false)
                         }
                         return@launch
                     }
