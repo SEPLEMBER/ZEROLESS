@@ -1,7 +1,10 @@
 package com.nemesis.droidcrypt
+
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
@@ -33,18 +36,18 @@ class MainActivity : AppCompatActivity() {
         // Отображение процента батареи
         updateBatteryLevel()
 
-        // Случайное приветствие
+        // Случайное приветствие с эффектом печатания
         val greetings = resources.getStringArray(R.array.greetings)
         val randomGreeting = greetings[Random.nextInt(greetings.size)]
-        findViewById<TextView>(R.id.greetingText).text = randomGreeting
+        animateGreeting(randomGreeting)
 
         val startChat = findViewById<MaterialButton>(R.id.startChatButton)
         val openSettings = findViewById<MaterialButton>(R.id.openSettingsButton)
         val setupButton = findViewById<MaterialButton>(R.id.setupButton)
 
         startChat.setOnClickListener {
-            val sharedPrefs = getSharedPreferences("PawsTribePrefs", MODE_PRIVATE)
-            val folderUri = sharedPrefs.getString("folderUri", null)
+            val sharedPrefs = getSharedPreferences("my_prefs", MODE_PRIVATE)
+            val folderUri = sharedPrefs.getString("pref_folder_uri", null)
             if (folderUri != null) {
                 val i = Intent(this@MainActivity, SplashActivity::class.java)
                 startActivity(i)
@@ -84,5 +87,21 @@ class MainActivity : AppCompatActivity() {
                 else -> getColor(R.color.battery_full) // Зелёный (#00FF00)
             }
         )
+    }
+
+    private fun animateGreeting(greeting: String) {
+        val greetingText = findViewById<TextView>(R.id.greetingText)
+        greetingText.text = ""
+        var index = 0
+        val handler = Handler(Looper.getMainLooper())
+        handler.postDelayed(object : Runnable {
+            override fun run() {
+                if (index < greeting.length) {
+                    greetingText.append(greeting[index].toString())
+                    index++
+                    handler.postDelayed(this, 50) // Задержка 50 мс на символ
+                }
+            }
+        }, 500) // Начальная задержка на 500 мс
     }
 }
