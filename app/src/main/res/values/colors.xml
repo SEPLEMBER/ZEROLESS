@@ -3,7 +3,7 @@
     
     <color name="background_black">#0A0A0A</color> 
     <color name="matte_black">#0A0A0A</color> <!-- Матово-чёрный для фона -->
-    <color name="text_green">#00FFFF0</color>
+    <color name="text_green">#00FFFF</color>
     <color name="button_transparent">#00000000</color>
     <color name="card_dark">#232323</color>
 
@@ -20,7 +20,7 @@
 
     <color name="battery_low">#FF4500</color>
     <color name="battery_ok">#FFA500</color>
-    <color name="battery_full">#00FFFF0</color>
+    <color name="battery_full">#00FFFF</color>
 
     <!-- Accents and UI -->
     <color name="neon_accent">#39FF14</color>
