@@ -1,29 +1,42 @@
 package com.nemesis.droidcrypt
 
+import android.animation.ObjectAnimator
+import android.animation.ValueAnimator
 import android.content.Intent
+import android.content.res.ColorStateList
 import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
+import android.graphics.drawable.GradientDrawable
+import android.media.MediaPlayer
 import android.net.Uri
-import android.os.*
+import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.speech.tts.TextToSpeech
+import android.view.Gravity
 import android.view.KeyEvent
 import android.view.MotionEvent
+import android.view.View
+import android.view.ViewGroup
+import android.view.WindowManager
 import android.view.inputmethod.EditorInfo
+import android.widget.AutoCompleteTextView
 import android.widget.ImageButton
+import android.widget.ImageView
+import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.widget.PopupMenu
+import androidx.core.graphics.ColorUtils
+import androidx.core.view.ViewCompat
 import androidx.core.view.isVisible
 import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.lifecycleScope
 import androidx.preference.PreferenceManager
-import androidx.recyclerview.widget.LinearLayoutManager
-import androidx.recyclerview.widget.RecyclerView
-import com.google.android.material.appbar.MaterialToolbar
 import com.google.android.material.progressindicator.LinearProgressIndicator
-import com.google.android.material.textfield.TextInputEditText
-import com.google.android.material.textfield.TextInputLayout
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -31,6 +44,9 @@ import java.util.*
 import kotlin.collections.ArrayList
 import kotlin.collections.HashMap
 import kotlin.collections.set
+import kotlin.math.roundToInt
+
+// Local project classes (assumed present)
 import com.nemesis.droidcrypt.Engine
 import com.nemesis.droidcrypt.ChatCore
 import com.nemesis.droidcrypt.MemoryManager
@@ -46,20 +62,21 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     // Core
     private lateinit var engine: Engine
 
-    // UI
+    // UI (some views optional because layout is simplified)
     private var folderUri: Uri? = null
-    private lateinit var loadingIndicator: LinearProgressIndicator
-    private lateinit var inputContainer: TextInputLayout
-    private lateinit var queryInput: TextInputEditText
+    private var loadingIndicator: LinearProgressIndicator? = null
+    // inputContainer (TextInputLayout) removed in simplified XML -> keep nullable for compatibility
+    // private var inputContainer: TextInputLayout? = null
+    private lateinit var queryInput: AutoCompleteTextView
     private var envelopeInputButton: ImageButton? = null
     private var btnLock: ImageButton? = null
     private var btnTrash: ImageButton? = null
     private var btnEnvelopeTop: ImageButton? = null
     private var btnSettings: ImageButton? = null
     private var btnOverflow: ImageButton? = null
-    private lateinit var topBar: MaterialToolbar
-
-    private lateinit var messagesContainer: LinearLayout
+    // topBar exists in xml but minimal; no MaterialToolbar required
+    // container for messages
+    private lateinit var chatMessagesContainer: LinearLayout
     private lateinit var scrollView: ScrollView
 
     private var tts: TextToSpeech? = null
@@ -93,7 +110,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
     }
 
-    // message store (keeps logical history; UI is messagesContainer)
+    // message store (keeps logical history; UI is chatMessagesContainer)
     private val messages = mutableListOf<ChatMessage>()
 
     private fun canonicalKeyFromTokens(tokens: List<String>): String = tokens.sorted().joinToString(" ")
@@ -114,16 +131,13 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         try { supportActionBar?.setBackgroundDrawable(ColorDrawable(Color.argb(128, 0, 0, 0))) } catch (_: Exception) {}
         window.setBackgroundDrawable(ColorDrawable(Color.BLACK))
 
-        // find views - ensure your layout has these IDs
-        topBar = findViewById(R.id.topBar)
-        topBar.isVisible = false // hide toolbar to keep UI minimal
-
-        messagesContainer = findViewById(R.id.messagesContainer)
-        scrollView = findViewById(R.id.scrollView)
+        // find views - adapted to simplified xml
+        // topBar is a plain LinearLayout in xml
+        // find optional indicator (may be absent)
         loadingIndicator = findViewById(R.id.loadingIndicator)
-        inputContainer = findViewById(R.id.inputContainer)
+        chatMessagesContainer = findViewById(R.id.chatMessagesContainer)
+        scrollView = findViewById(R.id.scrollView)
         queryInput = findViewById(R.id.queryInput)
-
         envelopeInputButton = findViewById(R.id.envelope_button)
         btnLock = findViewById(R.id.btn_lock)
         btnTrash = findViewById(R.id.btn_trash)
@@ -131,8 +145,8 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         btnSettings = findViewById(R.id.btn_settings)
         btnOverflow = findViewById(R.id.btn_overflow)
 
-        // tint loading
-        try { loadingIndicator.setIndicatorColor(Color.parseColor("#00BCD4")) } catch (_: Exception) {}
+        // tint loading if present
+        try { loadingIndicator?.setIndicatorColor(Color.parseColor("#00BCD4")) } catch (_: Exception) {}
 
         // restore persisted folder uri
         folderUri = intent?.getParcelableExtra("folderUri")
@@ -165,12 +179,6 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             if (disable) window.addFlags(WindowManager.LayoutParams.FLAG_SECURE) else window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
         } catch (_: Exception) {}
 
-        // wire end icon (send) in TextInputLayout
-        try {
-            inputContainer.setEndIconOnClickListener { performSendFromInput() }
-            try { inputContainer.endIconDrawable?.setTint(Color.parseColor("#00BCD4")) } catch (_: Exception) {}
-        } catch (_: Exception) {}
-
         // IME action send & Enter behavior
         queryInput.setOnEditorActionListener { _, actionId, event ->
             if (actionId == EditorInfo.IME_ACTION_SEND ||
@@ -180,7 +188,10 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             } else false
         }
 
-        // touch effects
+        // send button (envelope)
+        envelopeInputButton?.setOnClickListener { performSendFromInput() }
+
+        // touch effects (safe no-op when buttons are null)
         setupIconTouchEffect(btnLock)
         setupIconTouchEffect(btnTrash)
         setupIconTouchEffect(btnEnvelopeTop)
@@ -193,21 +204,26 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         btnSettings?.setOnClickListener { startActivity(Intent(this, SettingsActivity::class.java)) }
         btnEnvelopeTop?.setOnClickListener { startActivity(Intent(this, SetupActivity::class.java)) }
 
-        // overflow popup
+        // overflow popup (uses string resources defined earlier)
         btnOverflow?.setOnClickListener { v ->
-            val popup = PopupMenu(this, v)
-            popup.menu.add(0, 1, 0, getString(R.string.menu_clear_chat))
-            popup.menu.add(0, 2, 0, getString(R.string.menu_convert))
-            popup.menu.add(0, 3, 0, getString(R.string.menu_settings))
-            popup.setOnMenuItemClickListener { item ->
-                when (item.itemId) {
-                    1 -> clearChat()
-                    2 -> showCustomToast(getString(R.string.menu_convert_placeholder))
-                    3 -> startActivity(Intent(this, SettingsActivity::class.java))
+            try {
+                val popup = PopupMenu(this, v)
+                // Using strings from resources: ensure these exist in strings.xml
+                popup.menu.add(0, 1, 0, getString(R.string.clear_chat))
+                popup.menu.add(0, 2, 0, getString(R.string.convert))
+                popup.menu.add(0, 3, 0, getString(R.string.settings))
+                popup.setOnMenuItemClickListener { item ->
+                    when (item.itemId) {
+                        1 -> clearChat()
+                        2 -> showCustomToast(getString(R.string.convert))
+                        3 -> startActivity(Intent(this, SettingsActivity::class.java))
+                    }
+                    true
                 }
-                true
+                popup.show()
+            } catch (e: Exception) {
+                showCustomToast(getString(R.string.unknown_command, e.message ?: ""))
             }
-            popup.show()
         }
 
         tts = TextToSpeech(this, this)
@@ -329,13 +345,15 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private fun addChatMessage(sender: String, text: String) {
         lifecycleScope.launch {
             withContext(Dispatchers.Main) {
-                loadingIndicator.isVisible = false
+                loadingIndicator?.isVisible = false
+
                 val row = LinearLayout(this@ChatActivity).apply {
                     orientation = LinearLayout.HORIZONTAL
                     val pad = dpToPx(6)
                     setPadding(pad, pad / 2, pad, pad / 2)
                     layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
                 }
+
                 val isUser = sender.equals(getString(R.string.user_label), ignoreCase = true)
                 if (isUser) {
                     val bubble = createMessageBubble(sender, text, true)
@@ -354,8 +372,8 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                         loadAvatarInto(this, sender)
                         setOnClickListener { view ->
                             view.isEnabled = false
-                            val scaleX = android.animation.ObjectAnimator.ofFloat(view, "scaleX", 1f, 1.08f, 1f)
-                            val scaleY = android.animation.ObjectAnimator.ofFloat(view, "scaleY", 1f, 1.08f, 1f)
+                            val scaleX = ObjectAnimator.ofFloat(view, "scaleX", 1f, 1.08f, 1f)
+                            val scaleY = ObjectAnimator.ofFloat(view, "scaleY", 1f, 1.08f, 1f)
                             scaleX.duration = 250; scaleY.duration = 250
                             scaleX.start(); scaleY.start()
                             Handler(Looper.getMainLooper()).postDelayed({
@@ -370,13 +388,14 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     row.addView(avatarView)
                     row.addView(bubble, bubbleLp)
                 }
-                messagesContainer.addView(row)
-                messagesContainer.findViewWithTag<View>("typingView")?.let { messagesContainer.removeView(it) }
-                if (messagesContainer.childCount > Engine.MAX_MESSAGES) {
-                    val removeCount = messagesContainer.childCount - Engine.MAX_MESSAGES
-                    repeat(removeCount) { messagesContainer.removeViewAt(0) }
+
+                chatMessagesContainer.addView(row)
+                chatMessagesContainer.findViewWithTag<View>("typingView")?.let { chatMessagesContainer.removeView(it) }
+                if (chatMessagesContainer.childCount > Engine.MAX_MESSAGES) {
+                    val removeCount = chatMessagesContainer.childCount - Engine.MAX_MESSAGES
+                    repeat(removeCount) { chatMessagesContainer.removeViewAt(0) }
                 }
-                scrollView.post { scrollView.smoothScrollTo(0, messagesContainer.bottom) }
+                scrollView.post { scrollView.smoothScrollTo(0, chatMessagesContainer.bottom) }
                 if (!isUser) playNotificationSound()
                 messages.add(ChatMessage(sender, text))
             }
@@ -385,7 +404,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private fun showTypingIndicator() {
         runOnUiThread {
-            val existing = messagesContainer.findViewWithTag<TextView>("typingView")
+            val existing = chatMessagesContainer.findViewWithTag<TextView>("typingView")
             if (existing != null) return@runOnUiThread
 
             val typingView = TextView(this).apply {
@@ -401,8 +420,8 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 }
             }
 
-            messagesContainer.addView(typingView)
-            scrollView.post { scrollView.smoothScrollTo(0, messagesContainer.bottom) }
+            chatMessagesContainer.addView(typingView)
+            scrollView.post { scrollView.smoothScrollTo(0, chatMessagesContainer.bottom) }
 
             val anim = ValueAnimator.ofFloat(4f, 12f).apply {
                 duration = 800
@@ -417,7 +436,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             }
 
             Handler(Looper.getMainLooper()).postDelayed({
-                messagesContainer.findViewWithTag<View>("typingView")?.let { messagesContainer.removeView(it) }
+                chatMessagesContainer.findViewWithTag<View>("typingView")?.let { chatMessagesContainer.removeView(it) }
                 try { anim.cancel() } catch (_: Exception) {}
             }, (1000..3000).random().toLong())
         }
@@ -435,7 +454,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private fun clearChat() {
         lifecycleScope.launch {
             withContext(Dispatchers.Main) {
-                messagesContainer.removeAllViews()
+                chatMessagesContainer.removeAllViews()
                 queryTimestamps.clear()
                 queryCache.clear()
                 currentContext = "base.txt"
@@ -469,7 +488,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     }
 
     private fun updateAutoComplete() {
-        // kept intentionally minimal for MD2 compatibility
+        // Minimal: keep for future; current layout uses AutoCompleteTextView which can be wired later.
     }
 
     private fun loadTemplatesFromFile(filename: String) {
@@ -632,8 +651,8 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         lifecycleScope.launch {
             withContext(Dispatchers.Main) {
                 try { title = getString(R.string.app_title_prefix, mascotName) } catch (_: Exception) {}
-                try { messagesContainer.setBackgroundColor(Color.parseColor(themeBackground)) } catch (_: Exception) {}
-                try { inputContainer.endIconTintList = ColorStateList.valueOf(safeParseColorOrDefault(themeColor, Color.parseColor("#00BCD4"))) } catch (_: Exception) {}
+                try { chatMessagesContainer.setBackgroundColor(Color.parseColor(themeBackground)) } catch (_: Exception) {}
+                // no TextInputLayout in simplified layout; skip endIcon tinting
             }
         }
     }
@@ -653,7 +672,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
     }
 
-    // Core logic preserved
+    // Core logic preserved (no changes)...
     private fun processUserQuery(userInput: String) {
         if (userInput.startsWith("/")) {
             handleCommand(userInput.trim())
