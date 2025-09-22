@@ -135,11 +135,10 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
         
          try {
-            val prefs = PreferenceManager.getDefaultSharedPreferences(this)
-            val disable = prefs.getBoolean(PREF_KEY_DISABLE_SCREENSHOTS, false)
-            if (disable) window.addFlags(WindowManager.LayoutParams.FLAG_SECURE) else window.clearFlags(
-                WindowManager.LayoutParams.FLAG_SECURE
-            )
+         val prefs = getSharedPreferences("PawsTribePrefs", MODE_PRIVATE)
+         val disable = prefs.getBoolean("disableScreenshots", false)
+         if (disable) window.addFlags(WindowManager.LayoutParams.FLAG_SECURE) else window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        }
         } catch (e: Exception) {
         }
 
