@@ -18,7 +18,6 @@ import java.io.InputStreamReader
 import com.nemesis.droidcrypt.R
 import com.nemesis.droidcrypt.ChatActivity
 
-
 class SplashActivity : AppCompatActivity() {
     private lateinit var prefs: SharedPreferences
     private var folderUri: Uri? = null
@@ -54,11 +53,10 @@ class SplashActivity : AppCompatActivity() {
         // Устанавливаем статус "Подключение..."
         statusText.text = getString(R.string.connecting)
 
-        // Асинхронно загружаем метаданные
+        // Асинхронно загружаем метаданные только для UI_metadata.txt
         lifecycleScope.launch {
-            val engineMeta = loadTextFromSAF("engine_metadata.txt")
             val uiMeta = loadTextFromSAF("UI_metadata.txt")
-            metadataText.text = (engineMeta + "\n" + uiMeta).trim()
+            metadataText.text = uiMeta.trim()
         }
 
         // Переход в ChatActivity через 50 мс
