@@ -1,12 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    
-    <color name="background_black">#000000</color> 
-    <color name="matte_black">#0A0A0A</color> <!-- Матово-чёрный для фона -->
-    <color name="text_green">#00FF00</color>
-    <color name="button_transparent">#00000000</color>
+    <!-- Базовые фоны -->
+    <color name="background_black">#000000</color>
+    <color name="matte_black">#0A0A0A</color> <!-- Матово-чёрный -->
     <color name="card_dark">#0A0A0A</color>
+    <color name="chat_area_bg">#040404</color>
+    <color name="input_bg">#070707</color>
+    <color name="bubble_bg">#0B0B0D</color>
 
+    <!-- Основные акценты -->
+    <color name="text_green">#00FF00</color>
+    <color name="neon_accent">#39FF14</color> <!-- Ярко-зелёный -->
+    <color name="neon_cyan">#00FFFF</color>   <!-- Голубой для бликов -->
+    <color name="typing_orange">#FFA500</color>
+
+    <!-- Цвета для подсказок / маскотов -->
     <color name="mascot_racky_text">#00FF00</color>
     <color name="mascot_racky_background">#000000</color>
     <color name="mascot_wise_text">#FFD700</color>
@@ -18,25 +26,16 @@
     <color name="mascot_crow_text">#800080</color>
     <color name="mascot_crow_background">#000000</color>
 
-    <color name="battery_low">#FF4500</color> <!-- Красный при низком заряде (≤20%) -->
-    <color name="battery_ok">#FFA500</color>  <!-- Оранжевый при среднем заряде (≤40%) -->
-    <color name="battery_full">#00FF00</color> <!-- Зелёный при высоком заряде (>40%) -->
+    <!-- Батарея -->
+    <color name="battery_low">#FF4500</color>  <!-- ≤20% -->
+    <color name="battery_ok">#FFA500</color>   <!-- ≤40% -->
+    <color name="battery_full">#00FF00</color> <!-- >40% -->
 
-    <!-- Accents and UI -->
-    <color name="neon_accent">#39FF14</color>
-    <color name="bubble_bg">#0B0B0D</color>
-    <color name="chat_area_bg">#040404</color>
-    <color name="input_bg">#070707</color>
-
-    <!-- Popup background for autocomplete -->
+    <!-- Popup -->
     <color name="popup_bg">#80000000</color>
 
-    <!-- Orange color for typing indicator -->
-    <color name="typing_orange">#FFA500</color>
-
-    <!-- Цвета для неоновой обводки кнопок -->
-    <color name="neon_pink">#FF00FF</color> <!-- Для кнопки "Установить" -->
-    <color name="neon_brown">#8B4513</color> <!-- Для кнопки "Открыть чат" -->
-    <color name="neon_blue">#4682B4</color> <!-- Для кнопки "Настройки" -->
-    <color name="neon_cyan">#00FFFF</color> <!-- Для текста приветствия и ripple-эффекта -->
+    <!-- Дополнительные «неоновые» цвета для кнопок -->
+    <color name="neon_pink">#FF00FF</color>
+    <color name="neon_brown">#8B4513</color>
+    <color name="neon_blue">#4682B4</color>
 </resources>
