@@ -6,6 +6,7 @@ import androidx.documentfile.provider.DocumentFile
 import com.nemesis.droidcrypt.Engine
 import com.nemesis.droidcrypt.MemoryManager
 import java.io.InputStreamReader
+import com.nemesis.droidcrypt.R
 import java.util.Locale
 
 object ChatCore {
