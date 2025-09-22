@@ -22,63 +22,72 @@
         android:layout_height="wrap_content"
         android:textColor="@color/neon_cyan"
         android:textSize="24sp"
+        android:foreground="@android:drawable/shadow_popup"
+        android:elevation="4dp"
         android:layout_marginBottom="48dp"
-        app:layout_constraintBottom_toTopOf="@id/buttonContainer"
+        app:layout_constraintBottom_toTopOf="@id/startChatButton"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent" />
 
-    <LinearLayout
-        android:id="@+id/buttonContainer"
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/startChatButton"
         android:layout_width="0dp"
-        android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:gravity="center"
+        android:layout_height="56dp"
+        android:text="@string/start_chat"
+        android:textColor="@android:color/white"
+        android:textSize="18sp"
+        app:strokeColor="@color/neon_pink"
+        app:strokeWidth="2dp"
+        app:backgroundTint="@color/matte_black"
+        app:cornerRadius="8dp"
+        app:rippleColor="@color/neon_cyan"
+        android:layout_margin="16dp"
         app:layout_constraintWidth_percent="0.85"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintTop_toTopOf="parent"
-        app:layout_constraintBottom_toBottomOf="parent">
+        app:layout_constraintBottom_toBottomOf="parent" />
 
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/setupButton"
-            android:layout_width="match_parent"
-            android:layout_height="56dp"
-            android:text="@string/setup"
-            android:textColor="@android:color/white"
-            android:textSize="18sp"
-            app:strokeColor="@color/neon_pink"
-            app:strokeWidth="2dp"
-            app:backgroundTint="@color/matte_black"
-            app:cornerRadius="8dp"
-            app:rippleColor="@color/neon_cyan"
-            android:layout_margin="16dp" />
+    <TextView
+        android:id="@+id/versionText"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="VERSION ENGINE 0.04"
+        android:textColor="@color/neon_cyan"
+        android:textSize="14sp"
+        android:layout_marginStart="16dp"
+        android:layout_marginBottom="16dp"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintBottom_toBottomOf="parent" />
 
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/startChatButton"
-            android:layout_width="match_parent"
-            android:layout_height="56dp"
-            android:text="@string/start_chat"
-            android:textColor="@android:color/white"
-            android:textSize="18sp"
-            app:strokeColor="@color/neon_brown"
-            app:strokeWidth="2dp"
-            app:backgroundTint="@color/matte_black"
-            app:cornerRadius="8dp"
-            app:rippleColor="@color/neon_cyan"
-            android:layout_margin="16dp" />
+    <TextView
+        android:id="@+id/setupText"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="@string/setup"
+        android:textColor="@color/neon_cyan"
+        android:textSize="14sp"
+        android:padding="8dp"
+        android:clickable="true"
+        android:focusable="true"
+        android:layout_marginEnd="16dp"
+        android:layout_marginBottom="16dp"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintBottom_toBottomOf="parent" />
 
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/openSettingsButton"
-            android:layout_width="match_parent"
-            android:layout_height="56dp"
-            android:text="@string/open_settings"
-            android:textColor="@android:color/white"
-            android:textSize="18sp"
-            app:strokeColor="@color/neon_blue"
-            app:strokeWidth="2dp"
-            app:backgroundTint="@color/matte_black"
-            app:cornerRadius="8dp"
-            app:rippleColor="@color/neon_cyan"
-            android:layout_margin="16dp" />
-    </LinearLayout>
+    <TextView
+        android:id="@+id/settingsText"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="@string/open_settings"
+        android:textColor="@color/neon_cyan"
+        android:textSize="14sp"
+        android:padding="8dp"
+        android:clickable="true"
+        android:focusable="true"
+        android:layout_marginEnd="16dp"
+        android:layout_marginBottom="48dp"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintBottom_toTopOf="@id/setupText" />
+
 </androidx.constraintlayout.widget.ConstraintLayout>
