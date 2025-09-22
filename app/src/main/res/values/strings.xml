@@ -36,13 +36,11 @@
     <string name="screenshots_disabled">Скриншоты запрещены</string>
     <string name="screenshots_enabled">Скриншоты разрешены</string>
     <string name="folder_unavailable">Ошибка: папка недоступна</string>
-    <resources>
     <string name="menu">Меню</string>
     <string name="hint_message">Введите сообщение...</string>
     <string name="clear_chat">Очистить чат</string>
     <string name="convert">Конверт</string>
     <string name="settings">Настройки</string>
-</resources>
     
     <!-- Диалоговые сообщения -->
     <string name="welcome_message">Добро пожаловать!</string>
