@@ -4,20 +4,59 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
-    android:background="@color/background_black"
+    android:background="@color/matte_black"
     android:padding="8dp">
 
     <!-- Top bar: Battery icon + percentage (left), time (center), icons (right) -->
     <LinearLayout
         android:id="@+id/topBar"
         android:layout_width="match_parent"
-        android:layout_height="68dp"
+        android:layout_height="72dp"
         android:orientation="horizontal"
         android:gravity="center_vertical"
         android:weightSum="3"
         android:paddingStart="8dp"
         android:paddingEnd="8dp"
-        android:background="@color/card_dark">
+        android:background="@color/matte_dark">
+
+        <!-- Left section: Battery icon and percentage -->
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:orientation="horizontal"
+            android:gravity="center_vertical|start">
+
+            <ImageView
+                android:id="@+id/battery_image"
+                android:layout_width="56dp"
+                android:layout_height="56dp"
+                android:scaleType="fitCenter"
+                android:adjustViewBounds="true"
+                android:contentDescription="@string/battery" />
+
+            <TextView
+                android:id="@+id/battery_percent"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="-"
+                android:textColor="@color/neon_cyan"
+                android:textSize="16sp"
+                android:layout_marginStart="8dp"
+                android:fontFamily="monospace" />
+        </LinearLayout>
+
+        <!-- Centered time -->
+        <TextView
+            android:id="@+id/time_text"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:text="PAWSTRIBE"
+            android:textColor="@color/neon_cyan"
+            android:textSize="20sp"
+            android:gravity="center"
+            android:fontFamily="monospace" />
 
         <!-- Right section: Icons -->
         <LinearLayout
@@ -29,8 +68,8 @@
 
             <ImageButton
                 android:id="@+id/info_icon_button"
-                android:layout_width="52dp"
-                android:layout_height="52dp"
+                android:layout_width="56dp"
+                android:layout_height="56dp"
                 android:layout_marginStart="6dp"
                 android:background="?attr/selectableItemBackgroundBorderless"
                 android:contentDescription="@string/info"
@@ -39,8 +78,8 @@
 
             <ImageButton
                 android:id="@+id/btn_lock"
-                android:layout_width="50dp"
-                android:layout_height="50dp"
+                android:layout_width="56dp"
+                android:layout_height="56dp"
                 android:layout_marginStart="6dp"
                 android:background="?attr/selectableItemBackgroundBorderless"
                 android:contentDescription="@string/lock"
@@ -49,8 +88,8 @@
 
             <ImageButton
                 android:id="@+id/btn_trash"
-                android:layout_width="52dp"
-                android:layout_height="52dp"
+                android:layout_width="56dp"
+                android:layout_height="56dp"
                 android:layout_marginStart="6dp"
                 android:background="?attr/selectableItemBackgroundBorderless"
                 android:contentDescription="@string/trash"
@@ -59,8 +98,8 @@
 
             <ImageButton
                 android:id="@+id/btn_envelope_top"
-                android:layout_width="52dp"
-                android:layout_height="52dp"
+                android:layout_width="56dp"
+                android:layout_height="56dp"
                 android:layout_marginStart="6dp"
                 android:background="?attr/selectableItemBackgroundBorderless"
                 android:contentDescription="@string/envelope"
@@ -69,8 +108,8 @@
 
             <ImageButton
                 android:id="@+id/btn_settings"
-                android:layout_width="52dp"
-                android:layout_height="52dp"
+                android:layout_width="56dp"
+                android:layout_height="56dp"
                 android:layout_marginStart="6dp"
                 android:background="?attr/selectableItemBackgroundBorderless"
                 android:contentDescription="@string/settings"
@@ -79,8 +118,8 @@
 
             <ImageButton
                 android:id="@+id/btn_charging"
-                android:layout_width="52dp"
-                android:layout_height="52dp"
+                android:layout_width="56dp"
+                android:layout_height="56dp"
                 android:layout_marginStart="6dp"
                 android:background="?attr/selectableItemBackgroundBorderless"
                 android:contentDescription="@string/charging"
@@ -97,7 +136,7 @@
         android:layout_height="0dp"
         android:layout_weight="1"
         android:fillViewport="true"
-        android:background="@color/chat_area_bg"
+        android:background="@color/matte_black"
         android:padding="8dp">
 
         <LinearLayout
@@ -114,7 +153,7 @@
         android:orientation="horizontal"
         android:gravity="center_vertical"
         android:paddingTop="8dp"
-        android:background="@color/input_bg"
+        android:background="@color/matte_black"
         android:padding="8dp">
 
         <AutoCompleteTextView
@@ -123,8 +162,8 @@
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:hint="@string/inp_text"
-            android:textColor="@color/mascot_racky_text"
-            android:textColorHint="@color/mascot_racky_text"
+            android:textColor="@color/neon_cyan"
+            android:textColorHint="@color/neon_cyan"
             android:background="@android:color/transparent"
             android:padding="8dp"
             android:inputType="textMultiLine"
