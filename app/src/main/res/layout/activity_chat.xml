@@ -65,7 +65,7 @@
             android:gravity="center_vertical|end">
 
             <ImageButton
-                android:id="@+id/btn_overflow"
+                android:id="@+id/btn_settings"
                 android:layout_width="40dp"
                 android:layout_height="40dp"
                 android:background="?attr/selectableItemBackgroundBorderless"
@@ -92,7 +92,15 @@
             android:orientation="vertical" />
     </ScrollView>
 
-    <!-- Поле ввода -->
+    <!-- Индикатор загрузки -->
+    <ProgressBar
+        android:id="@+id/loadingIndicator"
+        android:layout_width="40dp"
+        android:layout_height="40dp"
+        android:layout_gravity="center"
+        android:visibility="gone" />
+
+    <!-- Поле ввода + кнопки -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -125,6 +133,30 @@
             android:contentDescription="@string/send"
             android:src="@android:drawable/ic_menu_send"
             android:scaleType="centerInside" />
+
+        <ImageButton
+            android:id="@+id/btn_lock"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:src="@android:drawable/ic_lock_lock"
+            android:contentDescription="@string/lock" />
+
+        <ImageButton
+            android:id="@+id/btn_trash"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:src="@android:drawable/ic_menu_delete"
+            android:contentDescription="@string/clear_chat" />
+
+        <ImageButton
+            android:id="@+id/btn_envelope_top"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:src="@android:drawable/ic_menu_send"
+            android:contentDescription="@string/send" />
     </LinearLayout>
 
 </LinearLayout>
