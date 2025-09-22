@@ -4,7 +4,7 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
-    android:background="@color/matte_blackk"
+    android:background="@color/matte_black"
     android:padding="8dp">
 
     <!-- Top bar: Battery icon + percentage (left), time (center), icons (right) -->
