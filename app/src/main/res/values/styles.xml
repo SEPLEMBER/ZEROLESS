@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!-- Основная тема -->
     <style name="AppTheme" parent="Theme.MaterialComponents.DayNight.NoActionBar">
         <item name="android:windowBackground">@color/matte_black</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
@@ -11,16 +12,19 @@
         <item name="colorOnSecondary">@color/matte_black</item>
     </style>
 
+    <!-- Для splash -->
     <style name="SplashTheme" parent="AppTheme">
         <item name="android:windowBackground">@color/matte_black</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
     </style>
 
+    <!-- Для экрана установки -->
     <style name="SetupTheme" parent="AppTheme">
         <item name="android:windowBackground">@color/matte_black</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
     </style>
 
+    <!-- Для настроек -->
     <style name="SettingsTheme" parent="AppTheme">
         <item name="android:windowBackground">@color/matte_black</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
