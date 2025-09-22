@@ -24,6 +24,8 @@ import androidx.preference.PreferenceManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.InputStreamReader
+import java.text.Normalizer
 import java.util.*
 import kotlin.collections.ArrayList
 import kotlin.collections.HashMap
@@ -82,8 +84,52 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private fun canonicalKeyFromTokens(tokens: List<String>): String = tokens.sorted().joinToString(" ")
     private fun canonicalKeyFromTextStatic(text: String, synonyms: Map<String, String>, stopwords: Set<String>): String {
-        val toks = Engine.filterStopwordsAndMapSynonymsStatic(text, synonyms, stopwords).first
+        val normalized = normalizeForProcessing(text)
+        val toks = Engine.filterStopwordsAndMapSynonymsStatic(normalized, synonyms, stopwords).first
         return canonicalKeyFromTokens(toks)
+    }
+
+    // Normalize unicode and unify whitespace for downstream processing
+    private fun normalizeForProcessing(s: String): String {
+        val norm = Normalizer.normalize(s, Normalizer.Form.NFC)
+        return norm.replace(Regex("\\s+"), " ").trim()
+    }
+
+    // Basic script-based language hint (best-effort)
+    private fun detectLanguageTagByScript(text: String): String {
+        val t = text.trim()
+        if (t.isEmpty()) return Locale.getDefault().language
+        val counts = mapOf(
+            "CYRILLIC" to Regex("\\p{InCyrillic}").findAll(t).count(),
+            "LATIN" to Regex("\\p{IsLatin}").findAll(t).count(),
+            "HAN" to Regex("\\p{IsHan}").findAll(t).count(),
+            "HIRAGANA" to Regex("\\p{IsHiragana}").findAll(t).count(),
+            "KATAKANA" to Regex("\\p{IsKatakana}").findAll(t).count()
+        )
+        val maxEntry = counts.maxByOrNull { it.value } ?: return Locale.getDefault().language
+        return when (maxEntry.key) {
+            "CYRILLIC" -> "ru"
+            "LATIN" -> "en"
+            "HAN" -> "zh"
+            "HIRAGANA", "KATAKANA" -> "ja"
+            else -> Locale.getDefault().language
+        }
+    }
+
+    private fun setTTSLanguageForText(text: String) {
+        try {
+            val langTag = detectLanguageTagByScript(text)
+            val loc = Locale.forLanguageTag(langTag)
+            val available = tts?.isLanguageAvailable(loc) ?: TextToSpeech.LANG_NOT_SUPPORTED
+            if (available >= TextToSpeech.LANG_AVAILABLE) {
+                tts?.language = loc
+            } else {
+                // fallback to system default
+                tts?.language = Locale.getDefault()
+            }
+        } catch (_: Exception) {
+            try { tts?.language = Locale.getDefault() } catch (_: Exception) {}
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -114,8 +160,8 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 }
             }
         }
-        
-    try {
+
+        try {
             val prefs = PreferenceManager.getDefaultSharedPreferences(this)
             if (folderUri == null) {
                 val saved = prefs.getString(PREF_KEY_FOLDER_URI, null)
@@ -123,7 +169,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             }
         } catch (e: Exception) {
         }
-        
+
         ChatCore.loadSynonymsAndStopwords(this, folderUri, synonymsMap, stopwords)
 
         engine = Engine(templatesMap, synonymsMap, stopwords)
@@ -133,11 +179,11 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             MemoryManager.loadTemplatesFromFolder(this, folderUri)
         } catch (e: Exception) {
         }
-        
-         try {
-         val prefs = getSharedPreferences("PawsTribePrefs", MODE_PRIVATE)
-         val disable = prefs.getBoolean("disableScreenshots", false)
-         if (disable) window.addFlags(WindowManager.LayoutParams.FLAG_SECURE) else window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+
+        try {
+            val prefs = getSharedPreferences("PawsTribePrefs", MODE_PRIVATE)
+            val disable = prefs.getBoolean("disableScreenshots", false)
+            if (disable) window.addFlags(WindowManager.LayoutParams.FLAG_SECURE) else window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
         } catch (e: Exception) {
         }
 
@@ -220,7 +266,10 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     override fun onInit(status: Int) {
         if (status == TextToSpeech.SUCCESS) {
-            tts?.language = Locale("ru", "RU")
+            // start with system default, we'll switch per-text when speaking
+            try {
+                tts?.language = Locale.getDefault()
+            } catch (_: Exception) { }
             tts?.setPitch(1.0f)
             tts?.setSpeechRate(1.0f)
         } else {
@@ -582,7 +631,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     }
                 }
 
-            var bestLocalKey: String? = null
+                var bestLocalKey: String? = null
                 var bestLocalDist = Int.MAX_VALUE
                 for (key in localCandidates) {
                     val maxD = engine.getFuzzyDistance(qCanonical)
@@ -681,7 +730,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     }
 
     private fun handleCommand(cmdRaw: String) {
-        val cmd = cmdRaw.trim().lowercase(Locale.getDefault())
+        val cmd = cmdRaw.trim().lowercase(Locale.ROOT)
         when {
             cmd == "/reload" -> {
                 addChatMessage(currentMascotName, getString(R.string.reloading_templates))
@@ -820,6 +869,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     }
 
     private fun speakText(text: String) {
+        setTTSLanguageForText(text)
         tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "message_${System.currentTimeMillis()}")
     }
 
@@ -827,14 +877,17 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         val uri = folderUri ?: return
         try {
             val dir = DocumentFile.fromTreeUri(this, uri) ?: return
-            val mascotOuch = dir.findFile("${mascot.lowercase(Locale.getDefault())}.txt") ?: dir.findFile("ouch.txt")
+            val mascotFilename = "${mascot.lowercase(Locale.ROOT)}.txt"
+            val mascotOuch = dir.findFile(mascotFilename) ?: dir.findFile("ouch.txt")
             if (mascotOuch != null && mascotOuch.exists()) {
-                contentResolver.openInputStream(mascotOuch.uri)?.bufferedReader()?.use { reader ->
-                    val allText = reader.readText()
-                    val responses = allText.split("|").map { it.trim() }.filter { it.isNotEmpty() }
-                    if (responses.isNotEmpty()) {
-                        val randomResponse = responses.random()
-                        addChatMessage(mascot, randomResponse)
+                contentResolver.openInputStream(mascotOuch.uri)?.use { ins ->
+                    InputStreamReader(ins, Charsets.UTF_8).buffered().use { reader ->
+                        val allText = reader.readText()
+                        val responses = allText.split("|").map { it.trim() }.filter { it.isNotEmpty() }
+                        if (responses.isNotEmpty()) {
+                            val randomResponse = responses.random()
+                            addChatMessage(mascot, randomResponse)
+                        }
                     }
                 }
             }
@@ -914,7 +967,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         val uri = folderUri ?: return
         try {
             val dir = DocumentFile.fromTreeUri(this, uri) ?: return
-            val s = sender.lowercase(Locale.getDefault())
+            val s = sender.lowercase(Locale.ROOT)
             val candidates = listOf("${s}_icon.png", "${s}_avatar.png", "${s}.png", currentMascotIcon)
             for (name in candidates) {
                 val f = dir.findFile(name) ?: continue
@@ -988,79 +1041,83 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
                 return
             }
-            contentResolver.openInputStream(file.uri)?.bufferedReader()?.use { reader ->
-                reader.forEachLine { raw ->
-                    val l = raw.trim()
-                    if (l.isEmpty()) return@forEachLine
-                    if (filename == "base.txt" && l.startsWith(":") && l.endsWith(":")) {
-                        val contextLine = l.substring(1, l.length - 1)
-                        if (contextLine.contains("=")) {
-                            val parts = contextLine.split("=", limit = 2)
-                            if (parts.size == 2) {
-                                val keyword = parts[0].trim()
-                                val contextFile = parts[1].trim()
-                                if (keyword.isNotEmpty() && contextFile.isNotEmpty()) {
-                                    val keyCanon = canonicalKeyFromTextStatic(keyword, synonymsMap, stopwords)
-                                    if (keyCanon.isNotEmpty()) contextMap[keyCanon] = contextFile
+            contentResolver.openInputStream(file.uri)?.use { ins ->
+                InputStreamReader(ins, Charsets.UTF_8).buffered().use { reader ->
+                    reader.forEachLine { raw ->
+                        val l = raw.trim()
+                        if (l.isEmpty()) return@forEachLine
+                        if (filename == "base.txt" && l.startsWith(":" ) && l.endsWith(":")) {
+                            val contextLine = l.substring(1, l.length - 1)
+                            if (contextLine.contains("=")) {
+                                val parts = contextLine.split("=", limit = 2)
+                                if (parts.size == 2) {
+                                    val keyword = parts[0].trim()
+                                    val contextFile = parts[1].trim()
+                                    if (keyword.isNotEmpty() && contextFile.isNotEmpty()) {
+                                        val keyCanon = canonicalKeyFromTextStatic(keyword, synonymsMap, stopwords)
+                                        if (keyCanon.isNotEmpty()) contextMap[keyCanon] = contextFile
+                                    }
                                 }
                             }
+                            return@forEachLine
                         }
-                        return@forEachLine
-                    }
-                    if (l.startsWith("-")) {
-                        val keywordLine = l.substring(1)
-                        if (keywordLine.contains("=")) {
-                            val parts = keywordLine.split("=", limit = 2)
-                            if (parts.size == 2) {
-                                val keyword = parts[0].trim()
-                                val responses = parts[1].split("|")
-                                val responseList = responses.mapNotNull { it.trim().takeIf { s -> s.isNotEmpty() } }.toMutableList()
-                                if (keyword.isNotEmpty() && responseList.isNotEmpty()) {
-                                    val keyCanon = canonicalKeyFromTextStatic(keyword, synonymsMap, stopwords)
-                                    if (keyCanon.isNotEmpty()) keywordResponses[keyCanon] = responseList
+                        if (l.startsWith("-")) {
+                            val keywordLine = l.substring(1)
+                            if (keywordLine.contains("=")) {
+                                val parts = keywordLine.split("=", limit = 2)
+                                if (parts.size == 2) {
+                                    val keyword = parts[0].trim()
+                                    val responses = parts[1].split("|")
+                                    val responseList = responses.mapNotNull { it.trim().takeIf { s -> s.isNotEmpty() } }.toMutableList()
+                                    if (keyword.isNotEmpty() && responseList.isNotEmpty()) {
+                                        val keyCanon = canonicalKeyFromTextStatic(keyword, synonymsMap, stopwords)
+                                        if (keyCanon.isNotEmpty()) keywordResponses[keyCanon] = responseList
+                                    }
                                 }
                             }
+                            return@forEachLine
                         }
-                        return@forEachLine
-                    }
-                    if (!l.contains("=")) return@forEachLine
-                    val parts = l.split("=", limit = 2)
-                    if (parts.size == 2) {
-                        val triggerRaw = parts[0].trim()
-                        val triggerTokens = Engine.filterStopwordsAndMapSynonymsStatic(triggerRaw, synonymsMap, stopwords).first
-                        val triggerCanonical = triggerTokens.sorted().joinToString(" ")
-                        val responses = parts[1].split("|")
-                        val responseList = responses.mapNotNull { it.trim().takeIf { s -> s.isNotEmpty() } }.toMutableList()
-                        if (triggerCanonical.isNotEmpty() && responseList.isNotEmpty()) templatesMap[triggerCanonical] = responseList
+                        if (!l.contains("=")) return@forEachLine
+                        val parts = l.split("=", limit = 2)
+                        if (parts.size == 2) {
+                            val triggerRaw = parts[0].trim()
+                            val triggerTokens = Engine.filterStopwordsAndMapSynonymsStatic(normalizeForProcessing(triggerRaw), synonymsMap, stopwords).first
+                            val triggerCanonical = triggerTokens.sorted().joinToString(" ")
+                            val responses = parts[1].split("|")
+                            val responseList = responses.mapNotNull { it.trim().takeIf { s -> s.isNotEmpty() } }.toMutableList()
+                            if (triggerCanonical.isNotEmpty() && responseList.isNotEmpty()) templatesMap[triggerCanonical] = responseList
+                        }
                     }
                 }
             }
             val metadataFilename = filename.replace(".txt", "_metadata.txt")
             val metadataFile = dir.findFile(metadataFilename)
             if (metadataFile != null && metadataFile.exists()) {
-                contentResolver.openInputStream(metadataFile.uri)?.bufferedReader()?.use { reader ->
-                    reader.forEachLine { raw ->
-                        val line = raw.trim()
-                        when {
-                            line.startsWith("mascot_list=") -> {
-                                val mascots = line.substring("mascot_list=".length).split("|")
-                                for (mascot in mascots) {
-                                    val parts = mascot.split(":")
-                                    if (parts.size == 4) {
-                                        val mascotData = mapOf(
-                                            "name" to parts[0].trim(),
-                                            "icon" to parts[1].trim(),
-                                            "color" to parts[2].trim(),
-                                            "background" to parts[3].trim()
-                                        )
-                                        mascotList.add(mascotData)
+                contentResolver.openInputStream(metadataFile.uri)?.use { ins ->
+                    InputStreamReader(ins, Charsets.UTF_8).buffered().use { reader ->
+                        reader.forEachLine { raw ->
+                            val line = raw.trim()
+                            when {
+                                line.startsWith("mascot_list=") -> {
+                                    val mascots = line.substring("mascot_list=".length).split("|")
+                                    for (mascot in mascots) {
+                                        val parts = mascot.split(":")
+                                        if (parts.size == 4) {
+                                            val mascotData = mapOf(
+                                                "name" to parts[0].trim(),
+                                                "icon" to parts[1].trim(),
+                                                "color" to parts[2].trim(),
+                                                "background" to parts[3].trim()
+                                            )
+                                            mascotList.add(mascotData)
+                                        }
                                     }
                                 }
+                                line.startsWith("mascot_name=") -> currentMascotName = line.substring("mascot_name=".length).trim()
+                                line.startsWith("mascot_icon=") -> currentMascotIcon = line.substring("mascot_icon=".length).trim()
+                                line.startsWith("theme_color=") -> currentThemeColor = line.substring("theme_color=".length).trim()
+                                line.startsWith("theme_background=") -> currentThemeBackground = line.substring("theme_background=".length).trim()
                             }
-                            line.startsWith("mascot_name=") -> currentMascotName = line.substring("mascot_name=".length).trim()
-                            line.startsWith("mascot_icon=") -> currentMascotIcon = line.substring("mascot_icon=".length).trim()
-                            line.startsWith("theme_color=") -> currentThemeColor = line.substring("theme_color=".length).trim()
-                            line.startsWith("theme_background=") -> currentThemeBackground = line.substring("theme_background=".length).trim()
                         }
                     }
                 }
@@ -1111,22 +1168,24 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private fun loadMascotMetadata(mascotName: String) {
         if (folderUri == null) return
-        val metadataFilename = "${mascotName.lowercase(Locale.getDefault())}_metadata.txt"
+        val metadataFilename = "${mascotName.lowercase(Locale.ROOT)}_metadata.txt"
         val dir = DocumentFile.fromTreeUri(this, folderUri!!) ?: return
         val metadataFile = dir.findFile(metadataFilename)
         if (metadataFile != null && metadataFile.exists()) {
             try {
-                contentResolver.openInputStream(metadataFile.uri)?.bufferedReader()?.use { reader ->
-                    reader.forEachLine { raw ->
-                        val line = raw.trim()
-                        when {
-                            line.startsWith("mascot_name=") -> currentMascotName = line.substring("mascot_name=".length).trim()
-                            line.startsWith("mascot_icon=") -> currentMascotIcon = line.substring("mascot_icon=".length).trim()
-                            line.startsWith("theme_color=") -> currentThemeColor = line.substring("theme_color=".length).trim()
-                            line.startsWith("theme_background=") -> currentThemeBackground = line.substring("theme_background=".length).trim()
+                contentResolver.openInputStream(metadataFile.uri)?.use { ins ->
+                    InputStreamReader(ins, Charsets.UTF_8).buffered().use { reader ->
+                        reader.forEachLine { raw ->
+                            val line = raw.trim()
+                            when {
+                                line.startsWith("mascot_name=") -> currentMascotName = line.substring("mascot_name=".length).trim()
+                                line.startsWith("mascot_icon=") -> currentMascotIcon = line.substring("mascot_icon=".length).trim()
+                                line.startsWith("theme_color=") -> currentThemeColor = line.substring("theme_color=".length).trim()
+                                line.startsWith("theme_background=") -> currentThemeBackground = line.substring("theme_background=".length).trim()
+                            }
                         }
+                        updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
                     }
-                    updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
                 }
             } catch (e: Exception) {
                 showCustomToast(getString(R.string.error_loading_mascot_metadata, e.message ?: ""))
