@@ -40,7 +40,6 @@
     <string name="hint_message">Введите сообщение...</string>
     <string name="clear_chat">Очистить чат</string>
     <string name="convert">Конверт</string>
-    <string name="settings">Настройки</string>
     
     <!-- Диалоговые сообщения -->
     <string name="welcome_message">Добро пожаловать!</string>
