@@ -36,8 +36,6 @@
     <string name="screenshots_disabled">Скриншоты запрещены</string>
     <string name="screenshots_enabled">Скриншоты разрешены</string>
     <string name="folder_unavailable">Ошибка: папка недоступна</string>
-    <string name="enter_message">Введите сообщение</string>
-    <string name="back">Назад</string>
     
     <!-- Диалоговые сообщения -->
     <string name="welcome_message">Добро пожаловать!</string>
