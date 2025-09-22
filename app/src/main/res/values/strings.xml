@@ -37,6 +37,11 @@
     <string name="screenshots_enabled">Скриншоты разрешены</string>
     <string name="folder_unavailable">Ошибка: папка недоступна</string>
     <string name="inp_text">Напиши сообщение...</string>
+
+    <string name="trigger_hello">привет</string>
+<string name="trigger_how_are_you">как дела</string>
+<string name="trigger_thanks">спасибо</string>
+<string name="unknown_value">неизвестно</string>
     
     <!-- Диалоговые сообщения -->
     <string name="welcome_message">Добро пожаловать!</string>
