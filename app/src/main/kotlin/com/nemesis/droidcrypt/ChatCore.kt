@@ -5,32 +5,25 @@ import android.net.Uri
 import androidx.documentfile.provider.DocumentFile
 import com.nemesis.droidcrypt.Engine
 import com.nemesis.droidcrypt.MemoryManager
+import java.io.InputStreamReader
 import java.util.Locale
-import com.nemesis.droidcrypt.R
 
 object ChatCore {
 
-    // optional application context — инициализируется при старте приложения
     private var appContext: Context? = null
 
-    /**
-     * Инициализируйте ChatCore в Application.onCreate() или в ранней Activity:
-     * ChatCore.init(applicationContext)
-     */
     fun init(context: Context) {
         appContext = context.applicationContext
     }
 
-    // Helper: получить строковый ресурс, если доступен, иначе вернуть fallback
     private fun safeGetString(context: Context?, resId: Int, fallback: String): String {
         return try {
             (context ?: appContext)?.getString(resId) ?: fallback
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             fallback
         }
     }
 
-    // --- Anti-spam / fallback lists (читаются из ресурсов при наличии context) ---
     private val antiSpamResponses: List<String>
         get() {
             val c = appContext
@@ -48,32 +41,18 @@ object ChatCore {
                         c.getString(R.string.antispam_9),
                         c.getString(R.string.antispam_10)
                     )
-                } catch (e: Exception) {
+                } catch (_: Exception) {
                     listOf(
-                        "Ты надоел, давай что-то новенького!",
-                        "Спамить нехорошо, попробуй другой запрос.",
-                        "Я устал от твоих повторений!",
-                        "Хватит спамить, придумай что-то интересное.",
-                        "Эй, не зацикливайся, попробуй другой вопрос!",
-                        "Повторяешь одно и то же? Давай разнообразие!",
-                        "Слишком много повторов, я же не робот... ну, почти.",
-                        "Не спамь, пожалуйста, задай новый вопрос!",
-                        "Пять раз одно и то же? Попробуй что-то другое.",
-                        "Я уже ответил, давай новый запрос!"
+                        "Please stop spamming.",
+                        "Too many repeats, try something new.",
+                        "I'm tired of the repeats."
                     )
                 }
             } else {
                 listOf(
-                    "Ты надоел, давай что-то новенького!",
-                    "Спамить нехорошо, попробуй другой запрос.",
-                    "Я устал от твоих повторений!",
-                    "Хватит спамить, придумай что-то интересное.",
-                    "Эй, не зацикливайся, попробуй другой вопрос!",
-                    "Повторяешь одно и то же? Давай разнообразие!",
-                    "Слишком много повторов, я же не робот... ну, почти.",
-                    "Не спамь, пожалуйста, задай новый вопрос!",
-                    "Пять раз одно и то же? Попробуй что-то другое.",
-                    "Я уже ответил, давай новый запрос!"
+                    "Please stop spamming.",
+                    "Too many repeats, try something new.",
+                    "I'm tired of the repeats."
                 )
             }
         }
@@ -91,28 +70,20 @@ object ChatCore {
                         c.getString(R.string.fallback_3),
                         c.getString(R.string.fallback_4)
                     )
-                } catch (e: Exception) {
-                    listOf("Привет!", "Как дела?", "Расскажи о себе", "Выход")
+                } catch (_: Exception) {
+                    listOf("Hello!", "How are you?", "Tell me about yourself", "Exit")
                 }
             } else {
-                listOf("Привет!", "Как дела?", "Расскажи о себе", "Выход")
+                listOf("Hello!", "How are you?", "Tell me about yourself", "Exit")
             }
         }
 
-    // --- Context.txt / temporary topic in RAM support ---
-    // ContextPattern: left tokens before {}, right tokens after {}
     private data class ContextPattern(val left: List<String>, val right: List<String>, val response: String?)
 
-    // cached context patterns (reloaded per findBestResponse call)
     private val contextPatterns: MutableList<ContextPattern> = mutableListOf()
-
-    // recall map (canonical key -> response template with {topic})
     private val contextRecallMap: MutableMap<String, String> = mutableMapOf()
-
-    // temporary topic in RAM (ОЗУ)
     private var currentTopic: String? = null
 
-    // Helper to match a context pattern against input tokens, returns captured topic or null
     private fun matchContextPattern(p: ContextPattern, tokensMapped: List<String>): String? {
         if (p.left.isNotEmpty()) {
             if (tokensMapped.size <= p.left.size) return null
@@ -128,7 +99,6 @@ object ChatCore {
                 return captured.ifBlank { null }
             }
         } else {
-            // left empty -> require right at end
             if (p.right.isEmpty()) return null
             if (tokensMapped.size <= p.right.size) return null
             val tail = tokensMapped.takeLast(p.right.size)
@@ -138,52 +108,54 @@ object ChatCore {
         }
     }
 
-    // load context.txt (and recall lines starting with $) into memory (lightweight)
-    private fun loadContextTemplatesFromFolder(context: Context, folderUri: Uri?, synonymsSnapshot: Map<String, String>, stopwordsSnapshot: Set<String>) {
+    private fun loadContextTemplatesFromFolder(
+        context: Context,
+        folderUri: Uri?,
+        synonymsSnapshot: Map<String, String>,
+        stopwordsSnapshot: Set<String>
+    ) {
         contextPatterns.clear()
         contextRecallMap.clear()
-
         val uri = folderUri ?: return
         try {
             val dir = DocumentFile.fromTreeUri(context, uri) ?: return
             val file = dir.findFile("context.txt") ?: return
             if (!file.exists()) return
-            context.contentResolver.openInputStream(file.uri)?.bufferedReader()?.useLines { lines ->
-                lines.forEach { raw ->
-                    val l = raw.trim()
-                    if (l.isEmpty()) return@forEach
-                    try {
-                        if (l.startsWith("$")) {
-                            val parts = l.substring(1).split("=", limit = 2).map { it.trim() }
-                            if (parts.size == 2) {
-                                val keyNorm = Engine.normalizeText(parts[0])
-                                val keyTokens = Engine.filterStopwordsAndMapSynonymsStatic(keyNorm, synonymsSnapshot, stopwordsSnapshot).first
-                                val keyCanon = keyTokens.sorted().joinToString(" ")
-                                if (keyCanon.isNotEmpty()) contextRecallMap[keyCanon] = parts[1]
+            context.contentResolver.openInputStream(file.uri)?.use { ins ->
+                InputStreamReader(ins, Charsets.UTF_8).buffered().useLines { lines ->
+                    lines.forEach { raw ->
+                        val l = raw.trim()
+                        if (l.isEmpty()) return@forEach
+                        try {
+                            if (l.startsWith("$")) {
+                                val parts = l.substring(1).split("=", limit = 2).map { it.trim() }
+                                if (parts.size == 2) {
+                                    val keyNorm = Engine.normalizeText(parts[0])
+                                    val keyTokens = Engine.filterStopwordsAndMapSynonymsStatic(keyNorm, synonymsSnapshot, stopwordsSnapshot).first
+                                    val keyCanon = keyTokens.sorted().joinToString(" ")
+                                    if (keyCanon.isNotEmpty()) contextRecallMap[keyCanon] = parts[1]
+                                }
+                            } else {
+                                val parts = l.split("=", limit = 2).map { it.trim() }
+                                val patternRaw = parts[0]
+                                val response = parts.getOrNull(1)
+                                if (!patternRaw.contains("{}")) return@forEach
+                                val segs = patternRaw.split("{}", limit = 2)
+                                val leftNorm = Engine.normalizeText(segs[0])
+                                val rightNorm = Engine.normalizeText(segs.getOrNull(1) ?: "")
+                                val leftTokens = Engine.filterStopwordsAndMapSynonymsStatic(leftNorm, synonymsSnapshot, stopwordsSnapshot).first
+                                val rightTokens = Engine.filterStopwordsAndMapSynonymsStatic(rightNorm, synonymsSnapshot, stopwordsSnapshot).first
+                                contextPatterns.add(ContextPattern(leftTokens, rightTokens, response))
                             }
-                        } else {
-                            val parts = l.split("=", limit = 2).map { it.trim() }
-                            val patternRaw = parts[0]
-                            val response = parts.getOrNull(1)
-                            if (!patternRaw.contains("{}")) return@forEach
-                            val segs = patternRaw.split("{}", limit = 2)
-                            val leftNorm = Engine.normalizeText(segs[0])
-                            val rightNorm = Engine.normalizeText(segs.getOrNull(1) ?: "")
-                            val leftTokens = Engine.filterStopwordsAndMapSynonymsStatic(leftNorm, synonymsSnapshot, stopwordsSnapshot).first
-                            val rightTokens = Engine.filterStopwordsAndMapSynonymsStatic(rightNorm, synonymsSnapshot, stopwordsSnapshot).first
-                            contextPatterns.add(ContextPattern(leftTokens, rightTokens, response))
+                        } catch (_: Exception) {
                         }
-                    } catch (_: Exception) {
-                        // intentionally silent in release build
                     }
                 }
             }
         } catch (_: Exception) {
-            // intentionally silent in release build
         }
     }
 
-    // --- Загрузка синонимов и стоп-слов ---
     fun loadSynonymsAndStopwords(
         context: Context,
         folderUri: Uri?,
@@ -195,38 +167,38 @@ object ChatCore {
         val uri = folderUri ?: return
         try {
             val dir = DocumentFile.fromTreeUri(context, uri) ?: return
-
             dir.findFile("synonims.txt")?.takeIf { it.exists() }?.let { synFile ->
-                context.contentResolver.openInputStream(synFile.uri)?.bufferedReader()?.useLines { lines ->
-                    lines.forEach { raw ->
-                        var l = raw.trim()
-                        if (l.isEmpty()) return@forEach
-                        if (l.startsWith("*") && l.endsWith("*") && l.length > 1) {
-                            l = l.substring(1, l.length - 1)
-                        }
-                        val parts = l.split(";").map { Engine.normalizeText(it) }.filter { it.isNotEmpty() }
-                        if (parts.isNotEmpty()) {
-                            val canonical = parts.last()
-                            parts.forEach { p -> synonymsMap[p] = canonical }
+                context.contentResolver.openInputStream(synFile.uri)?.use { ins ->
+                    InputStreamReader(ins, Charsets.UTF_8).buffered().useLines { lines ->
+                        lines.forEach { raw ->
+                            var l = raw.trim()
+                            if (l.isEmpty()) return@forEach
+                            if (l.startsWith("*") && l.endsWith("*") && l.length > 1) {
+                                l = l.substring(1, l.length - 1)
+                            }
+                            val parts = l.split(";").map { Engine.normalizeText(it) }.filter { it.isNotEmpty() }
+                            if (parts.isNotEmpty()) {
+                                val canonical = parts.last()
+                                parts.forEach { p -> synonymsMap[p] = canonical }
+                            }
                         }
                     }
                 }
             }
-
             dir.findFile("stopwords.txt")?.takeIf { it.exists() }?.let { stopFile ->
-                context.contentResolver.openInputStream(stopFile.uri)?.bufferedReader()?.use { reader ->
-                    val parts = reader.readText().split(Regex("[\\r\\n\\t,|^;]+"))
-                        .map { Engine.normalizeText(it) }
-                        .filter { it.isNotEmpty() }
-                    stopwords.addAll(parts)
+                context.contentResolver.openInputStream(stopFile.uri)?.use { ins ->
+                    InputStreamReader(ins, Charsets.UTF_8).buffered().use { reader ->
+                        val parts = reader.readText().split(Regex("[\\r\\n\\t,|^;]+"))
+                            .map { Engine.normalizeText(it) }
+                            .filter { it.isNotEmpty() }
+                        stopwords.addAll(parts)
+                    }
                 }
             }
         } catch (_: Exception) {
-            // intentionally silent in release build
         }
     }
 
-    // --- Парсинг шаблонов ---
     fun parseTemplatesFromFile(
         context: Context,
         folderUri: Uri?,
@@ -241,42 +213,39 @@ object ChatCore {
             val dir = DocumentFile.fromTreeUri(context, uriLocal) ?: return Pair(templates, keywords)
             val file = dir.findFile(filename) ?: return Pair(templates, keywords)
             if (!file.exists()) return Pair(templates, keywords)
-
-            context.contentResolver.openInputStream(file.uri)?.bufferedReader()?.useLines { lines ->
-                lines.forEach { raw ->
-                    val l = raw.trim()
-                    if (l.isEmpty()) return@forEach
-
-                    try {
-                        if (l.startsWith("-")) {
-                            val (key, respRaw) = l.substring(1).split("=", limit = 2).map { it.trim() }
-                            val keyTokens = Engine.filterStopwordsAndMapSynonymsStatic(key, synonymsSnapshot, stopwordsSnapshot).first
-                            val keyMapped = keyTokens.sorted().joinToString(" ")
-                            val responses = respRaw.split("|").map { it.trim() }.filter { it.isNotEmpty() }
-                            if (keyMapped.isNotEmpty() && responses.isNotEmpty()) {
-                                keywords[keyMapped] = responses.toMutableList()
+            context.contentResolver.openInputStream(file.uri)?.use { ins ->
+                InputStreamReader(ins, Charsets.UTF_8).buffered().useLines { lines ->
+                    lines.forEach { raw ->
+                        val l = raw.trim()
+                        if (l.isEmpty()) return@forEach
+                        try {
+                            if (l.startsWith("-")) {
+                                val (key, respRaw) = l.substring(1).split("=", limit = 2).map { it.trim() }
+                                val keyTokens = Engine.filterStopwordsAndMapSynonymsStatic(key, synonymsSnapshot, stopwordsSnapshot).first
+                                val keyMapped = keyTokens.sorted().joinToString(" ")
+                                val responses = respRaw.split("|").map { it.trim() }.filter { it.isNotEmpty() }
+                                if (keyMapped.isNotEmpty() && responses.isNotEmpty()) {
+                                    keywords[keyMapped] = responses.toMutableList()
+                                }
+                            } else if (l.contains("=")) {
+                                val (trigger, respRaw) = l.split("=", limit = 2).map { it.trim() }
+                                val triggerTokens = Engine.filterStopwordsAndMapSynonymsStatic(trigger, synonymsSnapshot, stopwordsSnapshot).first
+                                val triggerMapped = triggerTokens.sorted().joinToString(" ")
+                                val responses = respRaw.split("|").map { it.trim() }.filter { it.isNotEmpty() }
+                                if (triggerMapped.isNotEmpty() && responses.isNotEmpty()) {
+                                    templates[triggerMapped] = responses.toMutableList()
+                                }
                             }
-                        } else if (l.contains("=")) {
-                            val (trigger, respRaw) = l.split("=", limit = 2).map { it.trim() }
-                            val triggerTokens = Engine.filterStopwordsAndMapSynonymsStatic(trigger, synonymsSnapshot, stopwordsSnapshot).first
-                            val triggerMapped = triggerTokens.sorted().joinToString(" ")
-                            val responses = respRaw.split("|").map { it.trim() }.filter { it.isNotEmpty() }
-                            if (triggerMapped.isNotEmpty() && responses.isNotEmpty()) {
-                                templates[triggerMapped] = responses.toMutableList()
-                            }
+                        } catch (_: Exception) {
                         }
-                    } catch (_: Exception) {
-                        // intentionally silent in release build
                     }
                 }
             }
         } catch (_: Exception) {
-            // intentionally silent in release build
         }
         return Pair(templates, keywords)
     }
 
-    // --- Поиск ---
     fun searchInCoreFiles(
         context: Context,
         folderUri: Uri?,
@@ -295,10 +264,13 @@ object ChatCore {
             val qCanonical = qMappedTokens.sorted().joinToString(" ")
             val dynamicJaccardThreshold = engine.getJaccardThreshold(qFiltered)
 
-            // helper: substitute placeholders using MemoryManager slots and choose random pipe-option
+            fun getUnknownPlaceholder(): String {
+                val lang = (appContext?.resources?.configuration?.locales?.get(0)?.language ?: Locale.getDefault().language).lowercase(Locale.ROOT)
+                return if (lang == "ru") "неизвестно" else "unknown"
+            }
+
             fun substitutePlaceholdersWithMemory(resp: String): String {
                 var out = resp
-                // support Unicode placeholders (letters/digits from any script + underscore)
                 val ph = Regex("<([\\p{L}\\p{N}_]+)>")
                 ph.findAll(resp).forEach { m ->
                     val name = m.groupValues[1]
@@ -308,9 +280,8 @@ object ChatCore {
                     } catch (_: Exception) {
                         null
                     }
-                    out = out.replace("<$name>", value?.takeIf { it.isNotBlank() } ?: "неизвестно")
+                    out = out.replace("<$name>", value?.takeIf { it.isNotBlank() } ?: getUnknownPlaceholder())
                 }
-                // support | alternatives
                 if (out.contains("|")) {
                     val parts = out.split("|").map { it.trim() }.filter { it.isNotEmpty() }
                     if (parts.isNotEmpty()) out = parts.random()
@@ -318,11 +289,9 @@ object ChatCore {
                 return out
             }
 
-            // resolvePotentialFileResponse: попытка углубиться в referenced file
             fun resolvePotentialFileResponse(respRaw: String, qSetLocal: Set<String>, qCanonicalLocal: String): String {
                 val respTrim = respRaw.trim()
                 val resp = respTrim.trim(':', ' ', '\t')
-                // allow non-ASCII filenames (letters/numbers from any script, plus -._)
                 val fileRegex = Regex("""([\p{L}\p{N}\-._]+\.txt)""", RegexOption.IGNORE_CASE)
                 val match = fileRegex.find(resp)
                 if (match != null) {
@@ -435,12 +404,10 @@ object ChatCore {
                 }
             }
         } catch (_: Exception) {
-            // intentionally silent in release build
         }
         return null
     }
 
-    // --- findBestResponse ---
     fun findBestResponse(
         context: Context,
         folderUri: Uri?,
@@ -450,48 +417,44 @@ object ChatCore {
     ): String {
         try {
             MemoryManager.init(context)
-            // передаём synonyms в MemoryManager, чтобы память знала canonical формы
             MemoryManager.loadTemplatesFromFolder(context, folderUri, engine.synonymsMap)
         } catch (_: Exception) {
-            // intentionally silent in release build
         }
 
-        // --- load context.txt templates (lightweight) ---
         try {
             loadContextTemplatesFromFolder(context, folderUri, engine.synonymsMap, engine.stopwords)
         } catch (_: Exception) {
-            // intentionally silent in release build
         }
 
-        // Normalize & tokens
         val normalized = Engine.normalizeText(userInput)
-
-        // FIX: получаем mapped tokens (те же самые, что использовались при загрузке contextPatterns)
         val (mappedTokens, mappedRaw) = Engine.filterStopwordsAndMapSynonymsStatic(normalized, engine.synonymsMap, engine.stopwords)
-        val tokens = mappedTokens // use mapped tokens for context pattern matching
+        val tokens = mappedTokens
 
-        // 1) Try context patterns ({} templates) — if matched, set currentTopic and return response
         try {
             for (p in contextPatterns) {
                 val topicMapped = matchContextPattern(p, tokens)
                 if (topicMapped != null) {
                     currentTopic = topicMapped
                     try { MemoryManager.processIncoming(context, topicMapped) } catch (_: Exception) {}
-                    val resp = p.response?.replace("{topic}", topicMapped) ?: "Запомнил тему: $topicMapped"
+                    val resp = p.response?.replace("{topic}", topicMapped) ?: run {
+                        val lang = (appContext?.resources?.configuration?.locales?.get(0)?.language ?: Locale.getDefault().language).lowercase(Locale.ROOT)
+                        if (lang == "ru") "Запомнил тему: $topicMapped" else "Remembered topic: $topicMapped"
+                    }
                     return resp
                 }
             }
-            // 2) Check recall keys from contextRecallMap
             if (currentTopic != null && contextRecallMap.isNotEmpty()) {
                 val normForKeyTokens = Engine.filterStopwordsAndMapSynonymsStatic(normalized, engine.synonymsMap, engine.stopwords).first
                 val normForKey = normForKeyTokens.sorted().joinToString(" ")
                 contextRecallMap[normForKey]?.let { templ ->
-                    val result = templ.replace("{topic}", currentTopic ?: "неизвестно")
+                    val result = templ.replace("{topic}", currentTopic ?: run {
+                        val lang = (appContext?.resources?.configuration?.locales?.get(0)?.language ?: Locale.getDefault().language).lowercase(Locale.ROOT)
+                        if (lang == "ru") "неизвестно" else "unknown"
+                    })
                     return result
                 }
             }
         } catch (_: Exception) {
-            // intentionally silent in release build
         }
 
         val normalizedForSearch = normalized
@@ -512,7 +475,6 @@ object ChatCore {
             try {
                 MemoryManager.processIncoming(context, userInput)
             } catch (_: Exception) {
-                // intentionally silent in release build
             }
             return resp
         }
@@ -521,13 +483,11 @@ object ChatCore {
             val memResp = MemoryManager.processIncoming(context, userInput)
             if (!memResp.isNullOrBlank()) return memResp
         } catch (_: Exception) {
-            // intentionally silent in release build
         }
 
         return getDummyResponse(context, userInput)
     }
 
-    // --- loadTemplatesFromFile (используется в UI elsewhere) ---
     fun loadTemplatesFromFile(
         context: Context,
         folderUri: Uri?,
@@ -558,43 +518,46 @@ object ChatCore {
         }
     }
 
-    // --- Заглушки ---
     fun loadFallbackTemplates(
         templatesMap: MutableMap<String, MutableList<String>>,
         keywordResponses: MutableMap<String, MutableList<String>>,
         mascotList: MutableList<Map<String, String>>,
         contextMap: MutableMap<String, String>
     ) {
-        templatesMap.clear(); keywordResponses.clear(); mascotList.clear(); contextMap.clear()
+        templatesMap.clear()
+        keywordResponses.clear()
+        mascotList.clear()
+        contextMap.clear()
         val c = appContext
 
-        templatesMap[Engine.normalizeText("привет")] = mutableListOf(
-            safeGetString(c, R.string.tpl_greeting_1, "Привет! Чем могу помочь?"),
-            safeGetString(c, R.string.tpl_greeting_2, "Здравствуй!")
+        val triggerHello = safeGetString(c, R.string.trigger_hello, safeGetString(c, R.string.fallback_1, "hello"))
+        val triggerHowAreYou = safeGetString(c, R.string.trigger_how_are_you, safeGetString(c, R.string.fallback_3, "how are you"))
+        val triggerThanks = safeGetString(c, R.string.trigger_thanks, "thanks")
+
+        templatesMap[Engine.normalizeText(triggerHello)] = mutableListOf(
+            safeGetString(c, R.string.tpl_greeting_1, safeGetString(c, R.string.fallback_1, "Hello! How can I help?")),
+            safeGetString(c, R.string.tpl_greeting_2, safeGetString(c, R.string.fallback_2, "Hi!"))
         )
-        templatesMap[Engine.normalizeText("как дела")] = mutableListOf(
-            safeGetString(c, R.string.tpl_howareyou_1, "Всё отлично, а у тебя?"),
-            safeGetString(c, R.string.tpl_howareyou_2, "Нормально, как дела?")
+        templatesMap[Engine.normalizeText(triggerHowAreYou)] = mutableListOf(
+            safeGetString(c, R.string.tpl_howareyou_1, safeGetString(c, R.string.tpl_howareyou_1, "I'm great, and you?")),
+            safeGetString(c, R.string.tpl_howareyou_2, safeGetString(c, R.string.tpl_howareyou_2, "Doing fine, how about you?"))
         )
-        keywordResponses[Engine.normalizeText("спасибо")] = mutableListOf(
-            safeGetString(c, R.string.tpl_thanks_1, "Рад, что помог!"),
-            safeGetString(c, R.string.tpl_thanks_2, "Всегда пожалуйста!")
+        keywordResponses[Engine.normalizeText(triggerThanks)] = mutableListOf(
+            safeGetString(c, R.string.tpl_thanks_1, "Glad I could help!"),
+            safeGetString(c, R.string.tpl_thanks_2, "You're welcome!")
         )
     }
 
-    // getDummyResponse: использует ресурсы, если контекст доступен
     fun getDummyResponse(query: String): String {
         val c = appContext
         return getDummyResponse(c, query)
     }
 
     fun getDummyResponse(context: Context?, query: String): String {
-        val greeting = safeGetString(context, R.string.dummy_greeting, "Привет! Чем могу помочь?")
-        val unknown = safeGetString(context, R.string.dummy_unknown, "Не понял запрос. Попробуй другой вариант.")
-        return if (query.lowercase(Locale.getDefault()).contains("привет"))
-            greeting
-        else
-            unknown
+        val greeting = safeGetString(context, R.string.dummy_greeting, safeGetString(context, R.string.fallback_1, "Hello!"))
+        val unknown = safeGetString(context, R.string.dummy_unknown, if ((context?.resources?.configuration?.locales?.get(0)?.language ?: Locale.getDefault().language).lowercase(Locale.ROOT) == "ru") "Не понял запрос. Попробуй другой вариант." else "Didn't understand. Try another phrasing.")
+        val triggerHello = safeGetString(context, R.string.trigger_hello, safeGetString(context, R.string.fallback_1, "hello")).lowercase(Locale.ROOT)
+        return if (query.lowercase(Locale.ROOT).contains(triggerHello)) greeting else unknown
     }
 
     fun detectContext(input: String, contextMap: Map<String, String>, engine: Engine): String? {
@@ -604,10 +567,8 @@ object ChatCore {
                 engine.synonymsMap,
                 engine.stopwords
             )
-
             if (mappedTokens.isEmpty()) return null
             val mappedSet = mappedTokens.toSet()
-
             return contextMap.maxByOrNull { (k, _) ->
                 if (k.isBlank()) return@maxByOrNull 0
                 val keyTokens = k.split(" ").filter { it.isNotEmpty() }.toSet()
