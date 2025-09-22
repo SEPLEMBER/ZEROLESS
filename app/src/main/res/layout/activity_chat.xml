@@ -4,88 +4,93 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
-    android:background="@color/matte_black"
+    android:background="@color/background_black"
     android:padding="8dp">
 
-    <!-- Верхняя панель: батарея, время, меню -->
+    <!-- Top bar: Battery icon + percentage (left), time (center), icons (right) -->
     <LinearLayout
         android:id="@+id/topBar"
         android:layout_width="match_parent"
-        android:layout_height="56dp"
+        android:layout_height="68dp"
         android:orientation="horizontal"
         android:gravity="center_vertical"
+        android:weightSum="3"
         android:paddingStart="8dp"
         android:paddingEnd="8dp"
         android:background="@color/card_dark">
 
-        <!-- Батарея -->
+        <!-- Right section: Icons -->
         <LinearLayout
             android:layout_width="0dp"
             android:layout_height="match_parent"
             android:layout_weight="1"
             android:orientation="horizontal"
-            android:gravity="center_vertical|start">
-
-            <ImageView
-                android:id="@+id/battery_image"
-                android:layout_width="24dp"
-                android:layout_height="24dp"
-                android:scaleType="fitCenter"
-                android:adjustViewBounds="true"
-                android:contentDescription="@string/battery" />
-
-            <TextView
-                android:id="@+id/battery_percent"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="--%"
-                android:textColor="@color/neon_cyan"
-                android:textSize="14sp"
-                android:layout_marginStart="6dp"
-                android:fontFamily="monospace" />
-        </LinearLayout>
-
-        <!-- Время -->
-        <TextView
-            android:id="@+id/time_text"
-            android:layout_width="0dp"
-            android:layout_height="match_parent"
-            android:layout_weight="1"
-            android:text="--:--"
-            android:textColor="@color/neon_cyan"
-            android:textSize="16sp"
-            android:gravity="center"
-            android:fontFamily="monospace" />
-
-        <!-- Кнопка-меню -->
-        <LinearLayout
-            android:layout_width="0dp"
-            android:layout_height="match_parent"
-            android:layout_weight="1"
             android:gravity="center_vertical|end">
 
             <ImageButton
-    android:id="@+id/btn_overflow"
-    android:layout_width="40dp"
-    android:layout_height="40dp"
-    android:background="?attr/selectableItemBackgroundBorderless"
-    android:src="@android:drawable/ic_menu_more"
-    android:contentDescription="@string/menu"
-    android:scaleType="centerInside" />
+                android:id="@+id/info_icon_button"
+                android:layout_width="52dp"
+                android:layout_height="52dp"
+                android:layout_marginStart="6dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="@string/info"
+                android:scaleType="fitCenter"
+                android:adjustViewBounds="true" />
 
+            <ImageButton
+                android:id="@+id/btn_lock"
+                android:layout_width="50dp"
+                android:layout_height="50dp"
+                android:layout_marginStart="6dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="@string/lock"
+                android:scaleType="fitCenter"
+                android:adjustViewBounds="true" />
+
+            <ImageButton
+                android:id="@+id/btn_trash"
+                android:layout_width="52dp"
+                android:layout_height="52dp"
+                android:layout_marginStart="6dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="@string/trash"
+                android:scaleType="fitCenter"
+                android:adjustViewBounds="true" />
+
+            <ImageButton
+                android:id="@+id/btn_envelope_top"
+                android:layout_width="52dp"
+                android:layout_height="52dp"
+                android:layout_marginStart="6dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="@string/envelope"
+                android:scaleType="fitCenter"
+                android:adjustViewBounds="true" />
 
             <ImageButton
                 android:id="@+id/btn_settings"
-                android:layout_width="40dp"
-                android:layout_height="40dp"
+                android:layout_width="52dp"
+                android:layout_height="52dp"
+                android:layout_marginStart="6dp"
                 android:background="?attr/selectableItemBackgroundBorderless"
-                android:src="@android:drawable/ic_menu_more"
-                android:contentDescription="@string/menu"
-                android:scaleType="centerInside" />
+                android:contentDescription="@string/settings"
+                android:scaleType="fitCenter"
+                android:adjustViewBounds="true" />
+
+            <ImageButton
+                android:id="@+id/btn_charging"
+                android:layout_width="52dp"
+                android:layout_height="52dp"
+                android:layout_marginStart="6dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="@string/charging"
+                android:scaleType="fitCenter"
+                android:adjustViewBounds="true"
+                android:visibility="gone" />
         </LinearLayout>
     </LinearLayout>
 
-    <!-- Чат -->
+    <!-- Chat area background slightly lighter than page -->
     <ScrollView
         android:id="@+id/scrollView"
         android:layout_width="match_parent"
@@ -102,29 +107,22 @@
             android:orientation="vertical" />
     </ScrollView>
 
-    <!-- Индикатор загрузки -->
-    <ProgressBar
-        android:id="@+id/loadingIndicator"
-        android:layout_width="40dp"
-        android:layout_height="40dp"
-        android:layout_gravity="center"
-        android:visibility="gone" />
-
-    <!-- Поле ввода + кнопки -->
+    <!-- Input row: text + envelope (send) -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
         android:gravity="center_vertical"
-        android:padding="8dp"
-        android:background="@color/input_bg">
+        android:paddingTop="8dp"
+        android:background="@color/input_bg"
+        android:padding="8dp">
 
         <AutoCompleteTextView
             android:id="@+id/queryInput"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:hint="@string/hint_message"
+            android:hint="@string/inp_text"
             android:textColor="@color/mascot_racky_text"
             android:textColorHint="@color/mascot_racky_text"
             android:background="@android:color/transparent"
@@ -136,37 +134,13 @@
 
         <ImageButton
             android:id="@+id/envelope_button"
-            android:layout_width="40dp"
-            android:layout_height="40dp"
+            android:layout_width="56dp"
+            android:layout_height="56dp"
             android:layout_marginStart="8dp"
             android:background="?attr/selectableItemBackgroundBorderless"
             android:contentDescription="@string/send"
-            android:src="@android:drawable/ic_menu_send"
-            android:scaleType="centerInside" />
-
-        <ImageButton
-            android:id="@+id/btn_lock"
-            android:layout_width="40dp"
-            android:layout_height="40dp"
-            android:background="?attr/selectableItemBackgroundBorderless"
-            android:src="@android:drawable/ic_lock_lock"
-            android:contentDescription="@string/lock" />
-
-        <ImageButton
-            android:id="@+id/btn_trash"
-            android:layout_width="40dp"
-            android:layout_height="40dp"
-            android:background="?attr/selectableItemBackgroundBorderless"
-            android:src="@android:drawable/ic_menu_delete"
-            android:contentDescription="@string/clear_chat" />
-
-        <ImageButton
-            android:id="@+id/btn_envelope_top"
-            android:layout_width="40dp"
-            android:layout_height="40dp"
-            android:background="?attr/selectableItemBackgroundBorderless"
-            android:src="@android:drawable/ic_menu_send"
-            android:contentDescription="@string/send" />
+            android:scaleType="fitCenter"
+            android:adjustViewBounds="true" />
     </LinearLayout>
 
 </LinearLayout>
