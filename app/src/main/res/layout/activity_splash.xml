@@ -16,10 +16,10 @@
         android:shadowDx="0"
         android:shadowDy="0"
         android:shadowRadius="8"
-        app:layout_constraintBottom_toTopOf="@id/metadataText"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintTop_toTopOf="parent" />
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintBottom_toTopOf="@id/metadataText" />
 
     <TextView
         android:id="@+id/metadataText"
@@ -30,6 +30,7 @@
         android:layout_marginTop="16dp"
         app:layout_constraintTop_toBottomOf="@id/statusText"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent" />
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintBottom_toBottomOf="parent" />
 
 </androidx.constraintlayout.widget.ConstraintLayout>
