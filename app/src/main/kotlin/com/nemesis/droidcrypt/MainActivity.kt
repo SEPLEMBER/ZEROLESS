@@ -43,8 +43,8 @@ class MainActivity : AppCompatActivity() {
         animateGreeting(randomGreeting)
 
         val startChat = findViewById<MaterialButton>(R.id.startChatButton)
-        val openSettings = findViewById<MaterialButton>(R.id.openSettingsButton)
-        val setupButton = findViewById<MaterialButton>(R.id.setupButton)
+        val setupText = findViewById<TextView>(R.id.setupText)
+        val settingsText = findViewById<TextView>(R.id.settingsText)
 
         startChat.setOnClickListener {
             val sharedPrefs = getSharedPreferences("PawsTribePrefs", MODE_PRIVATE)
@@ -62,14 +62,14 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        openSettings.setOnClickListener {
-            val i = Intent(this@MainActivity, SettingsActivity::class.java)
-            settingsResultLauncher.launch(i)
-        }
-
-        setupButton.setOnClickListener {
+        setupText.setOnClickListener {
             val i = Intent(this@MainActivity, SetupActivity::class.java)
             startActivity(i)
+        }
+
+        settingsText.setOnClickListener {
+            val i = Intent(this@MainActivity, SettingsActivity::class.java)
+            settingsResultLauncher.launch(i)
         }
     }
 
@@ -83,9 +83,9 @@ class MainActivity : AppCompatActivity() {
         batteryText.text = "$batteryPct%"
         batteryText.setTextColor(
             when {
-                batteryPct <= 20 -> getColor(R.color.battery_low) // Красный (#FF4500)
-                batteryPct <= 40 -> getColor(R.color.battery_ok) // Оранжевый (#FFA500)
-                else -> getColor(R.color.battery_full) // Зелёный (#00FF00)
+                batteryPct <= 20 -> getColor(R.color.battery_low)
+                batteryPct <= 40 -> getColor(R.color.battery_ok)
+                else -> getColor(R.color.battery_full)
             }
         )
     }
