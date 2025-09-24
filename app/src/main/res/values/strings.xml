@@ -121,7 +121,7 @@
 
     <!-- Дефолтные ответы -->
     <string name="dummy_greeting">Привет! Я пока учусь отвечать.</string>
-    <string name="dummy_unknown">Не понял запрос. Попробуй другой вариант.</string>
+    <string name="dummy_unknown">Хм... не знаю, что сказать. К такому жизнь меня не готовила.</string>
 
     <!-- Случайные приветствия для MainActivity -->
     <string-array name="greetings">
