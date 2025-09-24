@@ -66,8 +66,8 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private val stopwords = HashSet<String>()
     private var currentMascotName = "Racky"
     private var currentMascotIcon = "raccoon_icon.png"
-    private var currentThemeColor = "#00FF00"
-    private var currentThemeBackground = "#000000"
+    private var currentThemeColor = "#00FFFF"
+    private var currentThemeBackground = "#0A0A0A"
     private var currentContext = "base.txt"
     private var isContextLocked = false
 
@@ -817,7 +817,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     text = getString(R.string.typing)
                     textSize = 14f
                     setTextColor(getColor(R.color.neon_cyan))
-                    setBackgroundColor(0x80000000.toInt())
+                    setBackgroundColor(0x800A0A0A.toInt())
                     alpha = 0.7f
                     setPadding(16, 8, 16, 8)
                     tag = "typingView"
@@ -991,9 +991,9 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             val pad = dpToPx(10)
             setPadding(pad, pad, pad, pad)
             val accent = if (isUser) {
-                Color.parseColor("#00FF00")
+                Color.parseColor("#00FFFF")
             } else {
-                safeParseColorOrDefault(currentThemeColor, Color.parseColor("#00FF00"))
+                safeParseColorOrDefault(currentThemeColor, Color.parseColor("#00FFFF"))
             }
             background = createBubbleDrawable(accent)
             try {
@@ -1067,8 +1067,8 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
         currentMascotName = "Racky"
         currentMascotIcon = "raccoon_icon.png"
-        currentThemeColor = "#00FF00"
-        currentThemeBackground = "#000000"
+        currentThemeColor = "#00FFFF"
+        currentThemeBackground = "#0A0A0A"
         isContextLocked = false
 
         ChatCore.loadSynonymsAndStopwords(this, folderUri, synonymsMap, stopwords)
@@ -1287,7 +1287,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         lastUserInputTime = System.currentTimeMillis()
         idleCheckRunnable?.let {
             dialogHandler.removeCallbacks(it)
-            dialogHandler.postDelayed(it, 5000)
+            dialogHandler.postDelayed(it, 500000)
         }
     }
 }
