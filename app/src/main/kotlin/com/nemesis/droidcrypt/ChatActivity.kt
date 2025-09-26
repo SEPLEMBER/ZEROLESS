@@ -1,4 +1,4 @@
-package com.nemesis.droidcrypt
+package com.pawstribe.chat
 
 import android.animation.ObjectAnimator
 import android.content.Intent
@@ -24,16 +24,18 @@ import androidx.preference.PreferenceManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
 import java.io.InputStreamReader
 import java.text.Normalizer
+import java.text.SimpleDateFormat
 import java.util.*
 import kotlin.collections.ArrayList
 import kotlin.collections.HashMap
 import kotlin.math.roundToInt
-import com.nemesis.droidcrypt.Engine
-import com.nemesis.droidcrypt.ChatCore
-import com.nemesis.droidcrypt.MemoryManager
-import com.nemesis.droidcrypt.R
+import com.pawstribe.chat.Engine
+import com.pawstribe.chat.ChatCore
+import com.pawstribe.chat.MemoryManager
+import com.pawstribe.chat.R
 
 class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
@@ -85,6 +87,50 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             return size > Engine.MAX_CACHE_SIZE
         }
     }
+
+    // ---------- debug logging helper ----------
+    private val debugLogFileName = "paws_debug.log"
+    private fun writeDebugLog(line: String) {
+        try {
+            val f = File(filesDir, debugLogFileName)
+            val ts = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.ROOT).format(Date())
+            f.appendText("$ts | $line\n")
+        } catch (e: Exception) {
+            // best-effort, не ломаем работу приложения
+            try {
+                runOnUiThread { Toast.makeText(this, "Debug write failed: ${e.message}", Toast.LENGTH_SHORT).show() }
+            } catch (_: Exception) { }
+        }
+    }
+
+    private fun dumpStateToFile() {
+        try {
+            val f = File(filesDir, debugLogFileName)
+            f.writeText("=== DUMP STATE ${Date()} ===\n")
+            f.appendText("currentContext=$currentContext\n")
+            f.appendText("lockedContextFile=${lockedContextFile ?: "null"}\n")
+            f.appendText("isContextLocked=$isContextLocked\n")
+            f.appendText("templatesMap.size=${templatesMap.size}\n")
+            f.appendText("keywordResponses.size=${keywordResponses.size}\n")
+            f.appendText("contextMap.size=${contextMap.size}\n")
+            f.appendText("invertedIndex.size=${invertedIndex.size}\n")
+            f.appendText("synonymsMap.size=${synonymsMap.size}\n")
+            f.appendText("stopwords.size=${stopwords.size}\n")
+            f.appendText("\n--- templates keys (first 200) ---\n")
+            templatesMap.keys.take(200).forEach { f.appendText("$it\n") }
+            f.appendText("\n--- keywordResponses keys (first 200) ---\n")
+            keywordResponses.keys.take(200).forEach { f.appendText("$it\n") }
+            f.appendText("\n=== END DUMP ===\n")
+            writeDebugLog("State dumped to ${f.absolutePath}")
+            runOnUiThread {
+                showCustomToast("Dump saved: ${f.absolutePath}")
+            }
+        } catch (e: Exception) {
+            writeDebugLog("dumpStateToFile failed: ${e.message}")
+            runOnUiThread { showCustomToast("Dump failed: ${e.message}") }
+        }
+    }
+    // ---------- end debug helper ----------
 
     private fun canonicalKeyFromTokens(tokens: List<String>): String = tokens.sorted().joinToString(" ")
     private fun canonicalKeyFromTextStatic(text: String, synonyms: Map<String, String>, stopwords: Set<String>): String {
@@ -618,6 +664,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                         rebuildInvertedIndex()
                         engine.computeTokenWeights()
                         updateAutoComplete()
+                        writeDebugLog("Unlocked context (no match in locked file). Falling back to base.txt")
                     }
                     fallbackFromLocked = true
                     attempt++
@@ -636,6 +683,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                         rebuildInvertedIndex()
                         engine.computeTokenWeights()
                         updateAutoComplete()
+                        writeDebugLog("Switched context to $detectedContext via detection")
                     }
                 }
 
@@ -778,6 +826,9 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     return@launch
                 }
 
+                // debug: log search failure context
+                writeDebugLog("No response found — qFiltered='$qFiltered' qCanonical='$qCanonical' templates=${templatesMap.size} keywords=${keywordResponses.size} invertedIndexSize=${invertedIndex.size} isContextLocked=${isContextLocked} currentContext=${currentContext} lockedFile=${lockedContextFile}")
+
                 val dummy = ChatCore.getDummyResponse(qOrig)
                 withContext(Dispatchers.Main) {
                     addChatMessage(currentMascotName, dummy)
@@ -812,6 +863,8 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 return@launch
             }
 
+            // final fallback: log and return dummy
+            writeDebugLog("Final fallback — no core/memory response. qFiltered='$qFiltered' currentContext=$currentContext lockedFile=${lockedContextFile}")
             val dummy = ChatCore.getDummyResponse(qOrig)
             withContext(Dispatchers.Main) {
                 addChatMessage(currentMascotName, dummy)
@@ -845,6 +898,18 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             }
             cmd == "/clear" || cmd == "очисти чат" -> {
                 clearChat()
+            }
+            cmd == "/dump" -> {
+                writeDebugLog("/dump requested")
+                dumpStateToFile()
+            }
+            cmd == "/log" -> {
+                val f = File(filesDir, debugLogFileName)
+                if (f.exists()) {
+                    addChatMessage(currentMascotName, "Логи: ${f.absolutePath}")
+                } else {
+                    addChatMessage(currentMascotName, "Лог-файл не найден. Нажмите /dump")
+                }
             }
             else -> {
                 addChatMessage(currentMascotName, getString(R.string.unknown_command, cmdRaw))
@@ -1124,6 +1189,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             rebuildInvertedIndex()
             engine.computeTokenWeights()
             updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
+            writeDebugLog("Loaded fallback templates (no folderUri)")
             return
         }
         try {
@@ -1132,6 +1198,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 rebuildInvertedIndex()
                 engine.computeTokenWeights()
                 updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
+                writeDebugLog("DocumentFile.fromTreeUri returned null")
                 return
             }
             val file = dir.findFile(filename)
@@ -1140,6 +1207,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 rebuildInvertedIndex()
                 engine.computeTokenWeights()
                 updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
+                writeDebugLog("File '$filename' not found; loaded fallback templates")
                 return
             }
             var firstNonEmptyLineChecked = false
@@ -1156,6 +1224,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                                 isContextLocked = true
                                 lockedContextFile = filename
                                 // do not `return` the whole loader — continue parsing the file so templatesMap fills normally
+                                writeDebugLog("Detected #CONTEXT in $filename -> isContextLocked=true")
                                 return@forEachLine
                             }
                         }
@@ -1244,9 +1313,11 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             }
             rebuildInvertedIndex()
             engine.computeTokenWeights()
+            writeDebugLog("Loaded file '$filename' templates=${templatesMap.size} keywords=${keywordResponses.size} isContextLocked=$isContextLocked lockedContextFile=$lockedContextFile")
             updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
         } catch (e: Exception) {
             showCustomToast(getString(R.string.error_reading_file, e.message ?: ""))
+            writeDebugLog("Error reading '$filename': ${e.message}")
             ChatCore.loadFallbackTemplates(templatesMap, keywordResponses, mascotList, contextMap)
             rebuildInvertedIndex()
             engine.computeTokenWeights()
