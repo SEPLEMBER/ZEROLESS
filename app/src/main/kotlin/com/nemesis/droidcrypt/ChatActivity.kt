@@ -1,4 +1,4 @@
-package com.nemesis.droidcrypt
+package com.pawstribe.chat
 
 import android.animation.ObjectAnimator
 import android.content.Intent
@@ -30,10 +30,10 @@ import java.util.*
 import kotlin.collections.ArrayList
 import kotlin.collections.HashMap
 import kotlin.math.roundToInt
-import com.nemesis.droidcrypt.Engine
-import com.nemesis.droidcrypt.ChatCore
-import com.nemesis.droidcrypt.MemoryManager
-import com.nemesis.droidcrypt.R
+import com.pawstribe.chat.Engine
+import com.pawstribe.chat.ChatCore
+import com.pawstribe.chat.MemoryManager
+import com.pawstribe.chat.R
 
 class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
@@ -374,6 +374,15 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             }
         }
 
+        // Also try the "raw" mapped key (some files use raw mapping)
+        val rawKey = Engine.filterStopwordsAndMapSynonymsStatic(qFiltered, synonymsSnapshot, stopwordsSnapshot).second
+        templatesSnapshot[rawKey]?.let { possible ->
+            if (possible.isNotEmpty() && !processedSubqueries.contains(rawKey)) {
+                subqueryResponses.add(possible.random())
+                processedSubqueries.add(rawKey)
+            }
+        }
+
         // token / keyword / bigram quick matches
         if (subqueryResponses.size < Engine.MAX_SUBQUERY_RESPONSES) {
             val tokens = if (qTokensFiltered.isNotEmpty()) qTokensFiltered else Engine.tokenizeStatic(qFiltered)
@@ -427,15 +436,10 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             }
         }
 
-        // --- New behavior for context-locked files:
-        // If the chat is locked on a file, we should still perform fuzzy/jaccard/levenshtein
-        // matches but strictly within templatesSnapshot (the currently loaded file).
-        //
-        // If not locked — behavior stays the same (use global invertedIndexSnapshot / fuzzy across all templates).
+        // --- Search scope: if context locked -> search only inside templatesSnapshot (current file).
+        // If not locked -> search globally via invertedIndexSnapshot.
         val maxDist = engine.getFuzzyDistance(qCanonical)
 
-        // Build candidateCounts: either from a local inverted index (only current file)
-        // or from the provided invertedIndexSnapshot (global)
         val candidateCounts = HashMap<String, Int>()
         val tokensToUse = if (qTokensFiltered.isNotEmpty()) qTokensFiltered else Engine.tokenizeStatic(qFiltered)
 
@@ -471,17 +475,17 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 .map { it.key }
                 .take(Engine.MAX_CANDIDATES_FOR_LEV)
         } else {
-            // fallback to length-based candidate selection — but restrict to templatesSnapshot keys
-            templatesSnapshot.keys.filter { kotlin.math.abs(it.length - qCanonical.length) <= maxDist }
+            // if no candidates from inverted-index, relax and consider all keys from current scope (templatesSnapshot)
+            templatesSnapshot.keys.filter { kotlin.math.abs(it.length - qCanonical.length) <= maxDist * 2 + 2 } // slightly looser
+                .ifEmpty { templatesSnapshot.keys } // as last resort consider all keys
                 .take(Engine.MAX_CANDIDATES_FOR_LEV)
         }
 
-        // Weighted Jaccard to choose best candidate
+        // Weighted Jaccard to choose best candidate (but restrict to templatesSnapshot entries)
         var bestByJaccard: String? = null
         var bestJaccard = 0.0
         val qSet = tokensToUse.toSet()
         for (key in candidates) {
-            // ensure candidate exists in templatesSnapshot (important when using global inverted index)
             val possible = templatesSnapshot[key] ?: continue
             val keyTokens = Engine.filterStopwordsAndMapSynonymsStatic(key, synonymsSnapshot, stopwordsSnapshot).first.toSet()
             if (keyTokens.isEmpty()) continue
@@ -502,15 +506,15 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         var bestKey: String? = null
         var bestDist = Int.MAX_VALUE
         for (key in candidates) {
-            if (kotlin.math.abs(key.length - qCanonical.length) > maxDist + 1) continue
-            val d = engine.levenshtein(qCanonical, key, qCanonical)
+            if (kotlin.math.abs(key.length - qCanonical.length) > maxDist + 3) continue
+            val d = try { engine.levenshtein(qCanonical, key, qCanonical) } catch (_: Exception) { Int.MAX_VALUE }
             if (d < bestDist) {
                 bestDist = d
                 bestKey = key
             }
             if (bestDist == 0) break
         }
-        if (bestKey != null && bestDist <= maxDist) {
+        if (bestKey != null && bestDist <= maxDist + 1) {
             val possible = templatesSnapshot[bestKey]
             if (!possible.isNullOrEmpty()) {
                 return possible.random()
