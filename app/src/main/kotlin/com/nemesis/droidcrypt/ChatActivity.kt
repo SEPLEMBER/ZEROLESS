@@ -71,6 +71,9 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private var currentContext = "base.txt"
     private var isContextLocked = false
 
+    // имя файла, который выставил #CONTEXT — полезно для отладки
+    private var lockedContextFile: String? = null
+
     private val dialogHandler = Handler(Looper.getMainLooper())
     private var idleCheckRunnable: Runnable? = null
     private var lastUserInputTime = System.currentTimeMillis()
@@ -366,6 +369,9 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         val subqueryResponses = mutableListOf<String>()
         val processedSubqueries = mutableSetOf<String>()
 
+        // 0) if templatesSnapshot is empty -> immediately return null (nothing to match here)
+        if (templatesSnapshot.isEmpty()) return null
+
         // exact canonical match first
         templatesSnapshot[qCanonical]?.let { possible ->
             if (possible.isNotEmpty()) {
@@ -485,6 +491,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         var bestByJaccard: String? = null
         var bestJaccard = 0.0
         val qSet = tokensToUse.toSet()
+        val effectiveJaccardThreshold = if (isContextLocked) (jaccardThreshold + 0.05).coerceAtMost(0.95) else jaccardThreshold
         for (key in candidates) {
             val possible = templatesSnapshot[key] ?: continue
             val keyTokens = Engine.filterStopwordsAndMapSynonymsStatic(key, synonymsSnapshot, stopwordsSnapshot).first.toSet()
@@ -495,7 +502,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 bestByJaccard = key
             }
         }
-        if (bestByJaccard != null && bestJaccard >= jaccardThreshold) {
+        if (bestByJaccard != null && bestJaccard >= effectiveJaccardThreshold) {
             val possible = templatesSnapshot[bestByJaccard]
             if (!possible.isNullOrEmpty()) {
                 return possible.random()
@@ -602,9 +609,11 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 }
 
                 if (isContextLocked) {
+                    // If locked and we didn't find anything in the locked file, fall back: unlock and try base/core.
                     withContext(Dispatchers.Main) {
                         currentContext = "base.txt"
                         isContextLocked = false
+                        lockedContextFile = null
                         loadTemplatesFromFile(currentContext)
                         rebuildInvertedIndex()
                         engine.computeTokenWeights()
@@ -663,7 +672,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 }
 
                 if (isContextLocked) {
-                    // Skip fuzzy matching in locked context (we already tried matching within file earlier)
+                    // Skip additional fuzzy matching at this stage; we already tried matching within the locked file.
                 } else {
                     val localInverted = HashMap<String, MutableList<String>>()
                     for ((k, v) in localTemplates) {
@@ -884,6 +893,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 queryCache.clear()
                 currentContext = "base.txt"
                 isContextLocked = false
+                lockedContextFile = null
                 loadTemplatesFromFile(currentContext)
                 rebuildInvertedIndex()
                 engine.computeTokenWeights()
@@ -1105,6 +1115,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         currentThemeColor = "#00FFFF"
         currentThemeBackground = "#0A0A0A"
         isContextLocked = false
+        lockedContextFile = null
 
         ChatCore.loadSynonymsAndStopwords(this, folderUri, synonymsMap, stopwords)
 
@@ -1135,16 +1146,20 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             contentResolver.openInputStream(file.uri)?.use { ins ->
                 InputStreamReader(ins, Charsets.UTF_8).buffered().use { reader ->
                     reader.forEachLine { raw ->
-                        val l = raw.trim()
+                        // remove BOM and invisible unicode that could be at the start of a file
+                        var l = raw.replace("\uFEFF", "").trim()
                         if (l.isEmpty()) return@forEachLine
                         if (!firstNonEmptyLineChecked) {
                             firstNonEmptyLineChecked = true
-                            if (l.equals("#CONTEXT", ignoreCase = true)) {
+                            // accept any line that starts with "#CONTEXT" (case-insensitive), this is more robust
+                            if (l.startsWith("#CONTEXT", ignoreCase = true)) {
                                 isContextLocked = true
+                                lockedContextFile = filename
+                                // do not `return` the whole loader — continue parsing the file so templatesMap fills normally
                                 return@forEachLine
                             }
                         }
-                        if (filename == "base.txt" && l.startsWith(":" ) && l.endsWith(":")) {
+                        if (filename == "base.txt" && l.startsWith(":") && l.endsWith(":")) {
                             val contextLine = l.substring(1, l.length - 1)
                             if (contextLine.contains("=")) {
                                 val parts = contextLine.split("=", limit = 2)
