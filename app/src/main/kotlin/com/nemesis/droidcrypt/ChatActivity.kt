@@ -366,6 +366,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         val subqueryResponses = mutableListOf<String>()
         val processedSubqueries = mutableSetOf<String>()
 
+        // exact canonical match first
         templatesSnapshot[qCanonical]?.let { possible ->
             if (possible.isNotEmpty()) {
                 subqueryResponses.add(possible.random())
@@ -373,6 +374,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             }
         }
 
+        // token / keyword / bigram quick matches
         if (subqueryResponses.size < Engine.MAX_SUBQUERY_RESPONSES) {
             val tokens = if (qTokensFiltered.isNotEmpty()) qTokensFiltered else Engine.tokenizeStatic(qFiltered)
 
@@ -415,6 +417,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             return subqueryResponses.joinToString(". ")
         }
 
+        // keywordResponses (phrase-level)
         val qTokenSet = if (qTokensFiltered.isNotEmpty()) qTokensFiltered.toSet() else Engine.tokenizeStatic(qFiltered).toSet()
         for ((keyword, responses) in keywordResponsesSnapshot) {
             if (keyword.isBlank() || responses.isEmpty()) continue
@@ -424,15 +427,40 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             }
         }
 
-        if (isContextLocked) {
-            return null
-        }
+        // --- New behavior for context-locked files:
+        // If the chat is locked on a file, we should still perform fuzzy/jaccard/levenshtein
+        // matches but strictly within templatesSnapshot (the currently loaded file).
+        //
+        // If not locked — behavior stays the same (use global invertedIndexSnapshot / fuzzy across all templates).
+        val maxDist = engine.getFuzzyDistance(qCanonical)
 
-        val qTokens = if (qTokensFiltered.isNotEmpty()) qTokensFiltered else Engine.tokenizeStatic(qFiltered)
+        // Build candidateCounts: either from a local inverted index (only current file)
+        // or from the provided invertedIndexSnapshot (global)
         val candidateCounts = HashMap<String, Int>()
-        for (tok in qTokens) {
-            invertedIndexSnapshot[tok]?.forEach { trig ->
-                candidateCounts[trig] = candidateCounts.getOrDefault(trig, 0) + 1
+        val tokensToUse = if (qTokensFiltered.isNotEmpty()) qTokensFiltered else Engine.tokenizeStatic(qFiltered)
+
+        if (isContextLocked) {
+            // build local inverted index from templatesSnapshot keys (tokens -> triggers)
+            val localInverted = HashMap<String, MutableList<String>>()
+            for (key in templatesSnapshot.keys) {
+                if (key.isBlank()) continue
+                val toks = key.split(" ").filter { it.isNotEmpty() }
+                for (t in toks) {
+                    val list = localInverted.getOrPut(t) { mutableListOf() }
+                    if (!list.contains(key)) list.add(key)
+                }
+            }
+            for (tok in tokensToUse) {
+                localInverted[tok]?.forEach { trig ->
+                    candidateCounts[trig] = candidateCounts.getOrDefault(trig, 0) + 1
+                }
+            }
+        } else {
+            // use global inverted index snapshot (existing behavior)
+            for (tok in tokensToUse) {
+                invertedIndexSnapshot[tok]?.forEach { trig ->
+                    candidateCounts[trig] = candidateCounts.getOrDefault(trig, 0) + 1
+                }
             }
         }
 
@@ -443,15 +471,18 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 .map { it.key }
                 .take(Engine.MAX_CANDIDATES_FOR_LEV)
         } else {
-            val maxDist = engine.getFuzzyDistance(qCanonical)
+            // fallback to length-based candidate selection — but restrict to templatesSnapshot keys
             templatesSnapshot.keys.filter { kotlin.math.abs(it.length - qCanonical.length) <= maxDist }
                 .take(Engine.MAX_CANDIDATES_FOR_LEV)
         }
 
+        // Weighted Jaccard to choose best candidate
         var bestByJaccard: String? = null
         var bestJaccard = 0.0
-        val qSet = qTokens.toSet()
+        val qSet = tokensToUse.toSet()
         for (key in candidates) {
+            // ensure candidate exists in templatesSnapshot (important when using global inverted index)
+            val possible = templatesSnapshot[key] ?: continue
             val keyTokens = Engine.filterStopwordsAndMapSynonymsStatic(key, synonymsSnapshot, stopwordsSnapshot).first.toSet()
             if (keyTokens.isEmpty()) continue
             val weightedJ = engine.weightedJaccard(qSet, keyTokens)
@@ -467,10 +498,10 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             }
         }
 
+        // Levenshtein fallback among candidates (cache maxDist)
         var bestKey: String? = null
         var bestDist = Int.MAX_VALUE
         for (key in candidates) {
-            val maxDist = engine.getFuzzyDistance(qCanonical)
             if (kotlin.math.abs(key.length - qCanonical.length) > maxDist + 1) continue
             val d = engine.levenshtein(qCanonical, key, qCanonical)
             if (d < bestDist) {
@@ -479,14 +510,14 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             }
             if (bestDist == 0) break
         }
-        val maxDistLocal = engine.getFuzzyDistance(qCanonical)
-        if (bestKey != null && bestDist <= maxDistLocal) {
+        if (bestKey != null && bestDist <= maxDist) {
             val possible = templatesSnapshot[bestKey]
             if (!possible.isNullOrEmpty()) {
                 return possible.random()
             }
         }
 
+        // nothing found within the current scope (file or global depending on lock)
         return null
     }
 
@@ -628,7 +659,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 }
 
                 if (isContextLocked) {
-                    // Skip fuzzy matching in locked context
+                    // Skip fuzzy matching in locked context (we already tried matching within file earlier)
                 } else {
                     val localInverted = HashMap<String, MutableList<String>>()
                     for ((k, v) in localTemplates) {
@@ -1287,7 +1318,8 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         lastUserInputTime = System.currentTimeMillis()
         idleCheckRunnable?.let {
             dialogHandler.removeCallbacks(it)
-            dialogHandler.postDelayed(it, 500000)
+            // corrected to 5000 ms to match scheduling elsewhere
+            dialogHandler.postDelayed(it, 5000)
         }
     }
 }
