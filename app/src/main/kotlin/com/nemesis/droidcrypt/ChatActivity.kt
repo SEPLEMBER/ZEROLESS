@@ -1,4 +1,4 @@
-package com.pawstribe.chat
+package com.nemesis.droidcrypt
 
 import android.animation.ObjectAnimator
 import android.content.Intent
@@ -32,10 +32,10 @@ import java.util.*
 import kotlin.collections.ArrayList
 import kotlin.collections.HashMap
 import kotlin.math.roundToInt
-import com.pawstribe.chat.Engine
-import com.pawstribe.chat.ChatCore
-import com.pawstribe.chat.MemoryManager
-import com.pawstribe.chat.R
+import com.nemesis.droidcrypt.Engine
+import com.nemesis.droidcrypt.ChatCore
+import com.nemesis.droidcrypt.MemoryManager
+import com.nemesis.droidcrypt.R
 
 class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
