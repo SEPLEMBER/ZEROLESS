@@ -1,4 +1,4 @@
-package com.nemesis.droidcrypt
+package com.pawstribe.chat
 
 import android.animation.ObjectAnimator
 import android.content.Intent
@@ -32,10 +32,10 @@ import java.util.*
 import kotlin.collections.ArrayList
 import kotlin.collections.HashMap
 import kotlin.math.roundToInt
-import com.nemesis.droidcrypt.Engine
-import com.nemesis.droidcrypt.ChatCore
-import com.nemesis.droidcrypt.MemoryManager
-import com.nemesis.droidcrypt.R
+import com.pawstribe.chat.Engine
+import com.pawstribe.chat.ChatCore
+import com.pawstribe.chat.MemoryManager
+import com.pawstribe.chat.R
 
 class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
@@ -81,6 +81,8 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private var lastUserInputTime = System.currentTimeMillis()
     private val random = Random()
     private val queryTimestamps = HashMap<String, MutableList<Long>>()
+    private val debugBuffer: ArrayDeque<String> = ArrayDeque()
+    private val maxDebugLines = 100
     private var lastSendTime = 0L
     private val queryCache = object : LinkedHashMap<String, String>(Engine.MAX_CACHE_SIZE, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, String>?): Boolean {
@@ -89,17 +91,12 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     }
 
     // ---------- debug logging helper ----------
-    private val debugLogFileName = "paws_debug.log"
-    private fun writeDebugLog(line: String) {
-        try {
-            val f = File(filesDir, debugLogFileName)
-            val ts = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.ROOT).format(Date())
-            f.appendText("$ts | $line\n")
-        } catch (e: Exception) {
-            // best-effort, не ломаем работу приложения
-            try {
-                runOnUiThread { Toast.makeText(this, "Debug write failed: ${e.message}", Toast.LENGTH_SHORT).show() }
-            } catch (_: Exception) { }
+        private fun writeDebugLog(line: String) {
+        val ts = SimpleDateFormat("HH:mm:ss.SSS", Locale.ROOT).format(Date())
+        val msg = "$ts | $line"
+        debugBuffer.addLast(msg)
+        if (debugBuffer.size > maxDebugLines) {
+            debugBuffer.removeFirst()
         }
     }
 
@@ -903,12 +900,12 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 writeDebugLog("/dump requested")
                 dumpStateToFile()
             }
-            cmd == "/log" -> {
-                val f = File(filesDir, debugLogFileName)
-                if (f.exists()) {
-                    addChatMessage(currentMascotName, "Логи: ${f.absolutePath}")
+                        cmd == "/log" -> {
+                if (debugBuffer.isEmpty()) {
+                    addChatMessage(currentMascotName, "Лог пуст.")
                 } else {
-                    addChatMessage(currentMascotName, "Лог-файл не найден. Нажмите /dump")
+                    val text = debugBuffer.joinToString("\n")
+                    addChatMessage(currentMascotName, "Лог:\n$text")
                 }
             }
             else -> {
