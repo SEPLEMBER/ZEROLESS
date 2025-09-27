@@ -1502,3 +1502,4 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             return null
         }
     }
+}
