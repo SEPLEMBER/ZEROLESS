@@ -39,7 +39,7 @@
     <string name="inp_text">Напиши сообщение...</string>
     <string name="no_log_available">No log available</string>
 <string name="log_copied_to_clipboard">Log copied to clipboard</string>
-<string name="error_copying_log">Error copying log</string>
+<string name="error_copying_log">Error copying log: %s</string>
 
 
     <string name="trigger_hello">привет</string>
