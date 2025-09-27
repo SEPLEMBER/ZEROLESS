@@ -1,6 +1,9 @@
 package com.nemesis.droidcrypt
 
 import android.animation.ObjectAnimator
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
 import android.graphics.BitmapFactory
 import android.graphics.Color
@@ -81,8 +84,6 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private var lastUserInputTime = System.currentTimeMillis()
     private val random = Random()
     private val queryTimestamps = HashMap<String, MutableList<Long>>()
-    private val debugBuffer: ArrayDeque<String> = ArrayDeque()
-    private val maxDebugLines = 100
     private var lastSendTime = 0L
     private val queryCache = object : LinkedHashMap<String, String>(Engine.MAX_CACHE_SIZE, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, String>?): Boolean {
@@ -91,17 +92,21 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     }
 
     // ---------- debug logging helper ----------
-        private fun writeDebugLog(line: String) {
-        val ts = SimpleDateFormat("HH:mm:ss.SSS", Locale.ROOT).format(Date())
-        val msg = "$ts | $line"
-        debugBuffer.addLast(msg)
-        if (debugBuffer.size > maxDebugLines) {
-            debugBuffer.removeFirst()
+    private val debugLogFileName = "paws_debug.log"
+
+    private fun writeDebugLog(line: String) {
+        try {
+            val f = File(filesDir, debugLogFileName)
+            val ts = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.ROOT).format(Date())
+            f.appendText("$ts | $line\n")
+        } catch (e: Exception) {
+            // best-effort
+            try { runOnUiThread { Toast.makeText(this, "Debug write failed: ${e.message}", Toast.LENGTH_SHORT).show() } } catch (_: Exception) {}
         }
     }
 
-    private fun dumpStateToFile() {
-        try {
+    private fun dumpStateToFile(): String? {
+        return try {
             val f = File(filesDir, debugLogFileName)
             f.writeText("=== DUMP STATE ${Date()} ===\n")
             f.appendText("currentContext=$currentContext\n")
@@ -119,12 +124,58 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             keywordResponses.keys.take(200).forEach { f.appendText("$it\n") }
             f.appendText("\n=== END DUMP ===\n")
             writeDebugLog("State dumped to ${f.absolutePath}")
-            runOnUiThread {
-                showCustomToast("Dump saved: ${f.absolutePath}")
-            }
+            runOnUiThread { showCustomToast("Dump saved: ${f.absolutePath}") }
+            f.absolutePath
         } catch (e: Exception) {
             writeDebugLog("dumpStateToFile failed: ${e.message}")
             runOnUiThread { showCustomToast("Dump failed: ${e.message}") }
+            null
+        }
+    }
+
+    private fun copyLogToClipboard(maxChars: Int = 120_000) {
+        try {
+            val f = File(filesDir, debugLogFileName)
+            if (!f.exists()) {
+                showCustomToast("Лог не найден. Сначала выполните /dump")
+                return
+            }
+            var content = f.readText()
+            // Если очень большой — возьмём хвост (последние символы), так часто полезнее.
+            if (content.length > maxChars) {
+                content = content.takeLast(maxChars)
+                content = "[...TRUNCATED head...]\n" + content
+            }
+            val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            val clip = ClipData.newPlainText("paws_debug_log", content)
+            clipboard.setPrimaryClip(clip)
+            showCustomToast("Лог скопирован в буфер обмена (${minOf(content.length, maxChars)} chars).")
+            writeDebugLog("Log copied to clipboard (length=${content.length})")
+        } catch (e: Exception) {
+            writeDebugLog("copyLogToClipboard failed: ${e.message}")
+            showCustomToast("Ошибка копирования лога: ${e.message}")
+        }
+    }
+
+    private fun shareLogViaIntent(maxChars: Int = 200_000) {
+        try {
+            val f = File(filesDir, debugLogFileName)
+            if (!f.exists()) {
+                showCustomToast("Лог не найден. Сначала выполните /dump")
+                return
+            }
+            var content = f.readText()
+            if (content.length > maxChars) content = content.takeLast(maxChars).let { "[...TRUNCATED head...]\n$it" }
+            val send = Intent().apply {
+                action = Intent.ACTION_SEND
+                putExtra(Intent.EXTRA_TEXT, content)
+                type = "text/plain"
+            }
+            startActivity(Intent.createChooser(send, "Share debug log"))
+            writeDebugLog("Log shared via ACTION_SEND (length=${content.length})")
+        } catch (e: Exception) {
+            writeDebugLog("shareLogViaIntent failed: ${e.message}")
+            showCustomToast("Ошибка шаринга лога: ${e.message}")
         }
     }
     // ---------- end debug helper ----------
@@ -313,13 +364,11 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     override fun onInit(status: Int) {
         if (status == TextToSpeech.SUCCESS) {
-            // start with system default, we'll switch per-text when speaking
             try {
                 tts?.language = Locale.getDefault()
             } catch (_: Exception) { }
             tts?.setPitch(1.0f)
             tts?.setSpeechRate(1.0f)
-        } else {
         }
     }
 
@@ -412,10 +461,8 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         val subqueryResponses = mutableListOf<String>()
         val processedSubqueries = mutableSetOf<String>()
 
-        // 0) if templatesSnapshot is empty -> immediately return null (nothing to match here)
         if (templatesSnapshot.isEmpty()) return null
 
-        // exact canonical match first
         templatesSnapshot[qCanonical]?.let { possible ->
             if (possible.isNotEmpty()) {
                 subqueryResponses.add(possible.random())
@@ -423,7 +470,6 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             }
         }
 
-        // Also try the "raw" mapped key (some files use raw mapping)
         val rawKey = Engine.filterStopwordsAndMapSynonymsStatic(qFiltered, synonymsSnapshot, stopwordsSnapshot).second
         templatesSnapshot[rawKey]?.let { possible ->
             if (possible.isNotEmpty() && !processedSubqueries.contains(rawKey)) {
@@ -432,7 +478,6 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             }
         }
 
-        // token / keyword / bigram quick matches
         if (subqueryResponses.size < Engine.MAX_SUBQUERY_RESPONSES) {
             val tokens = if (qTokensFiltered.isNotEmpty()) qTokensFiltered else Engine.tokenizeStatic(qFiltered)
 
@@ -475,7 +520,6 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             return subqueryResponses.joinToString(". ")
         }
 
-        // keywordResponses (phrase-level)
         val qTokenSet = if (qTokensFiltered.isNotEmpty()) qTokensFiltered.toSet() else Engine.tokenizeStatic(qFiltered).toSet()
         for ((keyword, responses) in keywordResponsesSnapshot) {
             if (keyword.isBlank() || responses.isEmpty()) continue
@@ -485,15 +529,12 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             }
         }
 
-        // --- Search scope: if context locked -> search only inside templatesSnapshot (current file).
-        // If not locked -> search globally via invertedIndexSnapshot.
         val maxDist = engine.getFuzzyDistance(qCanonical)
 
         val candidateCounts = HashMap<String, Int>()
         val tokensToUse = if (qTokensFiltered.isNotEmpty()) qTokensFiltered else Engine.tokenizeStatic(qFiltered)
 
         if (isContextLocked) {
-            // build local inverted index from templatesSnapshot keys (tokens -> triggers)
             val localInverted = HashMap<String, MutableList<String>>()
             for (key in templatesSnapshot.keys) {
                 if (key.isBlank()) continue
@@ -509,7 +550,6 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 }
             }
         } else {
-            // use global inverted index snapshot (existing behavior)
             for (tok in tokensToUse) {
                 invertedIndexSnapshot[tok]?.forEach { trig ->
                     candidateCounts[trig] = candidateCounts.getOrDefault(trig, 0) + 1
@@ -524,13 +564,11 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 .map { it.key }
                 .take(Engine.MAX_CANDIDATES_FOR_LEV)
         } else {
-            // if no candidates from inverted-index, relax and consider all keys from current scope (templatesSnapshot)
-            templatesSnapshot.keys.filter { kotlin.math.abs(it.length - qCanonical.length) <= maxDist * 2 + 2 } // slightly looser
-                .ifEmpty { templatesSnapshot.keys } // as last resort consider all keys
+            templatesSnapshot.keys.filter { kotlin.math.abs(it.length - qCanonical.length) <= maxDist * 2 + 2 }
+                .ifEmpty { templatesSnapshot.keys }
                 .take(Engine.MAX_CANDIDATES_FOR_LEV)
         }
 
-        // Weighted Jaccard to choose best candidate (but restrict to templatesSnapshot entries)
         var bestByJaccard: String? = null
         var bestJaccard = 0.0
         val qSet = tokensToUse.toSet()
@@ -552,7 +590,6 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             }
         }
 
-        // Levenshtein fallback among candidates (cache maxDist)
         var bestKey: String? = null
         var bestDist = Int.MAX_VALUE
         for (key in candidates) {
@@ -571,7 +608,6 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             }
         }
 
-        // nothing found within the current scope (file or global depending on lock)
         return null
     }
 
@@ -652,7 +688,6 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 }
 
                 if (isContextLocked) {
-                    // If locked and we didn't find anything in the locked file, fall back: unlock and try base/core.
                     withContext(Dispatchers.Main) {
                         currentContext = "base.txt"
                         isContextLocked = false
@@ -823,7 +858,6 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     return@launch
                 }
 
-                // debug: log search failure context
                 writeDebugLog("No response found — qFiltered='$qFiltered' qCanonical='$qCanonical' templates=${templatesMap.size} keywords=${keywordResponses.size} invertedIndexSize=${invertedIndex.size} isContextLocked=${isContextLocked} currentContext=${currentContext} lockedFile=${lockedContextFile}")
 
                 val dummy = ChatCore.getDummyResponse(qOrig)
@@ -860,7 +894,6 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 return@launch
             }
 
-            // final fallback: log and return dummy
             writeDebugLog("Final fallback — no core/memory response. qFiltered='$qFiltered' currentContext=$currentContext lockedFile=${lockedContextFile}")
             val dummy = ChatCore.getDummyResponse(qOrig)
             withContext(Dispatchers.Main) {
@@ -900,12 +933,20 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 writeDebugLog("/dump requested")
                 dumpStateToFile()
             }
-                        cmd == "/log" -> {
-                if (debugBuffer.isEmpty()) {
-                    addChatMessage(currentMascotName, "Лог пуст.")
+            cmd == "/copylog" -> {
+                writeDebugLog("/copylog requested")
+                copyLogToClipboard()
+            }
+            cmd == "/sharelog" -> {
+                writeDebugLog("/sharelog requested")
+                shareLogViaIntent()
+            }
+            cmd == "/log" -> {
+                val f = File(filesDir, debugLogFileName)
+                if (f.exists()) {
+                    addChatMessage(currentMascotName, "Логи: ${f.absolutePath}")
                 } else {
-                    val text = debugBuffer.joinToString("\n")
-                    addChatMessage(currentMascotName, "Лог:\n$text")
+                    addChatMessage(currentMascotName, "Лог-файл не найден. Нажмите /dump")
                 }
             }
             else -> {
@@ -1211,16 +1252,13 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             contentResolver.openInputStream(file.uri)?.use { ins ->
                 InputStreamReader(ins, Charsets.UTF_8).buffered().use { reader ->
                     reader.forEachLine { raw ->
-                        // remove BOM and invisible unicode that could be at the start of a file
                         var l = raw.replace("\uFEFF", "").trim()
                         if (l.isEmpty()) return@forEachLine
                         if (!firstNonEmptyLineChecked) {
                             firstNonEmptyLineChecked = true
-                            // accept any line that starts with "#CONTEXT" (case-insensitive), this is more robust
                             if (l.startsWith("#CONTEXT", ignoreCase = true)) {
                                 isContextLocked = true
                                 lockedContextFile = filename
-                                // do not `return` the whole loader — continue parsing the file so templatesMap fills normally
                                 writeDebugLog("Detected #CONTEXT in $filename -> isContextLocked=true")
                                 return@forEachLine
                             }
@@ -1405,7 +1443,6 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         lastUserInputTime = System.currentTimeMillis()
         idleCheckRunnable?.let {
             dialogHandler.removeCallbacks(it)
-            // corrected to 5000 ms to match scheduling elsewhere
             dialogHandler.postDelayed(it, 5000)
         }
     }
