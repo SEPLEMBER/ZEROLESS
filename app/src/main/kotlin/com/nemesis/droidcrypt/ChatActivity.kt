@@ -30,7 +30,10 @@ import java.util.*
 import kotlin.collections.ArrayList
 import kotlin.collections.HashMap
 import kotlin.math.roundToInt
-import kotlin.math.abs
+import com.nemesis.droidcrypt.Engine
+import com.nemesis.droidcrypt.ChatCore
+import com.nemesis.droidcrypt.MemoryManager
+import com.nemesis.droidcrypt.R
 
 class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
@@ -54,14 +57,13 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private var tts: TextToSpeech? = null
 
-    // single mascot model
     private val templatesMap = HashMap<String, MutableList<String>>()
     private val contextMap = HashMap<String, String>()
     private val keywordResponses = HashMap<String, MutableList<String>>()
+    private val mascotList = mutableListOf<Map<String, String>>()
     private val invertedIndex = HashMap<String, MutableList<String>>()
     private val synonymsMap = HashMap<String, String>()
     private val stopwords = HashSet<String>()
-
     private var currentMascotName = "Racky"
     private var currentMascotIcon = "raccoon_icon.png"
     private var currentThemeColor = "#00FFFF"
@@ -70,6 +72,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private var isContextLocked = false
 
     private val dialogHandler = Handler(Looper.getMainLooper())
+    private var idleCheckRunnable: Runnable? = null
     private var lastUserInputTime = System.currentTimeMillis()
     private val random = Random()
     private val queryTimestamps = HashMap<String, MutableList<Long>>()
@@ -80,7 +83,6 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
     }
 
-    // helper canonical key builder
     private fun canonicalKeyFromTokens(tokens: List<String>): String = tokens.sorted().joinToString(" ")
     private fun canonicalKeyFromTextStatic(text: String, synonyms: Map<String, String>, stopwords: Set<String>): String {
         val normalized = normalizeForProcessing(text)
@@ -88,12 +90,13 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         return canonicalKeyFromTokens(toks)
     }
 
+    // Normalize unicode and unify whitespace for downstream processing
     private fun normalizeForProcessing(s: String): String {
         val norm = Normalizer.normalize(s, Normalizer.Form.NFC)
         return norm.replace(Regex("\\s+"), " ").trim()
     }
 
-    // language hint by script
+    // Basic script-based language hint (best-effort)
     private fun detectLanguageTagByScript(text: String): String {
         val t = text.trim()
         if (t.isEmpty()) return Locale.getDefault().language
@@ -122,6 +125,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             if (available >= TextToSpeech.LANG_AVAILABLE) {
                 tts?.language = loc
             } else {
+                // fallback to system default
                 tts?.language = Locale.getDefault()
             }
         } catch (_: Exception) {
@@ -164,21 +168,25 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 val saved = prefs.getString(PREF_KEY_FOLDER_URI, null)
                 if (saved != null) folderUri = Uri.parse(saved)
             }
-        } catch (_: Exception) {}
+        } catch (e: Exception) {
+        }
 
         ChatCore.loadSynonymsAndStopwords(this, folderUri, synonymsMap, stopwords)
+
         engine = Engine(templatesMap, synonymsMap, stopwords)
 
         try {
             MemoryManager.init(this)
             MemoryManager.loadTemplatesFromFolder(this, folderUri)
-        } catch (_: Exception) {}
+        } catch (e: Exception) {
+        }
 
         try {
-            val prefs = getSharedPreferences("RacoonTalkPrefs", MODE_PRIVATE)
+            val prefs = getSharedPreferences("PawsTribePrefs", MODE_PRIVATE)
             val disable = prefs.getBoolean("disableScreenshots", false)
             if (disable) window.addFlags(WindowManager.LayoutParams.FLAG_SECURE) else window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
-        } catch (_: Exception) {}
+        } catch (e: Exception) {
+        }
 
         loadToolbarIcons()
         setupIconTouchEffect(btnLock)
@@ -217,18 +225,55 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         tts = TextToSpeech(this, this)
 
-        // Load templates once at startup
-        loadTemplatesFromFile(currentContext)
-        rebuildInvertedIndex()
-        engine.computeTokenWeights()
-        updateAutoComplete()
+        if (folderUri == null) {
+            showCustomToast(getString(R.string.toast_folder_not_selected))
+            ChatCore.loadFallbackTemplates(templatesMap, keywordResponses, mascotList, contextMap)
+            rebuildInvertedIndex()
+            engine.computeTokenWeights()
+            updateAutoComplete()
+            addChatMessage(currentMascotName, getString(R.string.welcome_message))
+        } else {
+            loadTemplatesFromFile(currentContext)
+            try {
+                MemoryManager.loadTemplatesFromFolder(this, folderUri)
+            } catch (_: Exception) {}
+            rebuildInvertedIndex()
+            engine.computeTokenWeights()
+            updateAutoComplete()
+            addChatMessage(currentMascotName, getString(R.string.welcome_message))
+        }
+
+        queryInput.setOnItemClickListener { parent, _, position, _ ->
+            val selected = parent.getItemAtPosition(position) as String
+            queryInput.setText(selected)
+            processUserQuery(selected)
+        }
+
+        idleCheckRunnable = object : Runnable {
+            override fun run() {
+                if (System.currentTimeMillis() - lastUserInputTime > Engine.IDLE_TIMEOUT_MS) {
+                    val idleMessage = listOf(
+                        getString(R.string.idle_msg_1),
+                        getString(R.string.idle_msg_2),
+                        getString(R.string.idle_msg_3)
+                    ).random()
+                    addChatMessage(currentMascotName, idleMessage)
+                }
+                dialogHandler.postDelayed(this, 500000)
+            }
+        }
+        idleCheckRunnable?.let { dialogHandler.postDelayed(it, 500000) }
     }
 
     override fun onInit(status: Int) {
         if (status == TextToSpeech.SUCCESS) {
-            try { tts?.language = Locale.getDefault() } catch (_: Exception) {}
+            // start with system default, we'll switch per-text when speaking
+            try {
+                tts?.language = Locale.getDefault()
+            } catch (_: Exception) { }
             tts?.setPitch(1.0f)
             tts?.setSpeechRate(1.0f)
+        } else {
         }
     }
 
@@ -243,10 +288,17 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     override fun onResume() {
         super.onResume()
         folderUri?.let { loadTemplatesFromFile(currentContext) }
-        try { MemoryManager.loadTemplatesFromFolder(this, folderUri) } catch (_: Exception) {}
+        try {
+            MemoryManager.loadTemplatesFromFolder(this, folderUri)
+        } catch (e: Exception) {
+        }
         rebuildInvertedIndex()
         engine.computeTokenWeights()
         updateAutoComplete()
+        idleCheckRunnable?.let {
+            dialogHandler.removeCallbacks(it)
+            dialogHandler.postDelayed(it, 500000)
+        }
         loadToolbarIcons()
     }
 
@@ -286,65 +338,442 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                             target.setImageBitmap(bmp)
                         }
                     }
-                } catch (_: Exception) {}
+                } catch (e: Exception) {
+                }
             }
             tryLoadToImageButton("lock.png", btnLock)
             tryLoadToImageButton("trash.png", btnTrash)
             tryLoadToImageButton("envelope.png", btnEnvelopeTop)
             tryLoadToImageButton("settings.png", btnSettings)
             tryLoadToImageButton("send.png", envelopeInputButton)
-        } catch (_: Exception) {}
+        } catch (e: Exception) {
+        }
     }
 
-    // Simplified processing: use ChatCore.findBestResponse (it handles core/context/memory)
+    private suspend fun matchInCurrent(
+        qOrigRaw: String,
+        qTokensFiltered: List<String>,
+        qFiltered: String,
+        qCanonical: String,
+        qKeyForCount: String,
+        templatesSnapshot: HashMap<String, MutableList<String>>,
+        invertedIndexSnapshot: HashMap<String, MutableList<String>>,
+        synonymsSnapshot: HashMap<String, String>,
+        stopwordsSnapshot: HashSet<String>,
+        keywordResponsesSnapshot: HashMap<String, MutableList<String>>,
+        jaccardThreshold: Double
+    ): String? {
+        val subqueryResponses = mutableListOf<String>()
+        val processedSubqueries = mutableSetOf<String>()
+
+        templatesSnapshot[qCanonical]?.let { possible ->
+            if (possible.isNotEmpty()) {
+                subqueryResponses.add(possible.random())
+                processedSubqueries.add(qCanonical)
+            }
+        }
+
+        if (subqueryResponses.size < Engine.MAX_SUBQUERY_RESPONSES) {
+            val tokens = if (qTokensFiltered.isNotEmpty()) qTokensFiltered else Engine.tokenizeStatic(qFiltered)
+
+            try { engine.updateMemory(tokens) } catch (_: Exception) {}
+
+            for (token in tokens) {
+                if (subqueryResponses.size >= Engine.MAX_SUBQUERY_RESPONSES) break
+                if (processedSubqueries.contains(token) || token.length < 2) continue
+                templatesSnapshot[token]?.let { possible ->
+                    if (possible.isNotEmpty()) {
+                        subqueryResponses.add(possible.random())
+                        processedSubqueries.add(token)
+                    }
+                }
+                if (subqueryResponses.size < Engine.MAX_SUBQUERY_RESPONSES) {
+                    keywordResponsesSnapshot[token]?.let { possible ->
+                        if (possible.isNotEmpty()) {
+                            subqueryResponses.add(possible.random())
+                            processedSubqueries.add(token)
+                        }
+                    }
+                }
+            }
+            if (subqueryResponses.size < Engine.MAX_SUBQUERY_RESPONSES && tokens.size > 1) {
+                for (i in 0 until tokens.size - 1) {
+                    if (subqueryResponses.size >= Engine.MAX_SUBQUERY_RESPONSES) break
+                    val twoTokens = "${tokens[i]} ${tokens[i + 1]}"
+                    if (processedSubqueries.contains(twoTokens)) continue
+                    templatesSnapshot[twoTokens]?.let { possible ->
+                        if (possible.isNotEmpty()) {
+                            subqueryResponses.add(possible.random())
+                            processedSubqueries.add(twoTokens)
+                        }
+                    }
+                }
+            }
+        }
+
+        if (subqueryResponses.isNotEmpty()) {
+            return subqueryResponses.joinToString(". ")
+        }
+
+        val qTokenSet = if (qTokensFiltered.isNotEmpty()) qTokensFiltered.toSet() else Engine.tokenizeStatic(qFiltered).toSet()
+        for ((keyword, responses) in keywordResponsesSnapshot) {
+            if (keyword.isBlank() || responses.isEmpty()) continue
+            val kwTokens = keyword.split(" ").filter { it.isNotEmpty() }.toSet()
+            if (qTokenSet.intersect(kwTokens).isNotEmpty()) {
+                return responses.random()
+            }
+        }
+
+        if (isContextLocked) {
+            return null
+        }
+
+        val qTokens = if (qTokensFiltered.isNotEmpty()) qTokensFiltered else Engine.tokenizeStatic(qFiltered)
+        val candidateCounts = HashMap<String, Int>()
+        for (tok in qTokens) {
+            invertedIndexSnapshot[tok]?.forEach { trig ->
+                candidateCounts[trig] = candidateCounts.getOrDefault(trig, 0) + 1
+            }
+        }
+
+        val candidates: List<String> = if (candidateCounts.isNotEmpty()) {
+            candidateCounts.entries
+                .filter { it.value >= Engine.CANDIDATE_TOKEN_THRESHOLD }
+                .sortedByDescending { it.value }
+                .map { it.key }
+                .take(Engine.MAX_CANDIDATES_FOR_LEV)
+        } else {
+            val maxDist = engine.getFuzzyDistance(qCanonical)
+            templatesSnapshot.keys.filter { kotlin.math.abs(it.length - qCanonical.length) <= maxDist }
+                .take(Engine.MAX_CANDIDATES_FOR_LEV)
+        }
+
+        var bestByJaccard: String? = null
+        var bestJaccard = 0.0
+        val qSet = qTokens.toSet()
+        for (key in candidates) {
+            val keyTokens = Engine.filterStopwordsAndMapSynonymsStatic(key, synonymsSnapshot, stopwordsSnapshot).first.toSet()
+            if (keyTokens.isEmpty()) continue
+            val weightedJ = engine.weightedJaccard(qSet, keyTokens)
+            if (weightedJ > bestJaccard) {
+                bestJaccard = weightedJ
+                bestByJaccard = key
+            }
+        }
+        if (bestByJaccard != null && bestJaccard >= jaccardThreshold) {
+            val possible = templatesSnapshot[bestByJaccard]
+            if (!possible.isNullOrEmpty()) {
+                return possible.random()
+            }
+        }
+
+        var bestKey: String? = null
+        var bestDist = Int.MAX_VALUE
+        for (key in candidates) {
+            val maxDist = engine.getFuzzyDistance(qCanonical)
+            if (kotlin.math.abs(key.length - qCanonical.length) > maxDist + 1) continue
+            val d = engine.levenshtein(qCanonical, key, qCanonical)
+            if (d < bestDist) {
+                bestDist = d
+                bestKey = key
+            }
+            if (bestDist == 0) break
+        }
+        val maxDistLocal = engine.getFuzzyDistance(qCanonical)
+        if (bestKey != null && bestDist <= maxDistLocal) {
+            val possible = templatesSnapshot[bestKey]
+            if (!possible.isNullOrEmpty()) {
+                return possible.random()
+            }
+        }
+
+        return null
+    }
+
     private fun processUserQuery(userInput: String) {
         if (userInput.startsWith("/")) {
             handleCommand(userInput.trim())
             return
         }
-        val qOrigRaw = userInput.trim()
-        if (qOrigRaw.isEmpty()) return
 
+        val qOrigRaw = userInput.trim()
         val qOrig = Engine.normalizeText(qOrigRaw)
         val (qTokensFiltered, qFiltered) = engine.filterStopwordsAndMapSynonyms(qOrig)
         val qCanonical = if (qTokensFiltered.isNotEmpty()) canonicalKeyFromTokens(qTokensFiltered) else canonicalKeyFromTextStatic(qFiltered, synonymsMap, stopwords)
-        val qKeyForCount = qCanonical.ifBlank { qFiltered }
+        val qKeyForCount = qCanonical
 
-        // spam protection / simple caching
-        val now = System.currentTimeMillis()
-        val timestamps = queryTimestamps.getOrPut(qKeyForCount) { mutableListOf() }
-        timestamps.add(now)
-        timestamps.removeAll { it < now - Engine.SPAM_WINDOW_MS }
-        if (timestamps.size >= 6) {
-            val spamResp = ChatCore.getAntiSpamResponse()
-            addChatMessage(currentMascotName, spamResp)
-            return
-        }
+        if (qFiltered.isEmpty()) return
 
         queryCache[qKeyForCount]?.let { cachedResponse ->
             try { MemoryManager.processIncoming(this, qOrigRaw) } catch (_: Exception) {}
             addChatMessage(currentMascotName, cachedResponse)
+            startIdleTimer()
             return
         }
 
         lastUserInputTime = System.currentTimeMillis()
+
         addChatMessage(getString(R.string.user_label), userInput)
         showTypingIndicator()
 
-        lifecycleScope.launch(Dispatchers.Default) {
-            val response = try {
-                ChatCore.findBestResponse(this@ChatActivity, folderUri, engine, qOrigRaw)
+        val now = System.currentTimeMillis()
+        val timestamps = queryTimestamps.getOrPut(qKeyForCount) { mutableListOf() }
+        timestamps.add(now)
+        timestamps.removeAll { it < now - Engine.SPAM_WINDOW_MS }
+        if (timestamps.size >= 5) {
+            val spamResp = ChatCore.getAntiSpamResponse()
+            addChatMessage(currentMascotName, spamResp)
+            startIdleTimer()
+            return
+        }
+
+        val contextMapSnapshot = HashMap(contextMap)
+
+        fun recordMemorySideEffect(inputText: String) {
+            try {
+                MemoryManager.processIncoming(this, inputText)
             } catch (e: Exception) {
-                // if something goes wrong, log via ChatCore (it copies logs to clipboard)
-                ChatCore.init(applicationContext) // ensure init
-                e.printStackTrace()
-                ChatCore.getDummyResponse(this@ChatActivity, qOrigRaw)
+            }
+        }
+
+        lifecycleScope.launch(Dispatchers.Default) {
+            var fallbackFromLocked = false
+            var attempt = 0
+            var response: String? = null
+            while (attempt < 2 && response == null) {
+                val templatesSnapshot = HashMap(templatesMap)
+                val invertedIndexSnapshot = HashMap<String, MutableList<String>>()
+                for ((k, v) in invertedIndex) invertedIndexSnapshot[k] = ArrayList(v)
+                val synonymsSnapshot = HashMap(synonymsMap)
+                val stopwordsSnapshot = HashSet(stopwords)
+                val keywordResponsesSnapshot = HashMap<String, MutableList<String>>()
+                for ((k, v) in keywordResponses) keywordResponsesSnapshot[k] = ArrayList(v)
+                val jaccardThreshold = engine.getJaccardThreshold(qFiltered)
+
+                response = matchInCurrent(
+                    qOrigRaw, qTokensFiltered, qFiltered, qCanonical, qKeyForCount,
+                    templatesSnapshot, invertedIndexSnapshot, synonymsSnapshot, stopwordsSnapshot,
+                    keywordResponsesSnapshot, jaccardThreshold
+                )
+
+                if (response != null) {
+                    withContext(Dispatchers.Main) {
+                        addChatMessage(currentMascotName, response!!)
+                        recordMemorySideEffect(qOrigRaw)
+                        startIdleTimer()
+                        cacheResponse(qKeyForCount, response!!)
+                    }
+                    return@launch
+                }
+
+                if (isContextLocked) {
+                    withContext(Dispatchers.Main) {
+                        currentContext = "base.txt"
+                        isContextLocked = false
+                        loadTemplatesFromFile(currentContext)
+                        rebuildInvertedIndex()
+                        engine.computeTokenWeights()
+                        updateAutoComplete()
+                    }
+                    fallbackFromLocked = true
+                    attempt++
+                } else {
+                    break
+                }
             }
 
+            val detectedContext = ChatCore.detectContext(qFiltered, contextMapSnapshot, engine)
+
+            if (detectedContext != null) {
+                withContext(Dispatchers.Main) {
+                    if (detectedContext != currentContext) {
+                        currentContext = detectedContext
+                        loadTemplatesFromFile(currentContext)
+                        rebuildInvertedIndex()
+                        engine.computeTokenWeights()
+                        updateAutoComplete()
+                    }
+                }
+
+                val (localTemplates, localKeywords) = ChatCore.parseTemplatesFromFile(
+                    this@ChatActivity, folderUri, detectedContext, HashMap(synonymsMap), HashSet(stopwords)
+                )
+                localTemplates[qCanonical]?.let { possible ->
+                    if (possible.isNotEmpty()) {
+                        val resp = possible.random()
+                        withContext(Dispatchers.Main) {
+                            addChatMessage(currentMascotName, resp)
+                            recordMemorySideEffect(qOrigRaw)
+                            startIdleTimer()
+                            cacheResponse(qKeyForCount, resp)
+                        }
+                        return@launch
+                    }
+                }
+
+                for ((keyword, responses) in localKeywords) {
+                    if (keyword.isBlank() || responses.isEmpty()) continue
+                    val kwTokens = keyword.split(" ").filter { it.isNotEmpty() }.toSet()
+                    val qTokenSetLocal = if (qTokensFiltered.isNotEmpty()) qTokensFiltered.toSet() else Engine.tokenizeStatic(qFiltered).toSet()
+                    if (qTokenSetLocal.intersect(kwTokens).isNotEmpty()) {
+                        val resp = responses.random()
+                        withContext(Dispatchers.Main) {
+                            addChatMessage(currentMascotName, resp)
+                            recordMemorySideEffect(qOrigRaw)
+                            startIdleTimer()
+                            cacheResponse(qKeyForCount, resp)
+                        }
+                        return@launch
+                    }
+                }
+
+                if (isContextLocked) {
+                    // Skip fuzzy matching in locked context
+                } else {
+                    val localInverted = HashMap<String, MutableList<String>>()
+                    for ((k, v) in localTemplates) {
+                        val toks = if (k.isBlank()) emptyList<String>() else k.split(" ").filter { it.isNotEmpty() }
+                        for (t in toks) {
+                            val list = localInverted.getOrPut(t) { mutableListOf() }
+                            if (!list.contains(k)) list.add(k)
+                        }
+                    }
+                    val localCandidateCounts = HashMap<String, Int>()
+                    val tokensLocal = if (qTokensFiltered.isNotEmpty()) qTokensFiltered else Engine.tokenizeStatic(qFiltered)
+                    for (tok in tokensLocal) {
+                        localInverted[tok]?.forEach { trig ->
+                            localCandidateCounts[trig] = localCandidateCounts.getOrDefault(trig, 0) + 1
+                        }
+                    }
+                    val localCandidates: List<String> = if (localCandidateCounts.isNotEmpty()) {
+                        localCandidateCounts.entries
+                            .filter { it.value >= Engine.CANDIDATE_TOKEN_THRESHOLD }
+                            .sortedByDescending { it.value }
+                            .map { it.key }
+                            .take(Engine.MAX_CANDIDATES_FOR_LEV)
+                    } else {
+                        val md = engine.getFuzzyDistance(qCanonical)
+                        localTemplates.keys.filter { kotlin.math.abs(it.length - qCanonical.length) <= md }
+                            .take(Engine.MAX_CANDIDATES_FOR_LEV)
+                    }
+
+                    var bestLocal: String? = null
+                    var bestLocalJ = 0.0
+                    val qSetLocal = tokensLocal.toSet()
+                    for (key in localCandidates) {
+                        val keyTokens = Engine.filterStopwordsAndMapSynonymsStatic(key, HashMap(synonymsMap), HashSet(stopwords)).first.toSet()
+                        if (keyTokens.isEmpty()) continue
+                        val weightedJ = engine.weightedJaccard(qSetLocal, keyTokens)
+                        if (weightedJ > bestLocalJ) {
+                            bestLocalJ = weightedJ
+                            bestLocal = key
+                        }
+                    }
+                    if (bestLocal != null && bestLocalJ >= engine.getJaccardThreshold(qFiltered)) {
+                        val possible = localTemplates[bestLocal]
+                        if (!possible.isNullOrEmpty()) {
+                            val resp = possible.random()
+                            withContext(Dispatchers.Main) {
+                                addChatMessage(currentMascotName, resp)
+                                recordMemorySideEffect(qOrigRaw)
+                                startIdleTimer()
+                                cacheResponse(qKeyForCount, resp)
+                            }
+                            return@launch
+                        }
+                    }
+
+                    var bestLocalKey: String? = null
+                    var bestLocalDist = Int.MAX_VALUE
+                    for (key in localCandidates) {
+                        val maxD = engine.getFuzzyDistance(qCanonical)
+                        if (kotlin.math.abs(key.length - qCanonical.length) > maxD + 1) continue
+                        val d = engine.levenshtein(qCanonical, key, qCanonical)
+                        if (d < bestLocalDist) {
+                            bestLocalDist = d
+                            bestLocalKey = key
+                        }
+                        if (bestLocalDist == 0) break
+                    }
+                    if (bestLocalKey != null && bestLocalDist <= engine.getFuzzyDistance(qCanonical)) {
+                        val possible = localTemplates[bestLocalKey]
+                        if (!possible.isNullOrEmpty()) {
+                            val resp = possible.random()
+                            withContext(Dispatchers.Main) {
+                                addChatMessage(currentMascotName, resp)
+                                recordMemorySideEffect(qOrigRaw)
+                                startIdleTimer()
+                                cacheResponse(qKeyForCount, resp)
+                            }
+                            return@launch
+                        }
+                    }
+                }
+
+                val coreResult = ChatCore.searchInCoreFiles(
+                    this@ChatActivity, folderUri, qFiltered, if (qTokensFiltered.isNotEmpty()) qTokensFiltered else Engine.tokenizeStatic(qFiltered), engine,
+                    HashMap(synonymsMap), HashSet(stopwords), engine.getJaccardThreshold(qFiltered)
+                )
+                if (coreResult != null) {
+                    withContext(Dispatchers.Main) {
+                        addChatMessage(currentMascotName, coreResult)
+                        recordMemorySideEffect(qOrigRaw)
+                        startIdleTimer()
+                        cacheResponse(qKeyForCount, coreResult)
+                    }
+                    return@launch
+                }
+
+                val memBeforeDummy = try { MemoryManager.processIncoming(this@ChatActivity, qOrigRaw) } catch (_: Exception) { null }
+                if (!memBeforeDummy.isNullOrBlank()) {
+                    withContext(Dispatchers.Main) {
+                        addChatMessage(currentMascotName, memBeforeDummy)
+                        startIdleTimer()
+                        cacheResponse(qKeyForCount, memBeforeDummy)
+                    }
+                    return@launch
+                }
+
+                val dummy = ChatCore.getDummyResponse(qOrig)
+                withContext(Dispatchers.Main) {
+                    addChatMessage(currentMascotName, dummy)
+                    recordMemorySideEffect(qOrigRaw)
+                    startIdleTimer()
+                    cacheResponse(qKeyForCount, dummy)
+                }
+                return@launch
+            }
+
+            val coreResult = ChatCore.searchInCoreFiles(
+                this@ChatActivity, folderUri, qFiltered, if (qTokensFiltered.isNotEmpty()) qTokensFiltered else Engine.tokenizeStatic(qFiltered), engine,
+                HashMap(synonymsMap), HashSet(stopwords), engine.getJaccardThreshold(qFiltered)
+            )
+            if (coreResult != null) {
+                withContext(Dispatchers.Main) {
+                    addChatMessage(currentMascotName, coreResult)
+                    recordMemorySideEffect(qOrigRaw)
+                    startIdleTimer()
+                    cacheResponse(qKeyForCount, coreResult)
+                }
+                return@launch
+            }
+
+            val memResp = try { MemoryManager.processIncoming(this@ChatActivity, qOrigRaw) } catch (_: Exception) { null }
+            if (!memResp.isNullOrBlank()) {
+                withContext(Dispatchers.Main) {
+                    addChatMessage(currentMascotName, memResp)
+                    startIdleTimer()
+                    cacheResponse(qKeyForCount, memResp)
+                }
+                return@launch
+            }
+
+            val dummy = ChatCore.getDummyResponse(qOrig)
             withContext(Dispatchers.Main) {
-                addChatMessage(currentMascotName, response)
-                try { MemoryManager.processIncoming(this@ChatActivity, qOrigRaw) } catch (_: Exception) {}
-                cacheResponse(qKeyForCount, response)
+                addChatMessage(currentMascotName, dummy)
+                recordMemorySideEffect(qOrigRaw)
+                startIdleTimer()
+                cacheResponse(qKeyForCount, dummy)
             }
         }
     }
@@ -387,7 +816,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 val typingView = TextView(this@ChatActivity).apply {
                     text = getString(R.string.typing)
                     textSize = 14f
-                    setTextColor(Color.parseColor("#00FFFF"))
+                    setTextColor(getColor(R.color.neon_cyan))
                     setBackgroundColor(0x800A0A0A.toInt())
                     alpha = 0.7f
                     setPadding(16, 8, 16, 8)
@@ -407,7 +836,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                             messagesContainer.findViewWithTag<View>("typingView")?.let { messagesContainer.removeView(it) }
                         }
                     }
-                }, 800L)
+                }, (1000..3000).random().toLong())
             }
         }
     }
@@ -468,7 +897,6 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                             scaleX.start()
                             scaleY.start()
                             Handler(Looper.getMainLooper()).postDelayed({
-                                // keep ouch behaviour but limited to raccoon/ouch.txt if present
                                 loadAndSendOuchMessage(sender)
                                 view.isEnabled = true
                             }, 260)
@@ -503,9 +931,8 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         val uri = folderUri ?: return
         try {
             val dir = DocumentFile.fromTreeUri(this, uri) ?: return
-            // since single mascot, prefer raccoon or ouch.txt
             val mascotFilename = "${mascot.lowercase(Locale.ROOT)}.txt"
-            val mascotOuch = dir.findFile(mascotFilename) ?: dir.findFile("ouch.txt") ?: dir.findFile("raccoon.txt")
+            val mascotOuch = dir.findFile(mascotFilename) ?: dir.findFile("ouch.txt")
             if (mascotOuch != null && mascotOuch.exists()) {
                 contentResolver.openInputStream(mascotOuch.uri)?.use { ins ->
                     InputStreamReader(ins, Charsets.UTF_8).buffered().use { reader ->
@@ -542,7 +969,8 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 try { afd.close() } catch (_: Exception) {}
                 try { player.reset(); player.release() } catch (_: Exception) {}
             }
-        } catch (_: Exception) {}
+        } catch (e: Exception) {
+        }
     }
 
     private fun spaceView(): View = View(this).apply {
@@ -605,7 +1033,8 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     }
                 }
             }
-        } catch (_: Exception) {}
+        } catch (e: Exception) {
+        }
         target.setImageResource(android.R.color.transparent)
     }
 
@@ -629,10 +1058,10 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         return (dp * density).roundToInt()
     }
 
-    // Loading templates: simplified; metadata for mascots removed
     private fun loadTemplatesFromFile(filename: String) {
         templatesMap.clear()
         keywordResponses.clear()
+        mascotList.clear()
         if (filename == "base.txt") {
             contextMap.clear()
         }
@@ -645,16 +1074,15 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         ChatCore.loadSynonymsAndStopwords(this, folderUri, synonymsMap, stopwords)
 
         if (folderUri == null) {
-            ChatCore.loadFallbackTemplates(templatesMap, keywordResponses, mutableListOf(), contextMap)
+            ChatCore.loadFallbackTemplates(templatesMap, keywordResponses, mascotList, contextMap)
             rebuildInvertedIndex()
             engine.computeTokenWeights()
             updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
             return
         }
-
         try {
             val dir = DocumentFile.fromTreeUri(this, folderUri!!) ?: run {
-                ChatCore.loadFallbackTemplates(templatesMap, keywordResponses, mutableListOf(), contextMap)
+                ChatCore.loadFallbackTemplates(templatesMap, keywordResponses, mascotList, contextMap)
                 rebuildInvertedIndex()
                 engine.computeTokenWeights()
                 updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
@@ -662,20 +1090,26 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             }
             val file = dir.findFile(filename)
             if (file == null || !file.exists()) {
-                ChatCore.loadFallbackTemplates(templatesMap, keywordResponses, mutableListOf(), contextMap)
+                ChatCore.loadFallbackTemplates(templatesMap, keywordResponses, mascotList, contextMap)
                 rebuildInvertedIndex()
                 engine.computeTokenWeights()
                 updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
                 return
             }
-
+            var firstNonEmptyLineChecked = false
             contentResolver.openInputStream(file.uri)?.use { ins ->
-                InputStreamReader(ins, Charsets.UTF_8).buffered().useLines { lines ->
-                    lines.forEach { raw ->
-                        val l = raw.replace("\uFEFF", "").trim()
-                        if (l.isEmpty()) return@forEach
-                        // special base context mapping format :key=file.txt:
-                        if (filename == "base.txt" && l.startsWith(":") && l.endsWith(":")) {
+                InputStreamReader(ins, Charsets.UTF_8).buffered().use { reader ->
+                    reader.forEachLine { raw ->
+                        val l = raw.trim()
+                        if (l.isEmpty()) return@forEachLine
+                        if (!firstNonEmptyLineChecked) {
+                            firstNonEmptyLineChecked = true
+                            if (l.equals("#CONTEXT", ignoreCase = true)) {
+                                isContextLocked = true
+                                return@forEachLine
+                            }
+                        }
+                        if (filename == "base.txt" && l.startsWith(":" ) && l.endsWith(":")) {
                             val contextLine = l.substring(1, l.length - 1)
                             if (contextLine.contains("=")) {
                                 val parts = contextLine.split("=", limit = 2)
@@ -688,7 +1122,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                                     }
                                 }
                             }
-                            return@forEach
+                            return@forEachLine
                         }
                         if (l.startsWith("-")) {
                             val keywordLine = l.substring(1)
@@ -704,9 +1138,9 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                                     }
                                 }
                             }
-                            return@forEach
+                            return@forEachLine
                         }
-                        if (!l.contains("=")) return@forEach
+                        if (!l.contains("=")) return@forEachLine
                         val parts = l.split("=", limit = 2)
                         if (parts.size == 2) {
                             val triggerRaw = parts[0].trim()
@@ -719,15 +1153,51 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     }
                 }
             }
-
-            // metadata files removed: do NOT read mascot metadata — single mascot only
-
+            val metadataFilename = filename.replace(".txt", "_metadata.txt")
+            val metadataFile = dir.findFile(metadataFilename)
+            if (metadataFile != null && metadataFile.exists()) {
+                contentResolver.openInputStream(metadataFile.uri)?.use { ins ->
+                    InputStreamReader(ins, Charsets.UTF_8).buffered().use { reader ->
+                        reader.forEachLine { raw ->
+                            val line = raw.trim()
+                            when {
+                                line.startsWith("mascot_list=") -> {
+                                    val mascots = line.substring("mascot_list=".length).split("|")
+                                    for (mascot in mascots) {
+                                        val parts = mascot.split(":")
+                                        if (parts.size == 4) {
+                                            val mascotData = mapOf(
+                                                "name" to parts[0].trim(),
+                                                "icon" to parts[1].trim(),
+                                                "color" to parts[2].trim(),
+                                                "background" to parts[3].trim()
+                                            )
+                                            mascotList.add(mascotData)
+                                        }
+                                    }
+                                }
+                                line.startsWith("mascot_name=") -> currentMascotName = line.substring("mascot_name=".length).trim()
+                                line.startsWith("mascot_icon=") -> currentMascotIcon = line.substring("mascot_icon=".length).trim()
+                                line.startsWith("theme_color=") -> currentThemeColor = line.substring("theme_color=".length).trim()
+                                line.startsWith("theme_background=") -> currentThemeBackground = line.substring("theme_background=".length).trim()
+                            }
+                        }
+                    }
+                }
+            }
+            if (filename == "base.txt" && mascotList.isNotEmpty()) {
+                val selected = mascotList.random()
+                selected["name"]?.let { currentMascotName = it }
+                selected["icon"]?.let { currentMascotIcon = it }
+                selected["color"]?.let { currentThemeColor = it }
+                selected["background"]?.let { currentThemeBackground = it }
+            }
             rebuildInvertedIndex()
             engine.computeTokenWeights()
             updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
         } catch (e: Exception) {
             showCustomToast(getString(R.string.error_reading_file, e.message ?: ""))
-            ChatCore.loadFallbackTemplates(templatesMap, keywordResponses, mutableListOf(), contextMap)
+            ChatCore.loadFallbackTemplates(templatesMap, keywordResponses, mascotList, contextMap)
             rebuildInvertedIndex()
             engine.computeTokenWeights()
             updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
@@ -759,13 +1229,41 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
     }
 
+    private fun loadMascotMetadata(mascotName: String) {
+        if (folderUri == null) return
+        val metadataFilename = "${mascotName.lowercase(Locale.ROOT)}_metadata.txt"
+        val dir = DocumentFile.fromTreeUri(this, folderUri!!) ?: return
+        val metadataFile = dir.findFile(metadataFilename)
+        if (metadataFile != null && metadataFile.exists()) {
+            try {
+                contentResolver.openInputStream(metadataFile.uri)?.use { ins ->
+                    InputStreamReader(ins, Charsets.UTF_8).buffered().use { reader ->
+                        reader.forEachLine { raw ->
+                            val line = raw.trim()
+                            when {
+                                line.startsWith("mascot_name=") -> currentMascotName = line.substring("mascot_name=".length).trim()
+                                line.startsWith("mascot_icon=") -> currentMascotIcon = line.substring("mascot_icon=".length).trim()
+                                line.startsWith("theme_color=") -> currentThemeColor = line.substring("theme_color=".length).trim()
+                                line.startsWith("theme_background=") -> currentThemeBackground = line.substring("theme_background=".length).trim()
+                            }
+                        }
+                        updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
+                    }
+                }
+            } catch (e: Exception) {
+                showCustomToast(getString(R.string.error_loading_mascot_metadata, e.message ?: ""))
+            }
+        }
+    }
+
     private fun updateUI(mascotName: String, mascotIcon: String, themeColor: String, themeBackground: String) {
         lifecycleScope.launch {
             withContext(Dispatchers.Main) {
                 title = getString(R.string.app_title_prefix, mascotName)
                 try {
                     messagesContainer.setBackgroundColor(Color.parseColor(themeBackground))
-                } catch (_: Exception) {}
+                } catch (e: Exception) {
+                }
             }
         }
     }
@@ -786,7 +1284,10 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     }
 
     private fun startIdleTimer() {
-        // idle auto-messages intentionally removed in simplified single-mascot version
         lastUserInputTime = System.currentTimeMillis()
+        idleCheckRunnable?.let {
+            dialogHandler.removeCallbacks(it)
+            dialogHandler.postDelayed(it, 500000)
+        }
     }
 }
