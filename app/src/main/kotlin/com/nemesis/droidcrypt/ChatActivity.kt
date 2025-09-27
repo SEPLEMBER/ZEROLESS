@@ -50,8 +50,6 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private var envelopeInputButton: ImageButton? = null
     private var btnLock: ImageButton? = null
     private var btnTrash: ImageButton? = null
-    private var btnEnvelopeTop: ImageButton? = null
-    private var btnSettings: ImageButton? = null
     private lateinit var messagesContainer: LinearLayout
     private var adapter: ArrayAdapter<String>? = null
 
@@ -149,8 +147,6 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         envelopeInputButton = findViewById(R.id.envelope_button)
         btnLock = findViewById(R.id.btn_lock)
         btnTrash = findViewById(R.id.btn_trash)
-        btnEnvelopeTop = findViewById(R.id.btn_envelope_top)
-        btnSettings = findViewById(R.id.btn_settings)
         messagesContainer = findViewById(R.id.chatMessagesContainer)
 
         folderUri = intent?.getParcelableExtra("folderUri")
@@ -171,15 +167,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         } catch (e: Exception) {
         }
 
-        ChatCore.loadSynonymsAndStopwords(this, folderUri, synonymsMap, stopwords)
-
         engine = Engine(templatesMap, synonymsMap, stopwords)
-
-        try {
-            MemoryManager.init(this)
-            MemoryManager.loadTemplatesFromFolder(this, folderUri)
-        } catch (e: Exception) {
-        }
 
         try {
             val prefs = getSharedPreferences("PawsTribePrefs", MODE_PRIVATE)
@@ -188,17 +176,12 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         } catch (e: Exception) {
         }
 
-        loadToolbarIcons()
         setupIconTouchEffect(btnLock)
         setupIconTouchEffect(btnTrash)
-        setupIconTouchEffect(btnEnvelopeTop)
-        setupIconTouchEffect(btnSettings)
         setupIconTouchEffect(envelopeInputButton)
 
         btnLock?.setOnClickListener { finish() }
         btnTrash?.setOnClickListener { clearChat() }
-        btnSettings?.setOnClickListener { startActivity(Intent(this, SettingsActivity::class.java)) }
-        btnEnvelopeTop?.setOnClickListener { startActivity(Intent(this, SetupActivity::class.java)) }
 
         envelopeInputButton?.setOnClickListener {
             val now = System.currentTimeMillis()
@@ -225,24 +208,6 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         tts = TextToSpeech(this, this)
 
-        if (folderUri == null) {
-            showCustomToast(getString(R.string.toast_folder_not_selected))
-            ChatCore.loadFallbackTemplates(templatesMap, keywordResponses, mascotList, contextMap)
-            rebuildInvertedIndex()
-            engine.computeTokenWeights()
-            updateAutoComplete()
-            addChatMessage(currentMascotName, getString(R.string.welcome_message))
-        } else {
-            loadTemplatesFromFile(currentContext)
-            try {
-                MemoryManager.loadTemplatesFromFolder(this, folderUri)
-            } catch (_: Exception) {}
-            rebuildInvertedIndex()
-            engine.computeTokenWeights()
-            updateAutoComplete()
-            addChatMessage(currentMascotName, getString(R.string.welcome_message))
-        }
-
         queryInput.setOnItemClickListener { parent, _, position, _ ->
             val selected = parent.getItemAtPosition(position) as String
             queryInput.setText(selected)
@@ -263,6 +228,28 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             }
         }
         idleCheckRunnable?.let { dialogHandler.postDelayed(it, 500000) }
+
+        lifecycleScope.launch(Dispatchers.IO) {
+            ChatCore.loadSynonymsAndStopwords(this@ChatActivity, folderUri, synonymsMap, stopwords)
+            MemoryManager.init(this@ChatActivity)
+            MemoryManager.loadTemplatesFromFolder(this@ChatActivity, folderUri)
+            if (folderUri == null) {
+                ChatCore.loadFallbackTemplates(templatesMap, keywordResponses, mascotList, contextMap)
+            } else {
+                loadTemplatesFromFile(currentContext)
+                MemoryManager.loadTemplatesFromFolder(this@ChatActivity, folderUri)
+            }
+            rebuildInvertedIndex()
+            engine.computeTokenWeights()
+            withContext(Dispatchers.Main) {
+                loadToolbarIcons()
+                updateAutoComplete()
+                addChatMessage(currentMascotName, getString(R.string.welcome_message))
+                if (folderUri == null) {
+                    showCustomToast(getString(R.string.toast_folder_not_selected))
+                }
+            }
+        }
     }
 
     override fun onInit(status: Int) {
@@ -287,19 +274,23 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     override fun onResume() {
         super.onResume()
-        folderUri?.let { loadTemplatesFromFile(currentContext) }
-        try {
-            MemoryManager.loadTemplatesFromFolder(this, folderUri)
-        } catch (e: Exception) {
+        lifecycleScope.launch(Dispatchers.IO) {
+            folderUri?.let { loadTemplatesFromFile(currentContext) }
+            try {
+                MemoryManager.loadTemplatesFromFolder(this@ChatActivity, folderUri)
+            } catch (e: Exception) {
+            }
+            rebuildInvertedIndex()
+            engine.computeTokenWeights()
+            withContext(Dispatchers.Main) {
+                updateAutoComplete()
+                idleCheckRunnable?.let {
+                    dialogHandler.removeCallbacks(it)
+                    dialogHandler.postDelayed(it, 500000)
+                }
+                loadToolbarIcons()
+            }
         }
-        rebuildInvertedIndex()
-        engine.computeTokenWeights()
-        updateAutoComplete()
-        idleCheckRunnable?.let {
-            dialogHandler.removeCallbacks(it)
-            dialogHandler.postDelayed(it, 500000)
-        }
-        loadToolbarIcons()
     }
 
     override fun onPause() {
@@ -343,8 +334,6 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             }
             tryLoadToImageButton("lock.png", btnLock)
             tryLoadToImageButton("trash.png", btnTrash)
-            tryLoadToImageButton("envelope.png", btnEnvelopeTop)
-            tryLoadToImageButton("settings.png", btnSettings)
             tryLoadToImageButton("send.png", envelopeInputButton)
         } catch (e: Exception) {
         }
@@ -927,26 +916,32 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "message_${System.currentTimeMillis()}")
     }
 
-    private fun loadAndSendOuchMessage(mascot: String) {
-        val uri = folderUri ?: return
-        try {
-            val dir = DocumentFile.fromTreeUri(this, uri) ?: return
-            val mascotFilename = "${mascot.lowercase(Locale.ROOT)}.txt"
-            val mascotOuch = dir.findFile(mascotFilename) ?: dir.findFile("ouch.txt")
-            if (mascotOuch != null && mascotOuch.exists()) {
-                contentResolver.openInputStream(mascotOuch.uri)?.use { ins ->
-                    InputStreamReader(ins, Charsets.UTF_8).buffered().use { reader ->
-                        val allText = reader.readText()
-                        val responses = allText.split("|").map { it.trim() }.filter { it.isNotEmpty() }
-                        if (responses.isNotEmpty()) {
-                            val randomResponse = responses.random()
-                            addChatMessage(mascot, randomResponse)
+    private suspend fun loadAndSendOuchMessage(mascot: String) {
+        withContext(Dispatchers.IO) {
+            val uri = folderUri ?: return@withContext
+            try {
+                val dir = DocumentFile.fromTreeUri(this@ChatActivity, uri) ?: return@withContext
+                val mascotFilename = "${mascot.lowercase(Locale.ROOT)}.txt"
+                val mascotOuch = dir.findFile(mascotFilename) ?: dir.findFile("ouch.txt")
+                if (mascotOuch != null && mascotOuch.exists()) {
+                    contentResolver.openInputStream(mascotOuch.uri)?.use { ins ->
+                        InputStreamReader(ins, Charsets.UTF_8).buffered().use { reader ->
+                            val allText = reader.readText()
+                            val responses = allText.split("|").map { it.trim() }.filter { it.isNotEmpty() }
+                            if (responses.isNotEmpty()) {
+                                val randomResponse = responses.random()
+                                withContext(Dispatchers.Main) {
+                                    addChatMessage(mascot, randomResponse)
+                                }
+                            }
                         }
                     }
                 }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    showCustomToast(getString(R.string.error_loading_ouch, e.message ?: ""))
+                }
             }
-        } catch (e: Exception) {
-            showCustomToast(getString(R.string.error_loading_ouch, e.message ?: ""))
         }
     }
 
@@ -1058,149 +1053,163 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         return (dp * density).roundToInt()
     }
 
-    private fun loadTemplatesFromFile(filename: String) {
-        templatesMap.clear()
-        keywordResponses.clear()
-        mascotList.clear()
-        if (filename == "base.txt") {
-            contextMap.clear()
-        }
-        currentMascotName = "Racky"
-        currentMascotIcon = "raccoon_icon.png"
-        currentThemeColor = "#00FFFF"
-        currentThemeBackground = "#0A0A0A"
-        isContextLocked = false
+    private suspend fun loadTemplatesFromFile(filename: String) {
+        withContext(Dispatchers.IO) {
+            templatesMap.clear()
+            keywordResponses.clear()
+            mascotList.clear()
+            if (filename == "base.txt") {
+                contextMap.clear()
+            }
+            currentMascotName = "Racky"
+            currentMascotIcon = "raccoon_icon.png"
+            currentThemeColor = "#00FFFF"
+            currentThemeBackground = "#0A0A0A"
+            isContextLocked = false
 
-        ChatCore.loadSynonymsAndStopwords(this, folderUri, synonymsMap, stopwords)
+            ChatCore.loadSynonymsAndStopwords(this@ChatActivity, folderUri, synonymsMap, stopwords)
 
-        if (folderUri == null) {
-            ChatCore.loadFallbackTemplates(templatesMap, keywordResponses, mascotList, contextMap)
-            rebuildInvertedIndex()
-            engine.computeTokenWeights()
-            updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
-            return
-        }
-        try {
-            val dir = DocumentFile.fromTreeUri(this, folderUri!!) ?: run {
+            if (folderUri == null) {
                 ChatCore.loadFallbackTemplates(templatesMap, keywordResponses, mascotList, contextMap)
                 rebuildInvertedIndex()
                 engine.computeTokenWeights()
-                updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
-                return
-            }
-            val file = dir.findFile(filename)
-            if (file == null || !file.exists()) {
-                ChatCore.loadFallbackTemplates(templatesMap, keywordResponses, mascotList, contextMap)
-                rebuildInvertedIndex()
-                engine.computeTokenWeights()
-                updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
-                return
-            }
-            var firstNonEmptyLineChecked = false
-            contentResolver.openInputStream(file.uri)?.use { ins ->
-                InputStreamReader(ins, Charsets.UTF_8).buffered().use { reader ->
-                    reader.forEachLine { raw ->
-                        val l = raw.trim()
-                        if (l.isEmpty()) return@forEachLine
-                        if (!firstNonEmptyLineChecked) {
-                            firstNonEmptyLineChecked = true
-                            if (l.equals("#CONTEXT", ignoreCase = true)) {
-                                isContextLocked = true
-                                return@forEachLine
-                            }
-                        }
-                        if (filename == "base.txt" && l.startsWith(":" ) && l.endsWith(":")) {
-                            val contextLine = l.substring(1, l.length - 1)
-                            if (contextLine.contains("=")) {
-                                val parts = contextLine.split("=", limit = 2)
-                                if (parts.size == 2) {
-                                    val keyword = parts[0].trim()
-                                    val contextFile = parts[1].trim()
-                                    if (keyword.isNotEmpty() && contextFile.isNotEmpty()) {
-                                        val keyCanon = canonicalKeyFromTextStatic(keyword, synonymsMap, stopwords)
-                                        if (keyCanon.isNotEmpty()) contextMap[keyCanon] = contextFile
-                                    }
-                                }
-                            }
-                            return@forEachLine
-                        }
-                        if (l.startsWith("-")) {
-                            val keywordLine = l.substring(1)
-                            if (keywordLine.contains("=")) {
-                                val parts = keywordLine.split("=", limit = 2)
-                                if (parts.size == 2) {
-                                    val keyword = parts[0].trim()
-                                    val responses = parts[1].split("|")
-                                    val responseList = responses.mapNotNull { it.trim().takeIf { s -> s.isNotEmpty() } }.toMutableList()
-                                    if (keyword.isNotEmpty() && responseList.isNotEmpty()) {
-                                        val keyCanon = canonicalKeyFromTextStatic(keyword, synonymsMap, stopwords)
-                                        if (keyCanon.isNotEmpty()) keywordResponses[keyCanon] = responseList
-                                    }
-                                }
-                            }
-                            return@forEachLine
-                        }
-                        if (!l.contains("=")) return@forEachLine
-                        val parts = l.split("=", limit = 2)
-                        if (parts.size == 2) {
-                            val triggerRaw = parts[0].trim()
-                            val triggerTokens = Engine.filterStopwordsAndMapSynonymsStatic(normalizeForProcessing(triggerRaw), synonymsMap, stopwords).first
-                            val triggerCanonical = triggerTokens.sorted().joinToString(" ")
-                            val responses = parts[1].split("|")
-                            val responseList = responses.mapNotNull { it.trim().takeIf { s -> s.isNotEmpty() } }.toMutableList()
-                            if (triggerCanonical.isNotEmpty() && responseList.isNotEmpty()) templatesMap[triggerCanonical] = responseList
-                        }
-                    }
+                withContext(Dispatchers.Main) {
+                    updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
                 }
+                return@withContext
             }
-            val metadataFilename = filename.replace(".txt", "_metadata.txt")
-            val metadataFile = dir.findFile(metadataFilename)
-            if (metadataFile != null && metadataFile.exists()) {
-                contentResolver.openInputStream(metadataFile.uri)?.use { ins ->
+            try {
+                val dir = DocumentFile.fromTreeUri(this@ChatActivity, folderUri!!) ?: run {
+                    ChatCore.loadFallbackTemplates(templatesMap, keywordResponses, mascotList, contextMap)
+                    rebuildInvertedIndex()
+                    engine.computeTokenWeights()
+                    withContext(Dispatchers.Main) {
+                        updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
+                    }
+                    return@withContext
+                }
+                val file = dir.findFile(filename)
+                if (file == null || !file.exists()) {
+                    ChatCore.loadFallbackTemplates(templatesMap, keywordResponses, mascotList, contextMap)
+                    rebuildInvertedIndex()
+                    engine.computeTokenWeights()
+                    withContext(Dispatchers.Main) {
+                        updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
+                    }
+                    return@withContext
+                }
+                var firstNonEmptyLineChecked = false
+                contentResolver.openInputStream(file.uri)?.use { ins ->
                     InputStreamReader(ins, Charsets.UTF_8).buffered().use { reader ->
                         reader.forEachLine { raw ->
-                            val line = raw.trim()
-                            when {
-                                line.startsWith("mascot_list=") -> {
-                                    val mascots = line.substring("mascot_list=".length).split("|")
-                                    for (mascot in mascots) {
-                                        val parts = mascot.split(":")
-                                        if (parts.size == 4) {
-                                            val mascotData = mapOf(
-                                                "name" to parts[0].trim(),
-                                                "icon" to parts[1].trim(),
-                                                "color" to parts[2].trim(),
-                                                "background" to parts[3].trim()
-                                            )
-                                            mascotList.add(mascotData)
+                            val l = raw.trim()
+                            if (l.isEmpty()) return@forEachLine
+                            if (!firstNonEmptyLineChecked) {
+                                firstNonEmptyLineChecked = true
+                                if (l.equals("#CONTEXT", ignoreCase = true)) {
+                                    isContextLocked = true
+                                    return@forEachLine
+                                }
+                            }
+                            if (filename == "base.txt" && l.startsWith(":" ) && l.endsWith(":")) {
+                                val contextLine = l.substring(1, l.length - 1)
+                                if (contextLine.contains("=")) {
+                                    val parts = contextLine.split("=", limit = 2)
+                                    if (parts.size == 2) {
+                                        val keyword = parts[0].trim()
+                                        val contextFile = parts[1].trim()
+                                        if (keyword.isNotEmpty() && contextFile.isNotEmpty()) {
+                                            val keyCanon = canonicalKeyFromTextStatic(keyword, synonymsMap, stopwords)
+                                            if (keyCanon.isNotEmpty()) contextMap[keyCanon] = contextFile
                                         }
                                     }
                                 }
-                                line.startsWith("mascot_name=") -> currentMascotName = line.substring("mascot_name=".length).trim()
-                                line.startsWith("mascot_icon=") -> currentMascotIcon = line.substring("mascot_icon=".length).trim()
-                                line.startsWith("theme_color=") -> currentThemeColor = line.substring("theme_color=".length).trim()
-                                line.startsWith("theme_background=") -> currentThemeBackground = line.substring("theme_background=".length).trim()
+                                return@forEachLine
+                            }
+                            if (l.startsWith("-")) {
+                                val keywordLine = l.substring(1)
+                                if (keywordLine.contains("=")) {
+                                    val parts = keywordLine.split("=", limit = 2)
+                                    if (parts.size == 2) {
+                                        val keyword = parts[0].trim()
+                                        val responses = parts[1].split("|")
+                                        val responseList = responses.mapNotNull { it.trim().takeIf { s -> s.isNotEmpty() } }.toMutableList()
+                                        if (keyword.isNotEmpty() && responseList.isNotEmpty()) {
+                                            val keyCanon = canonicalKeyFromTextStatic(keyword, synonymsMap, stopwords)
+                                            if (keyCanon.isNotEmpty()) keywordResponses[keyCanon] = responseList
+                                        }
+                                    }
+                                }
+                                return@forEachLine
+                            }
+                            if (!l.contains("=")) return@forEachLine
+                            val parts = l.split("=", limit = 2)
+                            if (parts.size == 2) {
+                                val triggerRaw = parts[0].trim()
+                                val triggerTokens = Engine.filterStopwordsAndMapSynonymsStatic(normalizeForProcessing(triggerRaw), synonymsMap, stopwords).first
+                                val triggerCanonical = triggerTokens.sorted().joinToString(" ")
+                                val responses = parts[1].split("|")
+                                val responseList = responses.mapNotNull { it.trim().takeIf { s -> s.isNotEmpty() } }.toMutableList()
+                                if (triggerCanonical.isNotEmpty() && responseList.isNotEmpty()) templatesMap[triggerCanonical] = responseList
                             }
                         }
                     }
                 }
+                val metadataFilename = filename.replace(".txt", "_metadata.txt")
+                val metadataFile = dir.findFile(metadataFilename)
+                if (metadataFile != null && metadataFile.exists()) {
+                    contentResolver.openInputStream(metadataFile.uri)?.use { ins ->
+                        InputStreamReader(ins, Charsets.UTF_8).buffered().use { reader ->
+                            reader.forEachLine { raw ->
+                                val line = raw.trim()
+                                when {
+                                    line.startsWith("mascot_list=") -> {
+                                        val mascots = line.substring("mascot_list=".length).split("|")
+                                        for (mascot in mascots) {
+                                            val parts = mascot.split(":")
+                                            if (parts.size == 4) {
+                                                val mascotData = mapOf(
+                                                    "name" to parts[0].trim(),
+                                                    "icon" to parts[1].trim(),
+                                                    "color" to parts[2].trim(),
+                                                    "background" to parts[3].trim()
+                                                )
+                                                mascotList.add(mascotData)
+                                            }
+                                        }
+                                    }
+                                    line.startsWith("mascot_name=") -> currentMascotName = line.substring("mascot_name=".length).trim()
+                                    line.startsWith("mascot_icon=") -> currentMascotIcon = line.substring("mascot_icon=".length).trim()
+                                    line.startsWith("theme_color=") -> currentThemeColor = line.substring("theme_color=".length).trim()
+                                    line.startsWith("theme_background=") -> currentThemeBackground = line.substring("theme_background=".length).trim()
+                                }
+                            }
+                        }
+                    }
+                }
+                if (filename == "base.txt" && mascotList.isNotEmpty()) {
+                    val selected = mascotList.random()
+                    selected["name"]?.let { currentMascotName = it }
+                    selected["icon"]?.let { currentMascotIcon = it }
+                    selected["color"]?.let { currentThemeColor = it }
+                    selected["background"]?.let { currentThemeBackground = it }
+                }
+                rebuildInvertedIndex()
+                engine.computeTokenWeights()
+                withContext(Dispatchers.Main) {
+                    updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    showCustomToast(getString(R.string.error_reading_file, e.message ?: ""))
+                }
+                ChatCore.loadFallbackTemplates(templatesMap, keywordResponses, mascotList, contextMap)
+                rebuildInvertedIndex()
+                engine.computeTokenWeights()
+                withContext(Dispatchers.Main) {
+                    updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
+                }
             }
-            if (filename == "base.txt" && mascotList.isNotEmpty()) {
-                val selected = mascotList.random()
-                selected["name"]?.let { currentMascotName = it }
-                selected["icon"]?.let { currentMascotIcon = it }
-                selected["color"]?.let { currentThemeColor = it }
-                selected["background"]?.let { currentThemeBackground = it }
-            }
-            rebuildInvertedIndex()
-            engine.computeTokenWeights()
-            updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
-        } catch (e: Exception) {
-            showCustomToast(getString(R.string.error_reading_file, e.message ?: ""))
-            ChatCore.loadFallbackTemplates(templatesMap, keywordResponses, mascotList, contextMap)
-            rebuildInvertedIndex()
-            engine.computeTokenWeights()
-            updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
         }
     }
 
@@ -1229,29 +1238,35 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
     }
 
-    private fun loadMascotMetadata(mascotName: String) {
-        if (folderUri == null) return
-        val metadataFilename = "${mascotName.lowercase(Locale.ROOT)}_metadata.txt"
-        val dir = DocumentFile.fromTreeUri(this, folderUri!!) ?: return
-        val metadataFile = dir.findFile(metadataFilename)
-        if (metadataFile != null && metadataFile.exists()) {
-            try {
-                contentResolver.openInputStream(metadataFile.uri)?.use { ins ->
-                    InputStreamReader(ins, Charsets.UTF_8).buffered().use { reader ->
-                        reader.forEachLine { raw ->
-                            val line = raw.trim()
-                            when {
-                                line.startsWith("mascot_name=") -> currentMascotName = line.substring("mascot_name=".length).trim()
-                                line.startsWith("mascot_icon=") -> currentMascotIcon = line.substring("mascot_icon=".length).trim()
-                                line.startsWith("theme_color=") -> currentThemeColor = line.substring("theme_color=".length).trim()
-                                line.startsWith("theme_background=") -> currentThemeBackground = line.substring("theme_background=".length).trim()
+    private suspend fun loadMascotMetadata(mascotName: String) {
+        withContext(Dispatchers.IO) {
+            if (folderUri == null) return@withContext
+            val metadataFilename = "${mascotName.lowercase(Locale.ROOT)}_metadata.txt"
+            val dir = DocumentFile.fromTreeUri(this@ChatActivity, folderUri!!) ?: return@withContext
+            val metadataFile = dir.findFile(metadataFilename)
+            if (metadataFile != null && metadataFile.exists()) {
+                try {
+                    contentResolver.openInputStream(metadataFile.uri)?.use { ins ->
+                        InputStreamReader(ins, Charsets.UTF_8).buffered().use { reader ->
+                            reader.forEachLine { raw ->
+                                val line = raw.trim()
+                                when {
+                                    line.startsWith("mascot_name=") -> currentMascotName = line.substring("mascot_name=".length).trim()
+                                    line.startsWith("mascot_icon=") -> currentMascotIcon = line.substring("mascot_icon=".length).trim()
+                                    line.startsWith("theme_color=") -> currentThemeColor = line.substring("theme_color=".length).trim()
+                                    line.startsWith("theme_background=") -> currentThemeBackground = line.substring("theme_background=".length).trim()
+                                }
+                            }
+                            withContext(Dispatchers.Main) {
+                                updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
                             }
                         }
-                        updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
+                    }
+                } catch (e: Exception) {
+                    withContext(Dispatchers.Main) {
+                        showCustomToast(getString(R.string.error_loading_mascot_metadata, e.message ?: ""))
                     }
                 }
-            } catch (e: Exception) {
-                showCustomToast(getString(R.string.error_loading_mascot_metadata, e.message ?: ""))
             }
         }
     }
