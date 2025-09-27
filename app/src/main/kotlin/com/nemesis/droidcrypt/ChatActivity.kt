@@ -776,11 +776,15 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         when {
             cmd == "/reload" -> {
                 addChatMessage(currentMascotName, getString(R.string.reloading_templates))
-                loadTemplatesFromFile(currentContext)
-                rebuildInvertedIndex()
-                engine.computeTokenWeights()
-                updateAutoComplete()
-                addChatMessage(currentMascotName, getString(R.string.templates_reloaded))
+                lifecycleScope.launch(Dispatchers.IO) {
+                    loadTemplatesFromFile(currentContext)
+                    rebuildInvertedIndex()
+                    engine.computeTokenWeights()
+                    withContext(Dispatchers.Main) {
+                        updateAutoComplete()
+                        addChatMessage(currentMascotName, getString(R.string.templates_reloaded))
+                    }
+                }
             }
             cmd == "/stats" -> {
                 val templatesCount = templatesMap.size
@@ -885,10 +889,13 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                             scaleY.duration = 250
                             scaleX.start()
                             scaleY.start()
-                            Handler(Looper.getMainLooper()).postDelayed({
+                            lifecycleScope.launch {
+                                delay(260)
                                 loadAndSendOuchMessage(sender)
-                                view.isEnabled = true
-                            }, 260)
+                                withContext(Dispatchers.Main) {
+                                    view.isEnabled = true
+                                }
+                            }
                         }
                     }
                     val bubble = createMessageBubble(sender, text, isUser)
