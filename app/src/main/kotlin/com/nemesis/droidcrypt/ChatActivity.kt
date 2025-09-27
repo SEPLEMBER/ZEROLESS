@@ -27,10 +27,8 @@ import androidx.preference.PreferenceManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.io.File
-import java.io.InputStreamReader
+import java.io.*
 import java.text.Normalizer
-import java.text.SimpleDateFormat
 import java.util.*
 import kotlin.collections.ArrayList
 import kotlin.collections.HashMap
@@ -45,6 +43,8 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     companion object {
         private const val PREF_KEY_FOLDER_URI = "pref_folder_uri"
         private const val PREF_KEY_DISABLE_SCREENSHOTS = "pref_disable_screenshots"
+        private const val DEBUG_LOG_NAME = "paws_debug.log"
+        private const val DEBUG_LOG_MAX_BYTES = 1_000_000 // ~1MB rotate
     }
 
     private lateinit var engine: Engine
@@ -90,95 +90,6 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             return size > Engine.MAX_CACHE_SIZE
         }
     }
-
-    // ---------- debug logging helper ----------
-    private val debugLogFileName = "paws_debug.log"
-
-    private fun writeDebugLog(line: String) {
-        try {
-            val f = File(filesDir, debugLogFileName)
-            val ts = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.ROOT).format(Date())
-            f.appendText("$ts | $line\n")
-        } catch (e: Exception) {
-            // best-effort
-            try { runOnUiThread { Toast.makeText(this, "Debug write failed: ${e.message}", Toast.LENGTH_SHORT).show() } } catch (_: Exception) {}
-        }
-    }
-
-    private fun dumpStateToFile(): String? {
-        return try {
-            val f = File(filesDir, debugLogFileName)
-            f.writeText("=== DUMP STATE ${Date()} ===\n")
-            f.appendText("currentContext=$currentContext\n")
-            f.appendText("lockedContextFile=${lockedContextFile ?: "null"}\n")
-            f.appendText("isContextLocked=$isContextLocked\n")
-            f.appendText("templatesMap.size=${templatesMap.size}\n")
-            f.appendText("keywordResponses.size=${keywordResponses.size}\n")
-            f.appendText("contextMap.size=${contextMap.size}\n")
-            f.appendText("invertedIndex.size=${invertedIndex.size}\n")
-            f.appendText("synonymsMap.size=${synonymsMap.size}\n")
-            f.appendText("stopwords.size=${stopwords.size}\n")
-            f.appendText("\n--- templates keys (first 200) ---\n")
-            templatesMap.keys.take(200).forEach { f.appendText("$it\n") }
-            f.appendText("\n--- keywordResponses keys (first 200) ---\n")
-            keywordResponses.keys.take(200).forEach { f.appendText("$it\n") }
-            f.appendText("\n=== END DUMP ===\n")
-            writeDebugLog("State dumped to ${f.absolutePath}")
-            runOnUiThread { showCustomToast("Dump saved: ${f.absolutePath}") }
-            f.absolutePath
-        } catch (e: Exception) {
-            writeDebugLog("dumpStateToFile failed: ${e.message}")
-            runOnUiThread { showCustomToast("Dump failed: ${e.message}") }
-            null
-        }
-    }
-
-    private fun copyLogToClipboard(maxChars: Int = 120_000) {
-        try {
-            val f = File(filesDir, debugLogFileName)
-            if (!f.exists()) {
-                showCustomToast("Лог не найден. Сначала выполните /dump")
-                return
-            }
-            var content = f.readText()
-            // Если очень большой — возьмём хвост (последние символы), так часто полезнее.
-            if (content.length > maxChars) {
-                content = content.takeLast(maxChars)
-                content = "[...TRUNCATED head...]\n" + content
-            }
-            val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-            val clip = ClipData.newPlainText("paws_debug_log", content)
-            clipboard.setPrimaryClip(clip)
-            showCustomToast("Лог скопирован в буфер обмена (${minOf(content.length, maxChars)} chars).")
-            writeDebugLog("Log copied to clipboard (length=${content.length})")
-        } catch (e: Exception) {
-            writeDebugLog("copyLogToClipboard failed: ${e.message}")
-            showCustomToast("Ошибка копирования лога: ${e.message}")
-        }
-    }
-
-    private fun shareLogViaIntent(maxChars: Int = 200_000) {
-        try {
-            val f = File(filesDir, debugLogFileName)
-            if (!f.exists()) {
-                showCustomToast("Лог не найден. Сначала выполните /dump")
-                return
-            }
-            var content = f.readText()
-            if (content.length > maxChars) content = content.takeLast(maxChars).let { "[...TRUNCATED head...]\n$it" }
-            val send = Intent().apply {
-                action = Intent.ACTION_SEND
-                putExtra(Intent.EXTRA_TEXT, content)
-                type = "text/plain"
-            }
-            startActivity(Intent.createChooser(send, "Share debug log"))
-            writeDebugLog("Log shared via ACTION_SEND (length=${content.length})")
-        } catch (e: Exception) {
-            writeDebugLog("shareLogViaIntent failed: ${e.message}")
-            showCustomToast("Ошибка шаринга лога: ${e.message}")
-        }
-    }
-    // ---------- end debug helper ----------
 
     private fun canonicalKeyFromTokens(tokens: List<String>): String = tokens.sorted().joinToString(" ")
     private fun canonicalKeyFromTextStatic(text: String, synonyms: Map<String, String>, stopwords: Set<String>): String {
@@ -266,6 +177,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 if (saved != null) folderUri = Uri.parse(saved)
             }
         } catch (e: Exception) {
+            writeDebugLog("onCreate: error reading prefs: ${e.message}")
         }
 
         ChatCore.loadSynonymsAndStopwords(this, folderUri, synonymsMap, stopwords)
@@ -276,6 +188,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             MemoryManager.init(this)
             MemoryManager.loadTemplatesFromFolder(this, folderUri)
         } catch (e: Exception) {
+            writeDebugLog("onCreate: memory init error: ${e.message}")
         }
 
         try {
@@ -283,6 +196,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             val disable = prefs.getBoolean("disableScreenshots", false)
             if (disable) window.addFlags(WindowManager.LayoutParams.FLAG_SECURE) else window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
         } catch (e: Exception) {
+            writeDebugLog("onCreate: secure flag read error: ${e.message}")
         }
 
         loadToolbarIcons()
@@ -324,6 +238,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         if (folderUri == null) {
             showCustomToast(getString(R.string.toast_folder_not_selected))
+            writeDebugLog("No folderUri: loading fallback templates")
             ChatCore.loadFallbackTemplates(templatesMap, keywordResponses, mascotList, contextMap)
             rebuildInvertedIndex()
             engine.computeTokenWeights()
@@ -360,15 +275,20 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             }
         }
         idleCheckRunnable?.let { dialogHandler.postDelayed(it, 5000) }
+
+        writeDebugLog("onCreate completed, currentContext=$currentContext, folderUri=${folderUri?.path ?: "null"}")
     }
 
     override fun onInit(status: Int) {
         if (status == TextToSpeech.SUCCESS) {
+            // start with system default, we'll switch per-text when speaking
             try {
                 tts?.language = Locale.getDefault()
             } catch (_: Exception) { }
             tts?.setPitch(1.0f)
             tts?.setSpeechRate(1.0f)
+        } else {
+            writeDebugLog("TTS init failed: status=$status")
         }
     }
 
@@ -386,6 +306,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         try {
             MemoryManager.loadTemplatesFromFolder(this, folderUri)
         } catch (e: Exception) {
+            writeDebugLog("onResume memory load err: ${e.message}")
         }
         rebuildInvertedIndex()
         engine.computeTokenWeights()
@@ -395,11 +316,13 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             dialogHandler.postDelayed(it, 5000)
         }
         loadToolbarIcons()
+        writeDebugLog("onResume: currentContext=$currentContext, isContextLocked=$isContextLocked, lockedFile=$lockedContextFile")
     }
 
     override fun onPause() {
         super.onPause()
         dialogHandler.removeCallbacksAndMessages(null)
+        writeDebugLog("onPause")
     }
 
     override fun onDestroy() {
@@ -407,6 +330,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         dialogHandler.removeCallbacksAndMessages(null)
         tts?.shutdown()
         tts = null
+        writeDebugLog("onDestroy")
     }
 
     private fun setupIconTouchEffect(btn: ImageButton?) {
@@ -442,9 +366,14 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             tryLoadToImageButton("settings.png", btnSettings)
             tryLoadToImageButton("send.png", envelopeInputButton)
         } catch (e: Exception) {
+            writeDebugLog("loadToolbarIcons error: ${e.message}")
         }
     }
 
+    /**
+     * Core matching within current scope (file or global depending on isContextLocked).
+     * Returns response or null.
+     */
     private suspend fun matchInCurrent(
         qOrigRaw: String,
         qTokensFiltered: List<String>,
@@ -461,23 +390,32 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         val subqueryResponses = mutableListOf<String>()
         val processedSubqueries = mutableSetOf<String>()
 
-        if (templatesSnapshot.isEmpty()) return null
+        // 0) if templatesSnapshot is empty -> immediately return null (nothing to match here)
+        if (templatesSnapshot.isEmpty()) {
+            writeDebugLog("matchInCurrent: templatesSnapshot empty (scope empty).")
+            return null
+        }
 
+        // exact canonical match first
         templatesSnapshot[qCanonical]?.let { possible ->
             if (possible.isNotEmpty()) {
                 subqueryResponses.add(possible.random())
                 processedSubqueries.add(qCanonical)
+                writeDebugLog("matchInCurrent: exact canonical match for key='$qCanonical'")
             }
         }
 
+        // Also try the "raw" mapped key (some files use raw mapping)
         val rawKey = Engine.filterStopwordsAndMapSynonymsStatic(qFiltered, synonymsSnapshot, stopwordsSnapshot).second
         templatesSnapshot[rawKey]?.let { possible ->
             if (possible.isNotEmpty() && !processedSubqueries.contains(rawKey)) {
                 subqueryResponses.add(possible.random())
                 processedSubqueries.add(rawKey)
+                writeDebugLog("matchInCurrent: rawKey match for key='$rawKey'")
             }
         }
 
+        // token / keyword / bigram quick matches
         if (subqueryResponses.size < Engine.MAX_SUBQUERY_RESPONSES) {
             val tokens = if (qTokensFiltered.isNotEmpty()) qTokensFiltered else Engine.tokenizeStatic(qFiltered)
 
@@ -490,6 +428,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     if (possible.isNotEmpty()) {
                         subqueryResponses.add(possible.random())
                         processedSubqueries.add(token)
+                        writeDebugLog("matchInCurrent: token match template for token='$token'")
                     }
                 }
                 if (subqueryResponses.size < Engine.MAX_SUBQUERY_RESPONSES) {
@@ -497,6 +436,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                         if (possible.isNotEmpty()) {
                             subqueryResponses.add(possible.random())
                             processedSubqueries.add(token)
+                            writeDebugLog("matchInCurrent: token match keywordResponses for token='$token'")
                         }
                     }
                 }
@@ -510,6 +450,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                         if (possible.isNotEmpty()) {
                             subqueryResponses.add(possible.random())
                             processedSubqueries.add(twoTokens)
+                            writeDebugLog("matchInCurrent: bigram match for '$twoTokens'")
                         }
                     }
                 }
@@ -517,24 +458,31 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
 
         if (subqueryResponses.isNotEmpty()) {
-            return subqueryResponses.joinToString(". ")
+            val joined = subqueryResponses.joinToString(". ")
+            writeDebugLog("matchInCurrent: returning subqueryResponses")
+            return joined
         }
 
+        // keywordResponses (phrase-level)
         val qTokenSet = if (qTokensFiltered.isNotEmpty()) qTokensFiltered.toSet() else Engine.tokenizeStatic(qFiltered).toSet()
         for ((keyword, responses) in keywordResponsesSnapshot) {
             if (keyword.isBlank() || responses.isEmpty()) continue
             val kwTokens = keyword.split(" ").filter { it.isNotEmpty() }.toSet()
             if (qTokenSet.intersect(kwTokens).isNotEmpty()) {
+                writeDebugLog("matchInCurrent: returning keywordResponses for keyword='$keyword'")
                 return responses.random()
             }
         }
 
+        // --- Search scope: if context locked -> search only inside templatesSnapshot (current file).
+        // If not locked -> search globally via invertedIndexSnapshot.
         val maxDist = engine.getFuzzyDistance(qCanonical)
 
         val candidateCounts = HashMap<String, Int>()
         val tokensToUse = if (qTokensFiltered.isNotEmpty()) qTokensFiltered else Engine.tokenizeStatic(qFiltered)
 
         if (isContextLocked) {
+            // build local inverted index from templatesSnapshot keys (tokens -> triggers)
             val localInverted = HashMap<String, MutableList<String>>()
             for (key in templatesSnapshot.keys) {
                 if (key.isBlank()) continue
@@ -549,12 +497,15 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     candidateCounts[trig] = candidateCounts.getOrDefault(trig, 0) + 1
                 }
             }
+            writeDebugLog("matchInCurrent: using local inverted (locked file). candidates=${candidateCounts.size}")
         } else {
+            // use global inverted index snapshot (existing behavior)
             for (tok in tokensToUse) {
                 invertedIndexSnapshot[tok]?.forEach { trig ->
                     candidateCounts[trig] = candidateCounts.getOrDefault(trig, 0) + 1
                 }
             }
+            writeDebugLog("matchInCurrent: using global inverted. candidates=${candidateCounts.size}")
         }
 
         val candidates: List<String> = if (candidateCounts.isNotEmpty()) {
@@ -564,11 +515,13 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 .map { it.key }
                 .take(Engine.MAX_CANDIDATES_FOR_LEV)
         } else {
-            templatesSnapshot.keys.filter { kotlin.math.abs(it.length - qCanonical.length) <= maxDist * 2 + 2 }
-                .ifEmpty { templatesSnapshot.keys }
+            // if no candidates from inverted-index, relax and consider all keys from current scope (templatesSnapshot)
+            templatesSnapshot.keys.filter { kotlin.math.abs(it.length - qCanonical.length) <= maxDist * 2 + 2 } // slightly looser
+                .ifEmpty { templatesSnapshot.keys } // as last resort consider all keys
                 .take(Engine.MAX_CANDIDATES_FOR_LEV)
         }
 
+        // Weighted Jaccard to choose best candidate (but restrict to templatesSnapshot entries)
         var bestByJaccard: String? = null
         var bestJaccard = 0.0
         val qSet = tokensToUse.toSet()
@@ -583,13 +536,17 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 bestByJaccard = key
             }
         }
+        writeDebugLog("matchInCurrent: bestByJaccard=$bestByJaccard score=$bestJaccard threshold=$effectiveJaccardThreshold")
+
         if (bestByJaccard != null && bestJaccard >= effectiveJaccardThreshold) {
             val possible = templatesSnapshot[bestByJaccard]
             if (!possible.isNullOrEmpty()) {
+                writeDebugLog("matchInCurrent: returning bestByJaccard response key=$bestByJaccard")
                 return possible.random()
             }
         }
 
+        // Levenshtein fallback among candidates (cache maxDist)
         var bestKey: String? = null
         var bestDist = Int.MAX_VALUE
         for (key in candidates) {
@@ -601,13 +558,17 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             }
             if (bestDist == 0) break
         }
+        writeDebugLog("matchInCurrent: bestKey by lev=$bestKey dist=$bestDist maxDist=$maxDist")
         if (bestKey != null && bestDist <= maxDist + 1) {
             val possible = templatesSnapshot[bestKey]
             if (!possible.isNullOrEmpty()) {
+                writeDebugLog("matchInCurrent: returning bestKey (levenshtein) = $bestKey")
                 return possible.random()
             }
         }
 
+        // nothing found within the current scope (file or global depending on lock)
+        writeDebugLog("matchInCurrent: nothing found in current scope")
         return null
     }
 
@@ -654,6 +615,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             try {
                 MemoryManager.processIncoming(this, inputText)
             } catch (e: Exception) {
+                writeDebugLog("recordMemorySideEffect error: ${e.message}")
             }
         }
 
@@ -688,7 +650,9 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 }
 
                 if (isContextLocked) {
+                    // If locked and we didn't find anything in the locked file, fall back: unlock and try base/core.
                     withContext(Dispatchers.Main) {
+                        writeDebugLog("No answer in locked context ($lockedContextFile). Unlocking and switching to base.txt")
                         currentContext = "base.txt"
                         isContextLocked = false
                         lockedContextFile = null
@@ -696,7 +660,6 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                         rebuildInvertedIndex()
                         engine.computeTokenWeights()
                         updateAutoComplete()
-                        writeDebugLog("Unlocked context (no match in locked file). Falling back to base.txt")
                     }
                     fallbackFromLocked = true
                     attempt++
@@ -705,17 +668,20 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 }
             }
 
-            val detectedContext = ChatCore.detectContext(qFiltered, contextMapSnapshot, engine)
+            // detect context with stronger validation (ratio + parse check)
+            val detectedContext = detectAndValidateContextCandidate(qFiltered, contextMapSnapshot, minRatio = 0.5, minIntersection = 1)
 
             if (detectedContext != null) {
                 withContext(Dispatchers.Main) {
                     if (detectedContext != currentContext) {
+                        writeDebugLog("Switching context to detectedContext=$detectedContext")
                         currentContext = detectedContext
                         loadTemplatesFromFile(currentContext)
                         rebuildInvertedIndex()
                         engine.computeTokenWeights()
                         updateAutoComplete()
-                        writeDebugLog("Switched context to $detectedContext via detection")
+                    } else {
+                        writeDebugLog("Detected context equals currentContext=$currentContext (no reload)")
                     }
                 }
 
@@ -753,6 +719,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                 if (isContextLocked) {
                     // Skip additional fuzzy matching at this stage; we already tried matching within the locked file.
+                    writeDebugLog("DetectedContext is locked; skipping further fuzzy matching")
                 } else {
                     val localInverted = HashMap<String, MutableList<String>>()
                     for ((k, v) in localTemplates) {
@@ -858,8 +825,6 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     return@launch
                 }
 
-                writeDebugLog("No response found — qFiltered='$qFiltered' qCanonical='$qCanonical' templates=${templatesMap.size} keywords=${keywordResponses.size} invertedIndexSize=${invertedIndex.size} isContextLocked=${isContextLocked} currentContext=${currentContext} lockedFile=${lockedContextFile}")
-
                 val dummy = ChatCore.getDummyResponse(qOrig)
                 withContext(Dispatchers.Main) {
                     addChatMessage(currentMascotName, dummy)
@@ -894,7 +859,6 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 return@launch
             }
 
-            writeDebugLog("Final fallback — no core/memory response. qFiltered='$qFiltered' currentContext=$currentContext lockedFile=${lockedContextFile}")
             val dummy = ChatCore.getDummyResponse(qOrig)
             withContext(Dispatchers.Main) {
                 addChatMessage(currentMascotName, dummy)
@@ -929,25 +893,8 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             cmd == "/clear" || cmd == "очисти чат" -> {
                 clearChat()
             }
-            cmd == "/dump" -> {
-                writeDebugLog("/dump requested")
-                dumpStateToFile()
-            }
             cmd == "/copylog" -> {
-                writeDebugLog("/copylog requested")
-                copyLogToClipboard()
-            }
-            cmd == "/sharelog" -> {
-                writeDebugLog("/sharelog requested")
-                shareLogViaIntent()
-            }
-            cmd == "/log" -> {
-                val f = File(filesDir, debugLogFileName)
-                if (f.exists()) {
-                    addChatMessage(currentMascotName, "Логи: ${f.absolutePath}")
-                } else {
-                    addChatMessage(currentMascotName, "Лог-файл не найден. Нажмите /dump")
-                }
+                copyDebugLogToClipboard()
             }
             else -> {
                 addChatMessage(currentMascotName, getString(R.string.unknown_command, cmdRaw))
@@ -1010,6 +957,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         invertedIndex.clear()
         val tempIndex = engine.rebuildInvertedIndex()
         invertedIndex.putAll(tempIndex)
+        writeDebugLog("rebuildInvertedIndex: built ${invertedIndex.size} tokens")
     }
 
     private fun addChatMessage(sender: String, text: String) {
@@ -1095,6 +1043,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             }
         } catch (e: Exception) {
             showCustomToast(getString(R.string.error_loading_ouch, e.message ?: ""))
+            writeDebugLog("loadAndSendOuchMessage error: ${e.message}")
         }
     }
 
@@ -1116,8 +1065,10 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             } catch (e: Exception) {
                 try { afd.close() } catch (_: Exception) {}
                 try { player.reset(); player.release() } catch (_: Exception) {}
+                writeDebugLog("playNotificationSound error: ${e.message}")
             }
         } catch (e: Exception) {
+            writeDebugLog("playNotificationSound outer error: ${e.message}")
         }
     }
 
@@ -1182,6 +1133,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 }
             }
         } catch (e: Exception) {
+            writeDebugLog("loadAvatarInto error for sender=$sender: ${e.message}")
         }
         target.setImageResource(android.R.color.transparent)
     }
@@ -1227,7 +1179,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             rebuildInvertedIndex()
             engine.computeTokenWeights()
             updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
-            writeDebugLog("Loaded fallback templates (no folderUri)")
+            writeDebugLog("loadTemplatesFromFile: fallback loaded because folderUri==null")
             return
         }
         try {
@@ -1236,7 +1188,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 rebuildInvertedIndex()
                 engine.computeTokenWeights()
                 updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
-                writeDebugLog("DocumentFile.fromTreeUri returned null")
+                writeDebugLog("loadTemplatesFromFile: dir==null -> fallback loaded")
                 return
             }
             val file = dir.findFile(filename)
@@ -1245,21 +1197,24 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 rebuildInvertedIndex()
                 engine.computeTokenWeights()
                 updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
-                writeDebugLog("File '$filename' not found; loaded fallback templates")
+                writeDebugLog("loadTemplatesFromFile: file '$filename' not found -> fallback loaded")
                 return
             }
             var firstNonEmptyLineChecked = false
             contentResolver.openInputStream(file.uri)?.use { ins ->
                 InputStreamReader(ins, Charsets.UTF_8).buffered().use { reader ->
                     reader.forEachLine { raw ->
+                        // remove BOM and invisible unicode that could be at the start of a file
                         var l = raw.replace("\uFEFF", "").trim()
                         if (l.isEmpty()) return@forEachLine
                         if (!firstNonEmptyLineChecked) {
                             firstNonEmptyLineChecked = true
+                            // accept any line that starts with "#CONTEXT" (case-insensitive), this is more robust
                             if (l.startsWith("#CONTEXT", ignoreCase = true)) {
                                 isContextLocked = true
                                 lockedContextFile = filename
-                                writeDebugLog("Detected #CONTEXT in $filename -> isContextLocked=true")
+                                writeDebugLog("loadTemplatesFromFile: detected #CONTEXT in $filename, isContextLocked=true")
+                                // do not `return` the whole loader — continue parsing the file so templatesMap fills normally
                                 return@forEachLine
                             }
                         }
@@ -1348,11 +1303,11 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             }
             rebuildInvertedIndex()
             engine.computeTokenWeights()
-            writeDebugLog("Loaded file '$filename' templates=${templatesMap.size} keywords=${keywordResponses.size} isContextLocked=$isContextLocked lockedContextFile=$lockedContextFile")
             updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
+            writeDebugLog("loadTemplatesFromFile: loaded '$filename' templates=${templatesMap.size} keywords=${keywordResponses.size} locked=$isContextLocked")
         } catch (e: Exception) {
             showCustomToast(getString(R.string.error_reading_file, e.message ?: ""))
-            writeDebugLog("Error reading '$filename': ${e.message}")
+            writeDebugLog("loadTemplatesFromFile exception for '$filename': ${e.message}")
             ChatCore.loadFallbackTemplates(templatesMap, keywordResponses, mascotList, contextMap)
             rebuildInvertedIndex()
             engine.computeTokenWeights()
@@ -1408,6 +1363,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 }
             } catch (e: Exception) {
                 showCustomToast(getString(R.string.error_loading_mascot_metadata, e.message ?: ""))
+                writeDebugLog("loadMascotMetadata error for $mascotName: ${e.message}")
             }
         }
     }
@@ -1443,7 +1399,106 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         lastUserInputTime = System.currentTimeMillis()
         idleCheckRunnable?.let {
             dialogHandler.removeCallbacks(it)
+            // corrected to 5000 ms to match scheduling elsewhere
             dialogHandler.postDelayed(it, 5000)
         }
     }
-}
+
+    // ---------- Debug log helpers (write to internal filesDir) ----------
+    private fun writeDebugLog(msg: String) {
+        try {
+            val f = File(filesDir, DEBUG_LOG_NAME)
+            // rotate if too large
+            if (f.exists() && f.length() > DEBUG_LOG_MAX_BYTES) {
+                val old = File(filesDir, "$DEBUG_LOG_NAME.old")
+                try { old.delete() } catch (_: Exception) {}
+                f.renameTo(old)
+            }
+            val ts = System.currentTimeMillis()
+            val line = "${Date(ts)}\t$msg\n"
+            FileOutputStream(f, true).bufferedWriter(Charsets.UTF_8).use { it.append(line) }
+        } catch (e: Exception) {
+            // swallow — logging must not crash app
+        }
+    }
+
+    private fun readDebugLog(): String {
+        return try {
+            val f = File(filesDir, DEBUG_LOG_NAME)
+            if (!f.exists()) return ""
+            f.readText(Charsets.UTF_8)
+        } catch (e: Exception) {
+            ""
+        }
+    }
+
+    private fun copyDebugLogToClipboard() {
+        try {
+            val content = readDebugLog()
+            if (content.isBlank()) {
+                showCustomToast(getString(R.string.no_log_available))
+                return
+            }
+            val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            val clip = ClipData.newPlainText("paws_debug_log", content)
+            clipboard.setPrimaryClip(clip)
+            showCustomToast(getString(R.string.log_copied_to_clipboard))
+            writeDebugLog("copyDebugLogToClipboard: copied ${content.length} chars")
+        } catch (e: Exception) {
+            showCustomToast(getString(R.string.error_copying_log, e.message ?: ""))
+            writeDebugLog("copyDebugLogToClipboard error: ${e.message}")
+        }
+    }
+
+    // ---------- Strict context detection & validation ----------
+    private fun detectAndValidateContextCandidate(
+        qFiltered: String,
+        contextMapSnapshot: Map<String, String>,
+        minRatio: Double = 0.5,
+        minIntersection: Int = 1
+    ): String? {
+        try {
+            val normalized = Engine.normalizeText(qFiltered)
+            val (mappedTokens, _) = Engine.filterStopwordsAndMapSynonymsStatic(normalized, synonymsMap, stopwords)
+            if (mappedTokens.isEmpty()) return null
+
+            var bestFile: String? = null
+            var bestScore = 0.0
+            // перебираем контекстные ключи (они уже canonical в contextMapSnapshot)
+            for ((keyCanon, file) in contextMapSnapshot) {
+                if (keyCanon.isBlank()) continue
+                val keyTokens = keyCanon.split(" ").filter { it.isNotEmpty() }.toSet()
+                if (keyTokens.isEmpty()) continue
+                val intersection = mappedTokens.count { it in keyTokens }
+                if (intersection < minIntersection) continue
+                val score = intersection.toDouble() / keyTokens.size.toDouble() // доля покрытых токенов контекстного ключа
+                if (score > bestScore) {
+                    bestScore = score
+                    bestFile = file
+                }
+            }
+            if (bestFile == null) return null
+            if (bestScore < minRatio) {
+                writeDebugLog("Context candidate '$bestFile' rejected: score=$bestScore < $minRatio")
+                return null
+            }
+
+            // Проверим, что файл реально содержит шаблоны/ключевые ответы — чтобы не переключаться на пустой context-файл
+            try {
+                val (tpls, kws) = ChatCore.parseTemplatesFromFile(this, folderUri, bestFile, HashMap(synonymsMap), HashSet(stopwords))
+                if ((tpls.isEmpty() && kws.isEmpty())) {
+                    writeDebugLog("Context file '$bestFile' rejected: parseTemplatesFromFile returned empty")
+                    return null
+                }
+            } catch (e: Exception) {
+                writeDebugLog("Context validation parse failed for '$bestFile': ${e.message}")
+                return null
+            }
+
+            writeDebugLog("Context candidate accepted: '$bestFile' score=$bestScore")
+            return bestFile
+        } catch (e: Exception) {
+            writeDebugLog("detectAndValidateContextCandidate failed: ${e.message}")
+            return null
+        }
+    }
