@@ -8,19 +8,78 @@ import com.nemesis.droidcrypt.MemoryManager
 import java.io.InputStreamReader
 import com.nemesis.droidcrypt.R
 import java.util.Locale
+import android.util.Log
+import android.content.ClipData
+import android.content.ClipboardManager
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.concurrent.atomic.AtomicInteger
 
 object ChatCore {
 
     private var appContext: Context? = null
 
+    // simple in-memory ring buffer for logs (keeps last N entries)
+    private val logBuffer = ArrayDeque<String>()
+    private const val LOG_BUFFER_MAX = 200
+    private val logCounter = AtomicInteger(0)
+
     fun init(context: Context) {
         appContext = context.applicationContext
+        appendLog("ChatCore.init")
+    }
+
+    private fun timestamp(): String {
+        val df = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
+        return df.format(Date())
+    }
+
+    private fun appendLogLine(line: String) {
+        synchronized(logBuffer) {
+            val entry = "${timestamp()} ${line}"
+            logBuffer.addLast(entry)
+            if (logBuffer.size > LOG_BUFFER_MAX) logBuffer.removeFirst()
+            // also log to Logcat for devices where it's possible
+            try {
+                Log.i("ChatCore", entry)
+            } catch (_: Exception) {}
+        }
+    }
+
+    private fun appendLog(tag: String, message: String? = null, ex: Exception? = null) {
+        val idx = logCounter.incrementAndGet()
+        val msg = buildString {
+            append("[$idx] ")
+            append(tag)
+            if (!message.isNullOrBlank()) {
+                append(" - ")
+                append(message)
+            }
+            ex?.let {
+                append(" : ")
+                append(it::class.java.simpleName)
+                append(" - ")
+                append(it.message ?: "")
+            }
+        }
+        appendLogLine(msg)
+        // persist last logs to clipboard for debugging (best-effort)
+        try {
+            val c = appContext ?: return
+            val clipboard = c.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            val whole = synchronized(logBuffer) { logBuffer.joinToString("\n") }
+            val clip = ClipData.newPlainText("RacoonTalkLogs", whole)
+            clipboard.setPrimaryClip(clip)
+        } catch (_: Exception) {
+            // ignore clipboard failures
+        }
     }
 
     private fun safeGetString(context: Context?, resId: Int, fallback: String): String {
         return try {
             (context ?: appContext)?.getString(resId) ?: fallback
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            appendLog("safeGetString", "resId=$resId", e)
             fallback
         }
     }
@@ -42,7 +101,8 @@ object ChatCore {
                         c.getString(R.string.antispam_9),
                         c.getString(R.string.antispam_10)
                     )
-                } catch (_: Exception) {
+                } catch (e: Exception) {
+                    appendLog("antiSpamResponses", null, e)
                     listOf(
                         "Please stop spamming.",
                         "Too many repeats, try something new.",
@@ -71,7 +131,8 @@ object ChatCore {
                         c.getString(R.string.fallback_3),
                         c.getString(R.string.fallback_4)
                     )
-                } catch (_: Exception) {
+                } catch (e: Exception) {
+                    appendLog("fallbackReplies", null, e)
                     listOf("Hello!", "How are you?", "Tell me about yourself", "Exit")
                 }
             } else {
@@ -148,12 +209,14 @@ object ChatCore {
                                 val rightTokens = Engine.filterStopwordsAndMapSynonymsStatic(rightNorm, synonymsSnapshot, stopwordsSnapshot).first
                                 contextPatterns.add(ContextPattern(leftTokens, rightTokens, response))
                             }
-                        } catch (_: Exception) {
+                        } catch (e: Exception) {
+                            appendLog("loadContextTemplatesFromFolder", "parsing line failed: $raw", e)
                         }
                     }
                 }
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            appendLog("loadContextTemplatesFromFolder", "failed to load context.txt", e)
         }
     }
 
@@ -174,13 +237,17 @@ object ChatCore {
                         lines.forEach { raw ->
                             var l = raw.trim()
                             if (l.isEmpty()) return@forEach
-                            if (l.startsWith("*") && l.endsWith("*") && l.length > 1) {
-                                l = l.substring(1, l.length - 1)
-                            }
-                            val parts = l.split(";").map { Engine.normalizeText(it) }.filter { it.isNotEmpty() }
-                            if (parts.isNotEmpty()) {
-                                val canonical = parts.last()
-                                parts.forEach { p -> synonymsMap[p] = canonical }
+                            try {
+                                if (l.startsWith("*") && l.endsWith("*") && l.length > 1) {
+                                    l = l.substring(1, l.length - 1)
+                                }
+                                val parts = l.split(";").map { Engine.normalizeText(it) }.filter { it.isNotEmpty() }
+                                if (parts.isNotEmpty()) {
+                                    val canonical = parts.last()
+                                    parts.forEach { p -> synonymsMap[p] = canonical }
+                                }
+                            } catch (e: Exception) {
+                                appendLog("loadSynonymsAndStopwords", "line parse error: $raw", e)
                             }
                         }
                     }
@@ -196,7 +263,8 @@ object ChatCore {
                     }
                 }
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            appendLog("loadSynonymsAndStopwords", "failed to load synonyms/stopwords", e)
         }
     }
 
@@ -217,7 +285,7 @@ object ChatCore {
             context.contentResolver.openInputStream(file.uri)?.use { ins ->
                 InputStreamReader(ins, Charsets.UTF_8).buffered().useLines { lines ->
                     lines.forEach { raw ->
-                        val l = raw.trim()
+                        val l = raw.replace("\uFEFF", "").trim()
                         if (l.isEmpty()) return@forEach
                         try {
                             if (l.startsWith("-")) {
@@ -237,12 +305,14 @@ object ChatCore {
                                     templates[triggerMapped] = responses.toMutableList()
                                 }
                             }
-                        } catch (_: Exception) {
+                        } catch (e: Exception) {
+                            appendLog("parseTemplatesFromFile", "parse error in $filename line: $raw", e)
                         }
                     }
                 }
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            appendLog("parseTemplatesFromFile", "failed to parse $filename", e)
         }
         return Pair(templates, keywords)
     }
@@ -278,7 +348,8 @@ object ChatCore {
                     val value = try {
                         if (name.equals("topic", ignoreCase = true)) currentTopic ?: MemoryManager.readSlot(name)
                         else MemoryManager.readSlot(name)
-                    } catch (_: Exception) {
+                    } catch (e: Exception) {
+                        appendLog("substitutePlaceholdersWithMemory", "mem read fail for $name", e)
                         null
                     }
                     out = out.replace("<$name>", value?.takeIf { it.isNotBlank() } ?: getUnknownPlaceholder())
@@ -404,7 +475,8 @@ object ChatCore {
                     return resolvePotentialFileResponse(templates[bestLev]?.random() ?: "", qSet, qCanonical)
                 }
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            appendLog("searchInCoreFiles", "search failed", e)
         }
         return null
     }
@@ -419,12 +491,14 @@ object ChatCore {
         try {
             MemoryManager.init(context)
             MemoryManager.loadTemplatesFromFolder(context, folderUri, engine.synonymsMap)
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            appendLog("findBestResponse", "memory init/load failed", e)
         }
 
         try {
             loadContextTemplatesFromFolder(context, folderUri, engine.synonymsMap, engine.stopwords)
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            appendLog("findBestResponse", "loadContextTemplatesFromFolder failed", e)
         }
 
         val normalized = Engine.normalizeText(userInput)
@@ -432,11 +506,12 @@ object ChatCore {
         val tokens = mappedTokens
 
         try {
+            // pattern-based context capture (e.g. "my favorite topic is {}")
             for (p in contextPatterns) {
                 val topicMapped = matchContextPattern(p, tokens)
                 if (topicMapped != null) {
                     currentTopic = topicMapped
-                    try { MemoryManager.processIncoming(context, topicMapped) } catch (_: Exception) {}
+                    try { MemoryManager.processIncoming(context, topicMapped) } catch (e: Exception) { appendLog("findBestResponse", "memory write failed", e) }
                     val resp = p.response?.replace("{topic}", topicMapped) ?: run {
                         val lang = (appContext?.resources?.configuration?.locales?.get(0)?.language ?: Locale.getDefault().language).lowercase(Locale.ROOT)
                         if (lang == "ru") "Запомнил тему: $topicMapped" else "Remembered topic: $topicMapped"
@@ -455,7 +530,8 @@ object ChatCore {
                     return result
                 }
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            appendLog("findBestResponse", "context pattern handling failed", e)
         }
 
         val normalizedForSearch = normalized
@@ -475,7 +551,8 @@ object ChatCore {
         if (resp != null) {
             try {
                 MemoryManager.processIncoming(context, userInput)
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                appendLog("findBestResponse", "memory process incoming failed", e)
             }
             return resp
         }
@@ -483,7 +560,8 @@ object ChatCore {
         try {
             val memResp = MemoryManager.processIncoming(context, userInput)
             if (!memResp.isNullOrBlank()) return memResp
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            appendLog("findBestResponse", "memory fallback failed", e)
         }
 
         return getDummyResponse(context, userInput)
@@ -514,7 +592,8 @@ object ChatCore {
             keywords.clear()
             keywords.putAll(parsedKeywords)
             true to (parsedTemplates.size + parsedKeywords.size)
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            appendLog("loadTemplatesFromFile", "failed to load $filename", e)
             false to 0
         }
     }
@@ -561,6 +640,13 @@ object ChatCore {
         return if (query.lowercase(Locale.ROOT).contains(triggerHello)) greeting else unknown
     }
 
+    /**
+     * Improved detectContext:
+     * - uses mapped tokens (synonyms/stopwords applied)
+     * - computes absolute overlap and relative overlap
+     * - boosts score if tokens appear in engine.getContextTokens() (recent conversation)
+     * - returns null if below thresholds (to avoid accidental switches)
+     */
     fun detectContext(input: String, contextMap: Map<String, String>, engine: Engine): String? {
         try {
             val (mappedTokens, _) = Engine.filterStopwordsAndMapSynonymsStatic(
@@ -570,12 +656,48 @@ object ChatCore {
             )
             if (mappedTokens.isEmpty()) return null
             val mappedSet = mappedTokens.toSet()
-            return contextMap.maxByOrNull { (k, _) ->
-                if (k.isBlank()) return@maxByOrNull 0
+            val ctxTokensRecent = engine.getContextTokens()
+            var bestKey: String? = null
+            var bestScore = 0.0
+
+            for ((k, v) in contextMap) {
+                if (k.isBlank()) continue
                 val keyTokens = k.split(" ").filter { it.isNotEmpty() }.toSet()
-                mappedSet.count { it in keyTokens }
-            }?.value
-        } catch (_: Exception) {
+                if (keyTokens.isEmpty()) continue
+                val common = mappedSet.intersect(keyTokens)
+                val absCount = common.size
+                if (absCount == 0) continue
+                val rel = absCount.toDouble() / keyTokens.size.toDouble() // fraction of key matched
+                var score = absCount.toDouble() + rel
+                // boost if we have recent context tokens overlapping
+                val recentOverlap = ctxTokensRecent.intersect(keyTokens).size
+                if (recentOverlap > 0) {
+                    score += recentOverlap * Engine.CONTEXT_BOOST
+                }
+                // prefer keys that are more specific (larger keyTokens) if relative match is good
+                if (rel >= 0.6) score += 0.5
+
+                if (score > bestScore) {
+                    bestScore = score
+                    bestKey = k
+                }
+            }
+
+            // require either:
+            // - absolute match >= 2 tokens, or
+            // - relative match >= 0.6 (i.e., matched majority of small key)
+            if (bestKey != null) {
+                val keyTokens = bestKey.split(" ").filter { it.isNotEmpty() }.toSet()
+                val matched = mappedSet.intersect(keyTokens)
+                val absCount = matched.size
+                val rel = if (keyTokens.isEmpty()) 0.0 else absCount.toDouble() / keyTokens.size.toDouble()
+                if (absCount >= 2 || rel >= 0.6) {
+                    return contextMap[bestKey]
+                }
+            }
+            return null
+        } catch (e: Exception) {
+            appendLog("detectContext", "failed", e)
             return null
         }
     }
