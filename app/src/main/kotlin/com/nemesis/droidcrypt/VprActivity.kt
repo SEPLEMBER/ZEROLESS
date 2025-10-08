@@ -1,4 +1,4 @@
-package com.nemesis.droidcrypt
+package com.nemesis.pawstribe
 
 import android.graphics.Typeface
 import android.os.Bundle
@@ -67,7 +67,7 @@ class VprActivity : AppCompatActivity() {
         // Input behaviour: IME_ACTION_DONE submits command
         input.imeOptions = EditorInfo.IME_ACTION_DONE
         input.setRawInputType(InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS)
-        input.setOnEditorActionListener { v, actionId, event ->
+        input.setOnEditorActionListener { _, actionId, event ->
             if (actionId == EditorInfo.IME_ACTION_DONE || (event?.keyCode == KeyEvent.KEYCODE_ENTER)) {
                 val text = input.text.toString().trim()
                 if (text.isNotEmpty()) {
@@ -84,15 +84,23 @@ class VprActivity : AppCompatActivity() {
         addSystemLine("Offline Assistant — режим оффлайн. Введите команду (напр.: \"простые проценты 100000 7% 3 года\")")
     }
 
-    // Add user command view and process
+    // Add user command view and process (with try/catch to prevent crashes)
     private fun submitCommand(command: String) {
         addUserLine("> $command")
         lifecycleScope.launch(Dispatchers.Default) {
-            val outputs = parseCommand(command)
-            withContext(Dispatchers.Main) {
-                outputs.forEach { addAssistantLine("= $it") }
-                // auto scroll to bottom
-                scrollView.post { scrollView.fullScroll(View.FOCUS_DOWN) }
+            try {
+                val outputs = parseCommand(command)
+                withContext(Dispatchers.Main) {
+                    outputs.forEach { addAssistantLine("= $it") }
+                    // auto scroll to bottom
+                    scrollView.post { scrollView.fullScroll(View.FOCUS_DOWN) }
+                }
+            } catch (t: Throwable) {
+                // Показываем ошибку как сообщение ассистента — приложение не падает
+                withContext(Dispatchers.Main) {
+                    addAssistantLine("= Ошибка при обработке команды: ${t.message ?: t::class.java.simpleName}")
+                    scrollView.post { scrollView.fullScroll(View.FOCUS_DOWN) }
+                }
             }
         }
     }
@@ -173,37 +181,63 @@ class VprActivity : AppCompatActivity() {
 
         // Простые проценты: "простые проценты 100000 7% 3 года"
         if (lower.contains("прост") && lower.contains("процент")) {
-            val parts = tokenizeNumbersAndUnits(cmd)
-            // Expected: principal, rate, time (optional)
-            if (parts.size < 2) return listOf("Использование: простые проценты <сумма> <ставка%> [время (на X лет/месяцев/дней)]")
-            val principal = BigDecimal(parts.getOrNull(0) ?: "0")
-            val rate = parsePercent(parts.getOrNull(1) ?: "0")
-            val timeYears = parseTimeToYears(parts.drop(2).joinToString(" "))
+            // ищем первую сумму
+            val numMatch = Regex("""(\d+(?:[.,]\d+)?)""").find(cmd)
+            if (numMatch == null) return listOf("Использование: простые проценты <сумма> <ставка%> [время]")
+            val principal = try {
+                BigDecimal(numMatch.groupValues[1].replace(',', '.'))
+            } catch (e: Exception) {
+                return listOf("Невалидная сумма: ${numMatch.groupValues[1]}")
+            }
+
+            // ищем процент (число со знаком %)
+            val rateMatch = Regex("""(\d+(?:[.,]\d+)?)\s*%""").find(cmd)
+            val rate = if (rateMatch != null) {
+                parsePercent(rateMatch.groupValues[0])
+            } else {
+                // fallback: следующая числовая токен после суммы
+                val rest = cmd.substring(numMatch.range.last + 1)
+                val nextNum = Regex("""(\d+(?:[.,]\d+)?)""").find(rest)
+                if (nextNum != null) parsePercent(nextNum.groupValues[1]) else BigDecimal.ZERO
+            }
+
+            val timeYears = parseTimeToYears(cmd)
             return listOfNotNull(simpleInterestReport(principal, rate, timeYears))
         }
 
         // Сложные проценты: "сложные проценты 100000 7% 3 года помесячно"
         if (lower.contains("слож") && lower.contains("процент")) {
-            val parts = tokenizeNumbersAndUnits(cmd)
-            if (parts.size < 2) return listOf("Использование: сложные проценты <сумма> <ставка%> [время] [помесячно/посуточно/годовая]")
-            val principal = BigDecimal(parts.getOrNull(0) ?: "0")
-            val rate = parsePercent(parts.getOrNull(1) ?: "0")
-            val tail = parts.drop(2).joinToString(" ")
-            val timeYears = parseTimeToYears(tail)
+            val numMatch = Regex("""(\d+(?:[.,]\d+)?)""").find(cmd)
+            if (numMatch == null) return listOf("Использование: сложные проценты <сумма> <ставка%> [время] [помесячно/посуточно/годовая]")
+            val principal = try {
+                BigDecimal(numMatch.groupValues[1].replace(',', '.'))
+            } catch (e: Exception) {
+                return listOf("Невалидная сумма: ${numMatch.groupValues[1]}")
+            }
+
+            val rateMatch = Regex("""(\d+(?:[.,]\d+)?)\s*%""").find(cmd)
+            val rate = if (rateMatch != null) parsePercent(rateMatch.groupValues[0]) else BigDecimal.ZERO
+
+            val timeYears = parseTimeToYears(cmd)
             val capitalization = when {
-                tail.contains("помесяч", ignoreCase = true) || tail.contains("monthly", ignoreCase = true) -> "monthly"
-                tail.contains("посуточ", ignoreCase = true) || tail.contains("daily", ignoreCase = true) -> "daily"
-                tail.contains("год", ignoreCase = true) || tail.contains("year", ignoreCase = true) -> "yearly"
-                else -> "monthly" // по умолчанию помесячно — чаще ожидают месячную капитализацию
+                cmd.contains("помесяч", ignoreCase = true) || cmd.contains("monthly", ignoreCase = true) -> "monthly"
+                cmd.contains("посуточ", ignoreCase = true) || cmd.contains("daily", ignoreCase = true) -> "daily"
+                cmd.contains("год", ignoreCase = true) || cmd.contains("year", ignoreCase = true) -> "yearly"
+                else -> "monthly"
             }
             return listOfNotNull(compoundInterestReport(principal, rate, timeYears, capitalization))
         }
 
         // Месячный доход/расход: "месячный доход 120000 рабочие 8"
         if (lower.contains("месяч") && (lower.contains("доход") || lower.contains("зарп") || lower.contains("расход"))) {
-            val parts = tokenizeNumbersAndUnits(cmd)
-            if (parts.isEmpty()) return listOf("Использование: месячный доход <сумма> [рабочие <hours>]")
-            val amount = BigDecimal(parts.getOrNull(0) ?: "0")
+            // ищем сумму в тексте
+            val numMatch = Regex("""(\d+(?:[.,]\d+)?)""").find(cmd)
+            if (numMatch == null) return listOf("Использование: месячный доход <сумма> [рабочие <hours>]")
+            val amount = try {
+                BigDecimal(numMatch.groupValues[1].replace(',', '.'))
+            } catch (e: Exception) {
+                return listOf("Невалидная сумма: ${numMatch.groupValues[1]}")
+            }
             // find working hours in the command (pattern "рабочие X")
             val workHoursMatch = Regex("""рабоч\w*\s+(\d{1,2})""", RegexOption.IGNORE_CASE).find(cmd)
             val workHours = workHoursMatch?.groupValues?.get(1)?.toIntOrNull() ?: 8
