@@ -194,6 +194,6 @@
     <string name="monthly_hour_24">В час (24/сут): %1$s</string>
     <string name="monthly_hour_work">В час (рабочие %1$d): %2$s</string>
 
-    <string name="welcome_message2">Offline Assistant — режим оффлайн. Введите команду (напр.: "простые проценты 100000 7% 3 года")</string>
+    <string name="welcome_messagen">Offline Assistant — режим оффлайн. Введите команду (напр.: "простые проценты 100000 7% 3 года")</string>
 
 </resources>
