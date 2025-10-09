@@ -33,6 +33,72 @@ jobs:
       - name: Build Debug APK
         run: ./gradlew assembleDebug --stacktrace
 
+      # ----------------------------
+      # NEW: resource diagnostics
+      # ----------------------------
+      - name: Create diagnostics dir
+        run: mkdir -p build/resource-diagnostics || true
+
+      - name: Find merged values.xml files
+        run: |
+          echo "Looking for merged values.xml files..."
+          find app/build -type f -path "*/mergeDebugResources/*/values*.xml" -print || true
+          # Also capture any merged values.xml in incremental merged.dir
+          find app/build -type f -path "*/mergeDebugResources*/*/values*/values*.xml" -print || true
+        continue-on-error: true
+
+      - name: Copy merged values (if any) to diagnostics
+        run: |
+          set -e
+          mkdir -p build/resource-diagnostics/merged
+          # copy all candidate merged values.xml into diagnostics
+          find app/build -type f -path "*/mergeDebugResources/*/values*.xml" -exec cp -v "{}" build/resource-diagnostics/merged/ \; || true
+          find app/build -type f -path "*/mergeDebugResources*/*/values*/values*.xml" -exec cp -v "{}" build/resource-diagnostics/merged/ \; || true
+          echo "Files copied:"
+          ls -la build/resource-diagnostics/merged || true
+        continue-on-error: true
+
+      - name: Print merged values (first 200 lines) and hexdump for diagnostics
+        run: |
+          set -e
+          echo "---- merged files list ----"
+          ls -la build/resource-diagnostics/merged || true
+          for f in build/resource-diagnostics/merged/*.xml; do
+            [ -f "$f" ] || continue
+            echo "==== FILE: $f ===="
+            echo "---- first 200 lines ----"
+            sed -n '1,200p' "$f" || true
+            echo "---- hex dump of lines 1..80 (to reveal \\u / BOM / hidden bytes) ----"
+            sed -n '1,80p' "$f" | hexdump -C || true
+            echo
+          done
+        continue-on-error: true
+
+      - name: Grep suspicious sequences in repo and build
+        run: |
+          echo "=== Search for literal {str} in repo ==="
+          grep -R --line-number --fixed-strings '{str}' . || true
+          echo "=== Search for literal {str} in build dir ==="
+          grep -R --line-number --fixed-strings '{str}' app/build || true
+          echo "=== Search for backslash-u sequences (\\u) in repo ==="
+          git grep -n '\\u' || true
+          echo "=== Search for backslashes in res files (possible escapes) ==="
+          grep -R --line-number '\\\' app/src/main/res || true
+          echo "=== Search for curly placeholders like {anything} in res ==="
+          grep -R --line-number -E '\{[^}]+\}' app/src/main/res || true
+        continue-on-error: true
+
+      - name: Archive resource diagnostics
+        uses: actions/upload-artifact@v4
+        with:
+          name: resource-diagnostics
+          path: build/resource-diagnostics
+          retention-days: 7
+        if: always()
+
+      # ----------------------------
+      # Continue original flow
+      # ----------------------------
       - name: Upload Debug APK
         uses: actions/upload-artifact@v4
         with:
