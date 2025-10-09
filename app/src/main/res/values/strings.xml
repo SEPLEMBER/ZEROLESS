@@ -130,7 +130,8 @@
         <item>Математику не заказывали?</item>
         <item>Здесь ничего нет, честно!</item>
         <item>Запускаем матрицу...</item>
-
+        </string-array>
+        
     <string name="app_name">Offline Assistant</string>
     <string name="hint_input">Введите команду (Enter = отправить)</string>
 
@@ -193,5 +194,4 @@
     <string name="monthly_day">День (30d): %1$s</string>
     <string name="monthly_hour_24">В час (24/сут): %1$s</string>
     <string name="monthly_hour_work">В час (рабочие %1$d): %2$s</string>
-        </string-array>
 </resources>
