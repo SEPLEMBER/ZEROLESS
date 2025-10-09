@@ -143,7 +143,7 @@
     <string name="usage_entropy">Использование: энтропия &lt;текст&gt;</string>
 
     <!-- usage_traffic: никаких обратных слэшей или фигурных вставок -->
-    <string name="usage_traffic">Не могу распознать объём. Пример: 'трафик 5gb'</string>
+    <string name="usage_traffic"><![CDATA[Не могу распознать объём. Пример: 'трафик 5gb']]> </string>
 
     <string name="usage_simple_percent">Использование: простые проценты &lt;сумма&gt; &lt;ставка%&gt; [время]</string>
     <string name="usage_compound_percent">Использование: сложные проценты &lt;сумма&gt; &lt;ставка%&gt; [время] [помесячно/посуточно/годовая]</string>
