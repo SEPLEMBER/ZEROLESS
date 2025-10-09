@@ -1,196 +1,180 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <!-- Название приложения и заголовки -->
-    <string name="app_name">Pawstribe</string>
-    <string name="app_title_prefix">Pawstribe - %1$s</string>
-    <string name="settings_title">Настройки</string>
-    <string name="chat_title">Чат</string>
+name: Build Android APK
 
-    <!-- Элементы интерфейса -->
-    <string name="back">Назад</string>
-    <string name="send">Отправить</string>
-    <string name="lock">Заблокировать</string>
-    <string name="trash">Очистить чат</string>
-    <string name="envelope">Сообщения</string>
-    <string name="settings">Настройки</string>
-    <string name="battery">Батарея</string>
-    <string name="charging">Зарядка</string>
-    <string name="info">Информация</string>
-    <string name="time">Время</string>
-    <string name="save_templates">Сохранить шаблоны</string>
-    <string name="clear_cache">Очистить SharedPrefs</string>
-    <string name="templates_hint">Каждый шаблон в новой строке. Формат: триггер=ответ</string>
-    <string name="start_chat">Перейти в чат</string>
-    <string name="bluetooth">Bluetooth</string>
-    <string name="wifi">Wi-Fi</string>
-    <string name="avatar">Аватар</string>
-    <string name="open_settings">Открыть настройки</string>
-    <string name="user_label">Пользователь</string>
-    <string name="setup">Установить</string>
-    <string name="connecting">Подключение...</string>
-    <string name="choose_template_version">Выберите версию шаблонов:</string> <!-- Просьба бота -->
-    <string name="select_folder_instruction">Выберите папку для сохранения шаблонов</string> <!-- Инструкция -->
-    <string name="select_folder">Выбрать папку</string>
-    <string name="disable_screenshots">Запретить скриншоты</string>
-    <string name="folder_selected">Папка выбрана</string>
-    <string name="screenshots_disabled">Скриншоты запрещены</string>
-    <string name="screenshots_enabled">Скриншоты разрешены</string>
-    <string name="folder_unavailable">Ошибка: папка недоступна</string>
-    <string name="inp_text">Напиши сообщение...</string>
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
 
-    <string name="trigger_hello">привет</string>
-<string name="trigger_how_are_you">как дела</string>
-<string name="trigger_thanks">спасибо</string>
-<string name="unknown_value">неизвестно</string>
-    
-    <!-- Диалоговые сообщения -->
-    <string name="welcome_message">Добро пожаловать!</string>
-    <string name="typing">печатает...</string>
+jobs:
+  build:
+    runs-on: ubuntu-latest
 
-    <!-- Idle сообщения -->
-    <string name="idle_msg_1">Эй, ты здесь?</string>
-    <string name="idle_msg_2">Что-то тихо стало...</string>
-    <string name="idle_msg_3">Расскажи, о чём думаешь?</string>
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-    <!-- Ответы по умолчанию -->
-    <string name="default_response_hello">Привет! Чем могу помочь?</string>
-    <string name="default_response_how_are_you">Всё отлично, а у тебя?</string>
-    <string name="default_response_unknown">Не понял запрос. Попробуй другой вариант.</string>
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+          cache: 'gradle'
 
-    <!-- Ответы для времени и даты -->
-    <string name="date_response">Сегодня %1$s.</string>
-    <string name="day_response">Сегодня %1$s.</string>
-    <string name="year_response">Сейчас %1$s год.</string>
-    <string name="date_day_response">Сегодня %1$s, %2$s.</string>
+      - name: Make gradlew executable
+        run: chmod +x ./gradlew
 
-    <!-- Антиспам -->
-    <string name="antispam_1">Ты надоел, давай что-то новенького!</string>
-    <string name="antispam_2">Спамить нехорошо, попробуй другой запрос.</string>
-    <string name="antispam_3">Я устал от твоих повторений!</string>
-    <string name="antispam_4">Хватит спамить, придумай что-то интересное.</string>
-    <string name="antispam_5">Эй, не зацикливайся, попробуй другой вопрос!</string>
-    <string name="antispam_6">Повторяешь одно и то же? Давай разнообразие!</string>
-    <string name="antispam_7">Слишком много повторов, я же не робот... ну, почти.</string>
-    <string name="antispam_8">Не спамь, пожалуйста, задай новый вопрос!</string>
-    <string name="antispam_9">Пять раз одно и то же? Попробуй что-то другое.</string>
-    <string name="antispam_10">Я уже ответил, давай новый запрос!</string>
+      - name: Build with Gradle (capture log, continue on error)
+        run: |
+          mkdir -p build/ci-logs
+          ./gradlew build --stacktrace 2>&1 | tee build/ci-logs/gradle-build.log
+        continue-on-error: true
 
-    <!-- Сообщения о батарее -->
-    <string name="battery_urgent_warning">Это не шутки. Поставь на зарядку.</string>
-    <string name="battery_warning_1">Пожалуйста, поставь устройство на зарядку — батарейка почти села.</string>
-    <string name="battery_warning_2">Аккумулятор низкий, лучше подключить зарядку.</string>
-    <string name="battery_warning_3">Осталось немного заряда, поставь телефон на заряд.</string>
+      - name: Build Debug APK (capture log, continue on error)
+        run: |
+          mkdir -p build/ci-logs
+          ./gradlew assembleDebug --stacktrace 2>&1 | tee build/ci-logs/assemble-debug.log
+        continue-on-error: true
 
-    <!-- Сообщения для команд -->
-    <string name="reloading_templates">Перезагружаю шаблоны...</string>
-    <string name="templates_reloaded">Шаблоны перезагружены.</string>
-    <string name="stats_template">Контекст: %1$s. Шаблонов: %2$d. Ключевых ответов: %3$d.</string>
-    <string name="chat_cleared">Чат очищен. Возвращаюсь к началу.</string>
-    <string name="unknown_command">Неизвестная команда: %1$s</string>
+      # ----------------------------
+      # Resource diagnostics (always run after attempted build)
+      # ----------------------------
+      - name: Create diagnostics dir
+        run: mkdir -p build/resource-diagnostics/merged build/resource-diagnostics/raw || true
 
-    <!-- Сообщения об ошибках -->
-    <string name="toast_folder_not_selected">Папка не выбрана! Открой настройки и выбери папку.</string>
-    <string name="error_loading_ouch">Ошибка загрузки ouch.txt: %1$s</string>
-    <string name="error_loading_timetosleep">Ошибка загрузки timetosleep.txt: %1$s</string>
-    <string name="error_loading_cldsys">Ошибка загрузки cldsys.txt: %1$s</string>
-    <string name="error_reading_file">Ошибка чтения файла: %1$s</string>
-    <string name="error_loading_mascot_metadata">Ошибка загрузки метаданных маскота: %1$s</string>
-    <string name="error_loading_batterycare">Ошибка загрузки batterycare.txt: %1$s</string>
+      - name: Copy candidate merged values.xml into diagnostics
+        run: |
+          set -eux
+          # try multiple candidate patterns (incremental/merged/merged.dir etc.)
+          PATTERNS=(
+            "app/build/intermediates/incremental/debug/mergeDebugResources/merged.dir/values/values.xml"
+            "app/build/intermediates/incremental/debug/mergeDebugResources/*/values/values.xml"
+            "app/build/intermediates/merged_res/debug/values/values.xml"
+            "app/build/intermediates/merged_res/*/values*/values.xml"
+            "app/build/intermediates/*/mergeDebugResources/*/values*/values*.xml"
+            "app/build/intermediates/*/mergeDebugResources*/**/values*/values*.xml"
+            "app/build/intermediates/*/merged_res*/**/values*/values*.xml"
+          )
+          for p in "${PATTERNS[@]}"; do
+            for f in $(bash -c "ls -1 $p 2>/dev/null || true"); do
+              cp -v "$f" build/resource-diagnostics/merged/ || true
+            done
+          done
+          echo "Copied merged candidates:"
+          ls -la build/resource-diagnostics/merged || true
+        continue-on-error: true
 
-    <!-- Строки, используемые в SetupActivity -->
-    <string name="error_no_permission">Нет прав для доступа к выбранной папке.</string>
-    <string name="error_no_folder_selected">Папка не выбрана. Пожалуйста, укажите папку с шаблонами.</string>
-    <string name="error_folder_unavailable">Указанная папка недоступна или была удалена.</string>
-    <string name="no_supported_files_in_assets">В assets отсутствуют поддерживаемые файлы шаблонов.</string>
-    <string name="files_copied_successfully">Файлы успешно скопированы.</string>
-    <string name="error_copying_files">Ошибка копирования файлов: %1$s</string>
+      - name: Save original strings.xml and show with line numbers + hexdump
+        run: |
+          set -eux
+          SRC=app/src/main/res/values/strings.xml
+          if [ -f "$SRC" ]; then
+            cp -v "$SRC" build/resource-diagnostics/raw/strings.xml || true
+            echo "==== strings.xml (with line numbers) ===="
+            nl -ba "$SRC" | sed -n '1,120p' || true
+            echo "==== hexdump of first 200 bytes (to reveal BOM / invisible bytes) ===="
+            head -c 200 "$SRC" | hexdump -C || true
+          else
+            echo "No source strings.xml at $SRC"
+          fi
+        continue-on-error: true
 
-    <!-- Fallback -->
-    <string name="fallback_1">Привет! Чем могу помочь?</string>
-    <string name="fallback_2">Здравствуй!</string>
-    <string name="fallback_3">Всё отлично, а у тебя?</string>
-    <string name="fallback_4">Нормально, как дела?</string>
+      - name: Print merged candidates (first 500 lines) and hex-dump (1..200) for each
+        run: |
+          set -eux
+          for f in build/resource-diagnostics/merged/*.xml; do
+            [ -f "$f" ] || continue
+            echo "==== FILE: $f ===="
+            echo "---- first 500 lines ----"
+            sed -n '1,500p' "$f" || true
+            echo "---- hexdump (first 200 bytes) ----"
+            head -c 200 "$f" | hexdump -C || true
+            echo ""
+          done
+        continue-on-error: true
 
-    <!-- Шаблоны -->
-    <string name="tpl_greeting_1">Привет! Чем могу помочь?</string>
-    <string name="tpl_greeting_2">Здравствуй!</string>
-    <string name="tpl_howareyou_1">Всё отлично, а у тебя?</string>
-    <string name="tpl_howareyou_2">Нормально, как дела?</string>
-    <string name="tpl_thanks_1">Рад, что помог!</string>
-    <string name="tpl_thanks_2">Всегда пожалуйста!</string>
+      - name: Grep suspicious sequences in repo and build (look for {str}, \u, backslashes)
+        run: |
+          set -eux
+          echo "=== Search for literal {str} in repo ==="
+          grep -R --line-number --fixed-strings '{str}' . || true
+          echo "=== Search for literal {str} in build dir ==="
+          grep -R --line-number --fixed-strings '{str}' app/build || true
+          echo "=== Search for backslash-u sequences (\\u) in repo ==="
+          git grep -n '\\u' || true
+          echo "=== Search for backslashes in res files (possible escapes) ==="
+          grep -R --line-number '\\\' app/src/main/res || true
+          echo "=== Search for curly placeholders like {anything} in res ==="
+          grep -R --line-number -E '\{[^}]+\}' app/src/main/res || true
+        continue-on-error: true
 
-    <!-- Дефолтные ответы -->
-    <string name="dummy_greeting">Привет! Я пока учусь отвечать.</string>
-    <string name="dummy_unknown">Хм... не знаю, что сказать. К такому жизнь меня не готовила.</string>
+      - name: List app/build tree (small sample)
+        run: |
+          set -eux
+          echo "==== list intermediates top-level ===="
+          ls -la app/build/intermediates || true
+          echo "==== find values.xml in build dir ===="
+          find app/build -type f -name "values*.xml" -print | sed -n '1,200p' || true
+        continue-on-error: true
 
-    <!-- Случайные приветствия для MainActivity -->
-    <string-array name="greetings">
-        <item>Говорящие кибер-звери!</item>
-        <item>Сейчас 2017, инфа 100%!</item>
-        <item>Математику не заказывали?</item>
-        <item>Здесь ничего нет, честно!</item>
-        <item>Запускаем матрицу...</item>
-        </string-array>
-        
-    <string name="hint_input">Введите команду (Enter = отправить)</string>
+      - name: Save gradle logs into diagnostics
+        run: |
+          mkdir -p build/resource-diagnostics/logs
+          if [ -f build/ci-logs/gradle-build.log ]; then cp build/ci-logs/gradle-build.log build/resource-diagnostics/logs/ || true; fi
+          if [ -f build/ci-logs/assemble-debug.log ]; then cp build/ci-logs/assemble-debug.log build/resource-diagnostics/logs/ || true; fi
+        continue-on-error: true
 
-    <!-- Welcome / help -->
-    <string name="welcome_message2">Offline Assistant — режим оффлайн. Введите команду (напр.: "простые проценты 100000 7% 3 года")</string>
+      - name: Upload resource diagnostics artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: resource-diagnostics
+          path: build/resource-diagnostics
+          retention-days: 7
+        if: always()
 
-    <!-- Errors / usage -->
-    <string name="err_empty_input">Пожалуйста, введите текст.</string>
-    <string name="err_invalid_amount">Невалидная сумма: %1$s</string>
-    <string name="err_processing_command">Ошибка при обработке команды</string>
+      # ----------------------------
+      # Continue original flow: upload debug APK if exists
+      # ----------------------------
+      - name: Upload Debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 7
 
-    <string name="usage_entropy">Использование: энтропия &lt;текст&gt;</string>
-    <string name="usage_traffic">Не могу распознать объём. Пример: 'трафик 5gb'</string>
-    <string name="usage_simple_percent">Использование: простые проценты &lt;сумма&gt; &lt;ставка%&gt; [время]</string>
-    <string name="usage_compound_percent">Использование: сложные проценты &lt;сумма&gt; &lt;ставка%&gt; [время] [помесячно/посуточно/годовая]</string>
-    <string name="usage_monthly">Использование: месячный доход &lt;сумма&gt; [рабочие &lt;hours&gt;]</string>
-    <string name="fallback_unknown_command">Не распознанная команда. Поддерживаемые: энтропия, трафик, простые проценты, сложные проценты, месячный доход.</string>
+      - name: Decode Keystore
+        env:
+          ENCODED_KEYSTORE: ${{ secrets.KEYSTORE }}
+        run: |
+          echo "$ENCODED_KEYSTORE" | base64 -d > release.keystore
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
 
-    <!-- Entropy outputs -->
-    <string name="entropy_per_symbol_bytes">Энтропия (байт): %1$s бит/символ</string>
-    <string name="entropy_total_bits_bytes">Полная энтропия (байты): %1$s бит (длина %2$d байт)</string>
-    <string name="entropy_per_symbol_codepoints">Энтропия (символы): %1$s бит/символ</string>
-    <string name="entropy_total_bits_codepoints">Полная энтропия (символы): %1$s бит (длина %2$d символов)</string>
-    <string name="entropy_strength">Оценка силы: %1$s</string>
+      - name: Build Release APK
+        env:
+          KEYSTORE_PATH: release.keystore
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          ./gradlew assembleRelease --stacktrace \
+            -Pandroid.injected.signing.store.file=$KEYSTORE_PATH \
+            -Pandroid.injected.signing.store.password=$KEYSTORE_PASSWORD \
+            -Pandroid.injected.signing.key.alias=$KEY_ALIAS \
+            -Pandroid.injected.signing.key.password=$KEY_PASSWORD
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        continue-on-error: true
 
-    <string name="entropy_label_weak">Слабо</string>
-    <string name="entropy_label_acceptable">Приемлемо</string>
-    <string name="entropy_label_normal">Нормально</string>
-    <string name="entropy_label_strong">Сильно</string>
+      - name: List APK files
+        run: ls -la app/build/outputs/apk/release/
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
 
-    <!-- Traffic outputs -->
-    <string name="traffic_input_approx">%1$s ≈ %2$s / мес</string>
-    <string name="traffic_per_day">В день: %1$s</string>
-    <string name="traffic_per_hour">В час: %1$s</string>
-    <string name="traffic_per_min">В минуту: %1$s</string>
-    <string name="traffic_per_sec">Секунда / скорость: %1$s</string>
-
-    <!-- Simple percent outputs -->
-    <string name="simple_percent_header">Простой процент:</string>
-    <string name="simple_percent_principal">Вложено: %1$s</string>
-    <string name="simple_percent_rate">Годовая ставка: %1$s%%</string>
-    <string name="simple_percent_period">Период: %1$s лет</string>
-    <string name="simple_percent_total">Итого через период: %1$s (прибыль %2$s)</string>
-    <string name="simple_percent_yearly">Прибыль в год (средн.): %1$s</string>
-    <string name="simple_percent_month_day_hour">в месяц: %1$s, в день: %2$s, в час: %3$s</string>
-
-    <!-- Compound percent outputs -->
-    <string name="compound_percent_header">Сложные проценты (%1$s):</string>
-    <string name="compound_percent_principal">Вложено: %1$s</string>
-    <string name="compound_percent_rate">Годовая ставка: %1$s%%</string>
-    <string name="compound_percent_period">Период: %1$s лет</string>
-    <string name="compound_percent_total">Итоговая сумма: %1$s (прибыль %2$s)</string>
-    <string name="compound_percent_avg_year">Средняя прибыль в год: %1$s</string>
-    <string name="compound_percent_month_day_hour">в месяц: %1$s, в день: %2$s, в час: %3$s</string>
-
-    <!-- Monthly conversion -->
-    <string name="monthly_header">Перевод месячной суммы:</string>
-    <string name="monthly_amount">Месячная сумма: %1$s</string>
-    <string name="monthly_year">Год: %1$s</string>
-    <string name="monthly_day">День (30d): %1$s</string>
-    <string name="monthly_hour_24">В час (24/сут): %1$s</string>
-    <string name="monthly_hour_work">В час (рабочие %1$d): %2$s</string>
-</resources>
+      - name: Upload Release APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-apk
+          path: app/build/outputs/apk/release/app-release.apk
+          retention-days: 7
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
