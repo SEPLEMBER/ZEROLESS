@@ -7,6 +7,7 @@ import android.text.InputType
 import android.text.method.ScrollingMovementMethod
 import android.view.KeyEvent
 import android.view.View
+import android.view.WindowManager
 import android.view.inputmethod.EditorInfo
 import android.widget.EditText
 import android.widget.LinearLayout
@@ -24,25 +25,12 @@ import java.security.SecureRandom
 import kotlin.math.ln
 import kotlin.math.pow
 
-/**
- * VprActivity — минималистичный текстовый ассистент в одном Activity.
- *
- * Package: com.nemesis.pawstribe
- *
- * UI: activity_vpr.xml (ScrollView -> LinearLayout messagesContainer + EditText input)
- *
- * Цвета: фон #0A0A0A, текст неон-циан #00F5FF (строки создаются программно)
- *
- * Команды (примеры):
- *  - "энтропия привет как дела"
- *  - "трафик 5gb"
- *  - "простые проценты 100000 7% 3 года"
- *  - "сложные проценты 100000 7% 3 года помесячно"
- *  - "месячный доход 120000 рабочие 8"
- *
- * Никаких сторонних библиотек, никакого RecyclerView.
- */
 class VprActivity : AppCompatActivity() {
+
+    companion object {
+        private const val PREFS_NAME = "PawsTribePrefs"
+        private const val PREF_KEY_DISABLE_SCREENSHOTS = "disable_screenshots"
+    }
 
     // UI references
     private lateinit var messagesContainer: LinearLayout
@@ -56,6 +44,21 @@ class VprActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // hide status bar (full screen) as requested
+        window.setFlags(
+            WindowManager.LayoutParams.FLAG_FULLSCREEN,
+            WindowManager.LayoutParams.FLAG_FULLSCREEN
+        )
+
+        // Apply FLAG_SECURE if screenshots are disabled in prefs
+        val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+        if (prefs.getBoolean(PREF_KEY_DISABLE_SCREENSHOTS, false)) {
+            window.setFlags(
+                WindowManager.LayoutParams.FLAG_SECURE,
+                WindowManager.LayoutParams.FLAG_SECURE
+            )
+        }
+
         setContentView(R.layout.activity_vpr)
 
         messagesContainer = findViewById(R.id.messagesContainer)
@@ -73,6 +76,9 @@ class VprActivity : AppCompatActivity() {
                 if (text.isNotEmpty()) {
                     submitCommand(text)
                     input.text = Editable.Factory.getInstance().newEditable("")
+                } else {
+                    // show friendly hint when empty
+                    addAssistantLine(getString(R.string.err_empty_input))
                 }
                 true
             } else {
@@ -81,7 +87,7 @@ class VprActivity : AppCompatActivity() {
         }
 
         // seed welcome
-        addSystemLine("Offline Assistant — режим оффлайн. Введите команду (напр.: \"простые проценты 100000 7% 3 года\")")
+        addSystemLine(getString(R.string.welcome_message))
     }
 
     // Add user command view and process (with try/catch to prevent crashes)
@@ -98,7 +104,7 @@ class VprActivity : AppCompatActivity() {
             } catch (t: Throwable) {
                 // Показываем ошибку как сообщение ассистента — приложение не падает
                 withContext(Dispatchers.Main) {
-                    addAssistantLine("= Ошибка при обработке команды: ${t.message ?: t::class.java.simpleName}")
+                    addAssistantLine("= ${getString(R.string.err_processing_command)}: ${t.message ?: t::class.java.simpleName}")
                     scrollView.post { scrollView.fullScroll(View.FOCUS_DOWN) }
                 }
             }
@@ -155,27 +161,41 @@ class VprActivity : AppCompatActivity() {
         // Энтропия: "энтропия <...>"
         if (lower.startsWith("энтроп") || lower.startsWith("эн")) {
             val payload = cmd.substringAfter(' ').trim()
-            if (payload.isEmpty()) return listOf("Использование: энтропия <текст>")
-            val entropy = shannonEntropyString(payload)
-            return listOf("Энтропия (Shannon) строки: ${"%.4f".format(entropy)} бит/символ")
+            if (payload.isEmpty()) return listOf(getString(R.string.usage_entropy))
+            // calculate both byte-based and codepoint-based entropy
+            val byteEntropyPerSymbol = shannonEntropyBytes(payload.toByteArray(Charsets.UTF_8))
+            val totalBitsBytes = byteEntropyPerSymbol * payload.toByteArray(Charsets.UTF_8).size
+            val codepoints = payload.codePointCount(0, payload.length)
+            val codepointEntropyPerSymbol = shannonEntropyCodepoints(payload)
+            val totalBitsCodepoints = codepointEntropyPerSymbol * codepoints
+
+            val strengthLabel = entropyStrengthLabel(totalBitsBytes) // use byte-based total for strength
+
+            return listOf(
+                getString(R.string.entropy_per_symbol_bytes, "%.4f".format(byteEntropyPerSymbol)),
+                getString(R.string.entropy_total_bits_bytes, "%.2f".format(totalBitsBytes), payload.toByteArray(Charsets.UTF_8).size),
+                getString(R.string.entropy_per_symbol_codepoints, "%.4f".format(codepointEntropyPerSymbol)),
+                getString(R.string.entropy_total_bits_codepoints, "%.2f".format(totalBitsCodepoints), codepoints),
+                getString(R.string.entropy_strength, strengthLabel)
+            )
         }
 
         // Трафик: "трафик 5gb" или просто "5gb трафик"
         if (lower.contains("трафик") || Regex("""\d+\s*(gb|гб|mb|мб|kb|кб|b|байт)""").containsMatchIn(lower)) {
             // try to find number + optional unit
             val m = Regex("""(\d+(?:[.,]\d+)?)\s*(gb|гб|mb|мб|kb|кб|b|байт)?""", RegexOption.IGNORE_CASE).find(lower)
-            if (m == null) return listOf("Не могу распознать объём. Пример: 'трафик 5gb'")
+            if (m == null) return listOf(getString(R.string.usage_traffic))
             val numStr = m.groupValues[1].replace(',', '.')
             val unit = m.groupValues.getOrNull(2) ?: ""
             val bytes = parseBytes(numStr.toDouble(), unit)
             val rates = bytesPerMonthToRates(bytes)
+
             return listOf(
-                "${m.value.trim()} ≈ ${formatBytes(bytes)} / мес",
-                "B/day: ${"%.2f".format(rates["B/day"])}",
-                "B/hour: ${"%.2f".format(rates["B/hour"])}",
-                "B/min: ${"%.2f".format(rates["B/min"])}",
-                "B/sec: ${"%.4f".format(rates["B/s"])}",
-                "bit/s: ${"%.4f".format(rates["bit/s"])}"
+                getString(R.string.traffic_input_approx, m.value.trim(), formatBytesDecimal(bytes)),
+                getString(R.string.traffic_per_day, formatBytesDecimalDouble(rates["B/day"] ?: 0.0)),
+                getString(R.string.traffic_per_hour, formatBytesDecimalDouble(rates["B/hour"] ?: 0.0)),
+                getString(R.string.traffic_per_min, formatBytesDecimalDouble(rates["B/min"] ?: 0.0)),
+                getString(R.string.traffic_per_sec, formatBitsPerSecond(rates["B/s"] ?: 0.0))
             )
         }
 
@@ -183,11 +203,11 @@ class VprActivity : AppCompatActivity() {
         if (lower.contains("прост") && lower.contains("процент")) {
             // ищем первую сумму
             val numMatch = Regex("""(\d+(?:[.,]\d+)?)""").find(cmd)
-            if (numMatch == null) return listOf("Использование: простые проценты <сумма> <ставка%> [время]")
+            if (numMatch == null) return listOf(getString(R.string.usage_simple_percent))
             val principal = try {
                 BigDecimal(numMatch.groupValues[1].replace(',', '.'))
             } catch (e: Exception) {
-                return listOf("Невалидная сумма: ${numMatch.groupValues[1]}")
+                return listOf(getString(R.string.err_invalid_amount, numMatch.groupValues[1]))
             }
 
             // ищем процент (число со знаком %)
@@ -208,11 +228,11 @@ class VprActivity : AppCompatActivity() {
         // Сложные проценты: "сложные проценты 100000 7% 3 года помесячно"
         if (lower.contains("слож") && lower.contains("процент")) {
             val numMatch = Regex("""(\d+(?:[.,]\d+)?)""").find(cmd)
-            if (numMatch == null) return listOf("Использование: сложные проценты <сумма> <ставка%> [время] [помесячно/посуточно/годовая]")
+            if (numMatch == null) return listOf(getString(R.string.usage_compound_percent))
             val principal = try {
                 BigDecimal(numMatch.groupValues[1].replace(',', '.'))
             } catch (e: Exception) {
-                return listOf("Невалидная сумма: ${numMatch.groupValues[1]}")
+                return listOf(getString(R.string.err_invalid_amount, numMatch.groupValues[1]))
             }
 
             val rateMatch = Regex("""(\d+(?:[.,]\d+)?)\s*%""").find(cmd)
@@ -232,11 +252,11 @@ class VprActivity : AppCompatActivity() {
         if (lower.contains("месяч") && (lower.contains("доход") || lower.contains("зарп") || lower.contains("расход"))) {
             // ищем сумму в тексте
             val numMatch = Regex("""(\d+(?:[.,]\d+)?)""").find(cmd)
-            if (numMatch == null) return listOf("Использование: месячный доход <сумма> [рабочие <hours>]")
+            if (numMatch == null) return listOf(getString(R.string.usage_monthly))
             val amount = try {
                 BigDecimal(numMatch.groupValues[1].replace(',', '.'))
             } catch (e: Exception) {
-                return listOf("Невалидная сумма: ${numMatch.groupValues[1]}")
+                return listOf(getString(R.string.err_invalid_amount, numMatch.groupValues[1]))
             }
             // find working hours in the command (pattern "рабочие X")
             val workHoursMatch = Regex("""рабоч\w*\s+(\d{1,2})""", RegexOption.IGNORE_CASE).find(cmd)
@@ -245,7 +265,7 @@ class VprActivity : AppCompatActivity() {
         }
 
         // fallback
-        return listOf("Не распознанная команда. Поддерживаемые: энтропия, трафик, простые проценты, сложные проценты, месячный доход.")
+        return listOf(getString(R.string.fallback_unknown_command))
     }
 
     // --------------------
@@ -255,24 +275,50 @@ class VprActivity : AppCompatActivity() {
     private fun parseBytes(amount: Double, unitRaw: String?): Long {
         val unit = unitRaw?.lowercase() ?: ""
         return when (unit) {
-            "gb", "гб" -> (amount * 1024.0 * 1024.0 * 1024.0).toLong()
-            "mb", "мб" -> (amount * 1024.0 * 1024.0).toLong()
-            "kb", "кб" -> (amount * 1024.0).toLong()
+            "gb", "гб" -> (amount * 1000.0 * 1000.0 * 1000.0).toLong() // decimal GB
+            "mb", "мб" -> (amount * 1000.0 * 1000.0).toLong()
+            "kb", "кб" -> (amount * 1000.0).toLong()
             "b", "байт" -> amount.toLong()
             "" -> (amount).toLong() // assume bytes if no unit
             else -> (amount).toLong()
         }
     }
 
-    private fun formatBytes(bytes: Long): String {
-        val kb = 1024.0
-        val mb = kb * 1024.0
-        val gb = mb * 1024.0
+    // Format bytes in decimal units (1000-based) with one decimal where appropriate
+    private fun formatBytesDecimal(bytes: Long): String {
+        val kb = 1000.0
+        val mb = kb * 1000.0
+        val gb = mb * 1000.0
         return when {
-            bytes >= gb -> String.format("%.2f GB", bytes / gb)
-            bytes >= mb -> String.format("%.2f MB", bytes / mb)
-            bytes >= kb -> String.format("%.2f KB", bytes / kb)
+            bytes >= gb -> String.format("%.1f GB", bytes / gb)
+            bytes >= mb -> String.format("%.1f MB", bytes / mb)
+            bytes >= kb -> String.format("%.1f kB", bytes / kb)
             else -> "$bytes B"
+        }
+    }
+
+    // Format bytes from double (rates) to decimal units with one decimal
+    private fun formatBytesDecimalDouble(bytesDouble: Double): String {
+        val kb = 1000.0
+        val mb = kb * 1000.0
+        val gb = mb * 1000.0
+        return when {
+            bytesDouble >= gb -> String.format("%.1f GB", bytesDouble / gb)
+            bytesDouble >= mb -> String.format("%.1f MB", bytesDouble / mb)
+            bytesDouble >= kb -> String.format("%.1f kB", bytesDouble / kb)
+            bytesDouble >= 1.0 -> String.format("%.1f B", bytesDouble)
+            else -> String.format("%.3f B", bytesDouble)
+        }
+    }
+
+    private fun formatBitsPerSecond(bytesPerSecond: Double): String {
+        val bitsPerSecond = bytesPerSecond * 8.0
+        val kbps = 1000.0
+        val mbps = kbps * 1000.0
+        return when {
+            bitsPerSecond >= mbps -> String.format("%.2f Mb/s", bitsPerSecond / mbps)
+            bitsPerSecond >= kbps -> String.format("%.2f kb/s", bitsPerSecond / kbps)
+            else -> String.format("%.2f bit/s", bitsPerSecond)
         }
     }
 
@@ -282,13 +328,10 @@ class VprActivity : AppCompatActivity() {
         val bHour = bDay / 24.0
         val bMin = bHour / 60.0
         val bSec = bMin / 60.0
-        val bitsPerSec = bSec * 8.0
-        return mapOf("B/day" to bDay, "B/hour" to bHour, "B/min" to bMin, "B/s" to bSec, "bit/s" to bitsPerSec)
+        return mapOf("B/day" to bDay, "B/hour" to bHour, "B/min" to bMin, "B/s" to bSec)
     }
 
-    // tokenize numbers and keep words: returns list of tokens that look like numbers or words
     private fun tokenizeNumbersAndUnits(cmd: String): List<String> {
-        // crude: split by spaces, but keep punctuation removed
         return cmd.split(Regex("\\s+")).map { it.trim().trim(',', ';') }.filter { it.isNotEmpty() }
     }
 
@@ -333,8 +376,6 @@ class VprActivity : AppCompatActivity() {
 
     // Simple interest report: returns formatted string
     private fun simpleInterestReport(principal: BigDecimal, annualRate: BigDecimal, years: Double): String {
-        // Interest = P * r * t
-        val mcScale = 10
         val principalMC = principal
         val rateBD = BigDecimal(annualRate.toPlainString())
         val yearsBD = BigDecimal.valueOf(years)
@@ -346,13 +387,16 @@ class VprActivity : AppCompatActivity() {
         val perDay = yearlyProfit.divide(BigDecimal(365), 10, RoundingMode.HALF_UP)
         val perHour = perDay.divide(BigDecimal(24), 10, RoundingMode.HALF_UP)
         return buildString {
-            append("Простой процент:\n")
-            append("Вложено: ${principalMC.setScale(2, RoundingMode.HALF_UP)}\n")
-            append("Годовая ставка: ${(annualRate.multiply(BigDecimal(100))).setScale(4, RoundingMode.HALF_UP)}%\n")
-            append("Период: ${"%.4f".format(years)} лет\n")
-            append("Итого через период: ${total.setScale(2, RoundingMode.HALF_UP)} (прибыль ${interest.setScale(2, RoundingMode.HALF_UP)})\n")
-            append("Прибыль в год (средн.): ${yearlyProfit.setScale(2, RoundingMode.HALF_UP)}\n")
-            append("в месяц: ${perMonth.setScale(2, RoundingMode.HALF_UP)}, в день: ${perDay.setScale(4, RoundingMode.HALF_UP)}, в час: ${perHour.setScale(6, RoundingMode.HALF_UP)}")
+            append(getString(R.string.simple_percent_header)).append("\n")
+            append(getString(R.string.simple_percent_principal, principalMC.setScale(2, RoundingMode.HALF_UP))).append("\n")
+            append(getString(R.string.simple_percent_rate, (annualRate.multiply(BigDecimal(100))).setScale(4, RoundingMode.HALF_UP))).append("\n")
+            append(getString(R.string.simple_percent_period, "%.4f".format(years))).append("\n")
+            append(getString(R.string.simple_percent_total, total.setScale(2, RoundingMode.HALF_UP), interest.setScale(2, RoundingMode.HALF_UP))).append("\n")
+            append(getString(R.string.simple_percent_yearly, yearlyProfit.setScale(2, RoundingMode.HALF_UP))).append("\n")
+            append(getString(R.string.simple_percent_month_day_hour,
+                perMonth.setScale(2, RoundingMode.HALF_UP),
+                perDay.setScale(4, RoundingMode.HALF_UP),
+                perHour.setScale(6, RoundingMode.HALF_UP)))
         }
     }
 
@@ -365,7 +409,6 @@ class VprActivity : AppCompatActivity() {
             else -> 12
         }
         // formula: A = P * (1 + r/n)^(n*t)
-        // Use Double pow for fractional years, then convert to BigDecimal
         val p = principal.toDouble()
         val r = annualRate.toDouble()
         val factor = (1.0 + r / n.toDouble()).pow(n.toDouble() * years)
@@ -378,47 +421,74 @@ class VprActivity : AppCompatActivity() {
         val perHour = perDay.divide(BigDecimal(24), 10, RoundingMode.HALF_UP)
 
         return buildString {
-            append("Сложные проценты (${capitalization}):\n")
-            append("Вложено: ${principal.setScale(2, RoundingMode.HALF_UP)}\n")
-            append("Годовая ставка: ${(annualRate.multiply(BigDecimal(100))).setScale(4, RoundingMode.HALF_UP)}%\n")
-            append("Период: ${"%.4f".format(years)} лет\n")
-            append("Итоговая сумма: ${amount.setScale(2, RoundingMode.HALF_UP)} (прибыль ${totalGain.setScale(2, RoundingMode.HALF_UP)})\n")
-            append("Средняя прибыль в год: ${avgPerYear.setScale(2, RoundingMode.HALF_UP)}\n")
-            append("в месяц: ${perMonth.setScale(2, RoundingMode.HALF_UP)}, в день: ${perDay.setScale(4, RoundingMode.HALF_UP)}, в час: ${perHour.setScale(6, RoundingMode.HALF_UP)}")
+            append(getString(R.string.compound_percent_header, capitalization)).append("\n")
+            append(getString(R.string.compound_percent_principal, principal.setScale(2, RoundingMode.HALF_UP))).append("\n")
+            append(getString(R.string.compound_percent_rate, (annualRate.multiply(BigDecimal(100))).setScale(4, RoundingMode.HALF_UP))).append("\n")
+            append(getString(R.string.compound_percent_period, "%.4f".format(years))).append("\n")
+            append(getString(R.string.compound_percent_total, amount.setScale(2, RoundingMode.HALF_UP), totalGain.setScale(2, RoundingMode.HALF_UP))).append("\n")
+            append(getString(R.string.compound_percent_avg_year, avgPerYear.setScale(2, RoundingMode.HALF_UP))).append("\n")
+            append(getString(R.string.compound_percent_month_day_hour,
+                perMonth.setScale(2, RoundingMode.HALF_UP),
+                perDay.setScale(4, RoundingMode.HALF_UP),
+                perHour.setScale(6, RoundingMode.HALF_UP)))
         }
     }
 
     private fun monthlyToRatesReport(monthly: BigDecimal, workingHours: Int): String {
-        val mc = 10
         val yearly = monthly.multiply(BigDecimal(12))
-        val perDay = monthly.divide(BigDecimal(30), mc, RoundingMode.HALF_UP)
-        val per24Hour = perDay.divide(BigDecimal(24), mc, RoundingMode.HALF_UP)
-        val perWorkHour = if (workingHours > 0) perDay.divide(BigDecimal(workingHours), mc, RoundingMode.HALF_UP) else BigDecimal.ZERO
+        val perDay = monthly.divide(BigDecimal(30), 10, RoundingMode.HALF_UP)
+        val per24Hour = perDay.divide(BigDecimal(24), 10, RoundingMode.HALF_UP)
+        val perWorkHour = if (workingHours > 0) perDay.divide(BigDecimal(workingHours), 10, RoundingMode.HALF_UP) else BigDecimal.ZERO
         return buildString {
-            append("Месячная сумма: ${monthly.setScale(2, RoundingMode.HALF_UP)}\n")
-            append("Год: ${yearly.setScale(2, RoundingMode.HALF_UP)}\n")
-            append("День (30d): ${perDay.setScale(2, RoundingMode.HALF_UP)}\n")
-            append("В час (24/сут): ${per24Hour.setScale(2, RoundingMode.HALF_UP)}\n")
-            append("В час (рабочие $workingHours): ${perWorkHour.setScale(2, RoundingMode.HALF_UP)}")
+            append(getString(R.string.monthly_header)).append("\n")
+            append(getString(R.string.monthly_amount, monthly.setScale(2, RoundingMode.HALF_UP))).append("\n")
+            append(getString(R.string.monthly_year, yearly.setScale(2, RoundingMode.HALF_UP))).append("\n")
+            append(getString(R.string.monthly_day, perDay.setScale(2, RoundingMode.HALF_UP))).append("\n")
+            append(getString(R.string.monthly_hour_24, per24Hour.setScale(2, RoundingMode.HALF_UP))).append("\n")
+            append(getString(R.string.monthly_hour_work, workingHours, perWorkHour.setScale(2, RoundingMode.HALF_UP)))
         }
     }
 
-    // Shannon entropy in bits per symbol for a UTF-8 string
-    private fun shannonEntropyString(s: String): Double {
-        val bytes = s.toByteArray(Charsets.UTF_8)
+    // Shannon entropy in bits per symbol for a UTF-8 byte array
+    private fun shannonEntropyBytes(bytes: ByteArray): Double {
         if (bytes.isEmpty()) return 0.0
         val freq = IntArray(256)
-        for (b in bytes) {
-            freq[b.toInt() and 0xFF]++
-        }
+        bytes.forEach { b -> freq[b.toInt() and 0xFF]++ }
         val len = bytes.size.toDouble()
         var entropy = 0.0
-        for (c in freq) {
-            if (c == 0) continue
-            val p = c / len
+        for (count in freq) {
+            if (count == 0) continue
+            val p = count / len
             entropy -= p * (ln(p) / ln(2.0))
         }
         return entropy
+    }
+
+    // Shannon entropy per codepoint (characters) — uses codepoints as "symbols"
+    private fun shannonEntropyCodepoints(s: String): Double {
+        val cps = s.codePoints().toArray()
+        if (cps.isEmpty()) return 0.0
+        val map = mutableMapOf<Int, Int>()
+        for (cp in cps) {
+            map[cp] = (map[cp] ?: 0) + 1
+        }
+        val len = cps.size.toDouble()
+        var entropy = 0.0
+        for ((_, count) in map) {
+            val p = count / len
+            entropy -= p * (ln(p) / ln(2.0))
+        }
+        return entropy
+    }
+
+    // Strength label based on total bits (byte-based total)
+    private fun entropyStrengthLabel(totalBits: Double): String {
+        return when {
+            totalBits < 28.0 -> getString(R.string.entropy_label_weak)
+            totalBits < 46.0 -> getString(R.string.entropy_label_acceptable)
+            totalBits < 71.0 -> getString(R.string.entropy_label_normal)
+            else -> getString(R.string.entropy_label_strong)
+        }
     }
 
     // Utility: generate random bytes (for quick entropy test) - not used by default but kept
