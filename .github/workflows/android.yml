@@ -27,117 +27,12 @@ jobs:
       - name: Make gradlew executable
         run: chmod +x ./gradlew
 
-      - name: Build with Gradle (capture log, continue on error)
-        run: |
-          mkdir -p build/ci-logs
-          ./gradlew build --stacktrace 2>&1 | tee build/ci-logs/gradle-build.log
-        continue-on-error: true
+      - name: Build with Gradle
+        run: ./gradlew build --stacktrace
 
-      - name: Build Debug APK (capture log, continue on error)
-        run: |
-          mkdir -p build/ci-logs
-          ./gradlew assembleDebug --stacktrace 2>&1 | tee build/ci-logs/assemble-debug.log
-        continue-on-error: true
+      - name: Build Debug APK
+        run: ./gradlew assembleDebug --stacktrace
 
-      # ----------------------------
-      # Resource diagnostics (always run after attempted build)
-      # ----------------------------
-      - name: Create diagnostics dir
-        run: mkdir -p build/resource-diagnostics/merged build/resource-diagnostics/raw || true
-
-      - name: Copy candidate merged values.xml into diagnostics
-        run: |
-          set -eux
-          # try multiple candidate patterns (incremental/merged/merged.dir etc.)
-          PATTERNS=(
-            "app/build/intermediates/incremental/debug/mergeDebugResources/merged.dir/values/values.xml"
-            "app/build/intermediates/incremental/debug/mergeDebugResources/*/values/values.xml"
-            "app/build/intermediates/merged_res/debug/values/values.xml"
-            "app/build/intermediates/merged_res/*/values*/values.xml"
-            "app/build/intermediates/*/mergeDebugResources/*/values*/values*.xml"
-            "app/build/intermediates/*/mergeDebugResources*/**/values*/values*.xml"
-            "app/build/intermediates/*/merged_res*/**/values*/values*.xml"
-          )
-          for p in "${PATTERNS[@]}"; do
-            for f in $(bash -c "ls -1 $p 2>/dev/null || true"); do
-              cp -v "$f" build/resource-diagnostics/merged/ || true
-            done
-          done
-          echo "Copied merged candidates:"
-          ls -la build/resource-diagnostics/merged || true
-        continue-on-error: true
-
-      - name: Save original strings.xml and show with line numbers + hexdump
-        run: |
-          set -eux
-          SRC=app/src/main/res/values/strings.xml
-          if [ -f "$SRC" ]; then
-            cp -v "$SRC" build/resource-diagnostics/raw/strings.xml || true
-            echo "==== strings.xml (with line numbers) ===="
-            nl -ba "$SRC" | sed -n '1,120p' || true
-            echo "==== hexdump of first 200 bytes (to reveal BOM / invisible bytes) ===="
-            head -c 200 "$SRC" | hexdump -C || true
-          else
-            echo "No source strings.xml at $SRC"
-          fi
-        continue-on-error: true
-
-      - name: Print merged candidates (first 500 lines) and hex-dump (1..200) for each
-        run: |
-          set -eux
-          for f in build/resource-diagnostics/merged/*.xml; do
-            [ -f "$f" ] || continue
-            echo "==== FILE: $f ===="
-            echo "---- first 500 lines ----"
-            sed -n '1,500p' "$f" || true
-            echo "---- hexdump (first 200 bytes) ----"
-            head -c 200 "$f" | hexdump -C || true
-            echo ""
-          done
-        continue-on-error: true
-
-      - name: Grep suspicious sequences in repo and build (look for {str}, \u, backslashes)
-        run: |
-          set -eux
-          echo "=== Search for literal {str} in repo ==="
-          grep -R --line-number --fixed-strings '{str}' . || true
-          echo "=== Search for literal {str} in build dir ==="
-          grep -R --line-number --fixed-strings '{str}' app/build || true
-          echo "=== Search for backslash-u sequences (\\u) in repo ==="
-          git grep -n '\\u' || true
-          echo "=== Search for backslashes in res files (possible escapes) ==="
-          grep -R --line-number '\\\' app/src/main/res || true
-          echo "=== Search for curly placeholders like {anything} in res ==="
-          grep -R --line-number -E '\{[^}]+\}' app/src/main/res || true
-        continue-on-error: true
-
-      - name: List app/build tree (small sample)
-        run: |
-          set -eux
-          echo "==== list intermediates top-level ===="
-          ls -la app/build/intermediates || true
-          echo "==== find values.xml in build dir ===="
-          find app/build -type f -name "values*.xml" -print | sed -n '1,200p' || true
-        continue-on-error: true
-
-      - name: Save gradle logs into diagnostics
-        run: |
-          mkdir -p build/resource-diagnostics/logs
-          if [ -f build/ci-logs/gradle-build.log ]; then cp build/ci-logs/gradle-build.log build/resource-diagnostics/logs/ || true; fi
-          if [ -f build/ci-logs/assemble-debug.log ]; then cp build/ci-logs/assemble-debug.log build/resource-diagnostics/logs/ || true; fi
-        continue-on-error: true
-
-      - name: Upload resource diagnostics artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: resource-diagnostics
-          path: build/resource-diagnostics
-          retention-days: 7
-        if: always()
-
-      # ----------------------------
-      # Continue original flow: upload debug APK if exists
-      # ----------------------------
       - name: Upload Debug APK
         uses: actions/upload-artifact@v4
         with:
@@ -165,7 +60,6 @@ jobs:
             -Pandroid.injected.signing.key.alias=$KEY_ALIAS \
             -Pandroid.injected.signing.key.password=$KEY_PASSWORD
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        continue-on-error: true
 
       - name: List APK files
         run: ls -la app/build/outputs/apk/release/
