@@ -28,8 +28,8 @@
     <string name="user_label">Пользователь</string>
     <string name="setup">Установить</string>
     <string name="connecting">Подключение...</string>
-    <string name="choose_template_version">Выберите версию шаблонов:</string>
-    <string name="select_folder_instruction">Выберите папку для сохранения шаблонов</string>
+    <string name="choose_template_version">Выберите версию шаблонов:</string> <!-- Просьба бота -->
+    <string name="select_folder_instruction">Выберите папку для сохранения шаблонов</string> <!-- Инструкция -->
     <string name="select_folder">Выбрать папку</string>
     <string name="disable_screenshots">Запретить скриншоты</string>
     <string name="folder_selected">Папка выбрана</string>
@@ -39,10 +39,10 @@
     <string name="inp_text">Напиши сообщение...</string>
 
     <string name="trigger_hello">привет</string>
-    <string name="trigger_how_are_you">как дела</string>
-    <string name="trigger_thanks">спасибо</string>
-    <string name="unknown_value">неизвестно</string>
-
+<string name="trigger_how_are_you">как дела</string>
+<string name="trigger_thanks">спасибо</string>
+<string name="unknown_value">неизвестно</string>
+    
     <!-- Диалоговые сообщения -->
     <string name="welcome_message">Добро пожаловать!</string>
     <string name="typing">печатает...</string>
@@ -130,10 +130,12 @@
         <item>Математику не заказывали?</item>
         <item>Здесь ничего нет, честно!</item>
         <item>Запускаем матрицу...</item>
-    </string-array>
 
-    <!-- Дополнительные строки (ассистент) -->
+    <string name="app_name">Offline Assistant</string>
     <string name="hint_input">Введите команду (Enter = отправить)</string>
+
+    <!-- Welcome / help -->
+    <string name="welcome_message">Offline Assistant — режим оффлайн. Введите команду (напр.: "простые проценты 100000 7% 3 года")</string>
 
     <!-- Errors / usage -->
     <string name="err_empty_input">Пожалуйста, введите текст.</string>
@@ -141,10 +143,7 @@
     <string name="err_processing_command">Ошибка при обработке команды</string>
 
     <string name="usage_entropy">Использование: энтропия &lt;текст&gt;</string>
-
-    <!-- usage_traffic: никаких обратных слэшей или фигурных вставок -->
-    <string name="usage_traffic"><![CDATA[Не могу распознать объём. Пример: 'трафик 5gb']]> </string>
-
+    <string name="usage_traffic">Не могу распознать объём. Пример: 'трафик 5gb'</string>
     <string name="usage_simple_percent">Использование: простые проценты &lt;сумма&gt; &lt;ставка%&gt; [время]</string>
     <string name="usage_compound_percent">Использование: сложные проценты &lt;сумма&gt; &lt;ставка%&gt; [время] [помесячно/посуточно/годовая]</string>
     <string name="usage_monthly">Использование: месячный доход &lt;сумма&gt; [рабочие &lt;hours&gt;]</string>
@@ -194,5 +193,5 @@
     <string name="monthly_day">День (30d): %1$s</string>
     <string name="monthly_hour_24">В час (24/сут): %1$s</string>
     <string name="monthly_hour_work">В час (рабочие %1$d): %2$s</string>
-
+        </string-array>
 </resources>
