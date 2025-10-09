@@ -130,18 +130,18 @@ class VprActivity : AppCompatActivity() {
                 " - roi 50000 80000                — ROI (инвестиция, итоговая сумма)",
                 " - амортиз 200000 5 лет           — линейная амортизация (год/мес)",
                 " - окупаемость 500000 20000/мес   — месяцы до окупаемости",
-                " - терминал                       — попытка открыть com.example.app",
+                " - терминал                       — попытка открыть org.syndes.terminal",
                 " - сравн цен <название цена ...>  — сравнить до 10 позиций",
                 " - настройки                      — подсказка: введите 114 или 411"
             )
         }
 
         // --------------------
-        // TERMINAL — open package com.example.app (runs on main thread)
+        // TERMINAL — open package org.syndes.terminal (runs on main thread)
         // --------------------
         if (lower.contains("терминал") || lower.contains("термин")) {
-            // Try to launch package com.example.app
-            val pkg = "com.example.app"
+            // Try to launch package org.syndes.terminal
+            val pkg = "org.syndes.terminal"
             return try {
                 withContext(Dispatchers.Main) {
                     val intent = packageManager.getLaunchIntentForPackage(pkg)
