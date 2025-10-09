@@ -87,7 +87,7 @@ class VprActivity : AppCompatActivity() {
         }
 
         // seed welcome
-        addSystemLine(getString(R.string.welcome_message1))
+        addSystemLine(getString(R.string.welcome_messagen))
     }
 
     // Add user command view and process (with try/catch to prevent crashes)
