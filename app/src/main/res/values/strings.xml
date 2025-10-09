@@ -132,7 +132,6 @@
         <item>Запускаем матрицу...</item>
         </string-array>
         
-    <string name="app_name">Offline Assistant</string>
     <string name="hint_input">Введите команду (Enter = отправить)</string>
 
     <!-- Welcome / help -->
