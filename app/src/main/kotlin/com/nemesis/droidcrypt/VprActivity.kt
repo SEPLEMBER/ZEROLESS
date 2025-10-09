@@ -6,7 +6,6 @@ import android.text.Editable
 import android.text.InputType
 import android.text.method.ScrollingMovementMethod
 import android.view.KeyEvent
-import android.view.View
 import android.view.WindowManager
 import android.view.inputmethod.EditorInfo
 import android.widget.EditText
@@ -27,11 +26,6 @@ import kotlin.math.pow
 
 class VprActivity : AppCompatActivity() {
 
-    companion object {
-        private const val PREFS_NAME = "PawsTribePrefs"
-        private const val PREF_KEY_DISABLE_SCREENSHOTS = "disable_screenshots"
-    }
-
     // UI references
     private lateinit var messagesContainer: LinearLayout
     private lateinit var scrollView: ScrollView
@@ -44,15 +38,16 @@ class VprActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // hide status bar (full screen) as requested
+
+        // hide status bar (full screen)
         window.setFlags(
             WindowManager.LayoutParams.FLAG_FULLSCREEN,
             WindowManager.LayoutParams.FLAG_FULLSCREEN
         )
 
-        // Apply FLAG_SECURE if screenshots are disabled in prefs
-        val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
-        if (prefs.getBoolean(PREF_KEY_DISABLE_SCREENSHOTS, false)) {
+        // Apply FLAG_SECURE if screenshots are disabled in prefs (key matches SettingsActivity)
+        val prefs = getSharedPreferences("PawsTribePrefs", MODE_PRIVATE)
+        if (prefs.getBoolean("disable_screenshots", false)) {
             window.setFlags(
                 WindowManager.LayoutParams.FLAG_SECURE,
                 WindowManager.LayoutParams.FLAG_SECURE
@@ -77,7 +72,7 @@ class VprActivity : AppCompatActivity() {
                     submitCommand(text)
                     input.text = Editable.Factory.getInstance().newEditable("")
                 } else {
-                    // show friendly hint when empty
+                    // friendly hint when empty
                     addAssistantLine(getString(R.string.err_empty_input))
                 }
                 true
@@ -90,7 +85,9 @@ class VprActivity : AppCompatActivity() {
         addSystemLine(getString(R.string.welcome_messagen))
     }
 
-    // Add user command view and process (with try/catch to prevent crashes)
+    // --------------------
+    // Command routing
+    // --------------------
     private fun submitCommand(command: String) {
         addUserLine("> $command")
         lifecycleScope.launch(Dispatchers.Default) {
@@ -98,91 +95,49 @@ class VprActivity : AppCompatActivity() {
                 val outputs = parseCommand(command)
                 withContext(Dispatchers.Main) {
                     outputs.forEach { addAssistantLine("= $it") }
-                    // auto scroll to bottom
-                    scrollView.post { scrollView.fullScroll(View.FOCUS_DOWN) }
+                    scrollView.post { scrollView.fullScroll(ScrollView.FOCUS_DOWN) }
                 }
             } catch (t: Throwable) {
-                // Показываем ошибку как сообщение ассистента — приложение не падает
                 withContext(Dispatchers.Main) {
                     addAssistantLine("= ${getString(R.string.err_processing_command)}: ${t.message ?: t::class.java.simpleName}")
-                    scrollView.post { scrollView.fullScroll(View.FOCUS_DOWN) }
+                    scrollView.post { scrollView.fullScroll(ScrollView.FOCUS_DOWN) }
                 }
             }
         }
     }
 
-    // Append a user text line
-    private fun addUserLine(text: String) {
-        val tv = TextView(this).apply {
-            this.text = text
-            setTextColor(userGray)
-            setPadding(14)
-            textSize = 14f
-            typeface = Typeface.MONOSPACE
-        }
-        messagesContainer.addView(tv)
-        scrollView.post { scrollView.fullScroll(View.FOCUS_DOWN) }
-    }
-
-    // Append an assistant/result line
-    private fun addAssistantLine(text: String) {
-        val tv = TextView(this).apply {
-            this.text = text
-            setTextColor(neonCyan)
-            setPadding(14)
-            textSize = 15f
-            typeface = Typeface.MONOSPACE
-            // enable multi-line scrolling in case of big result
-            movementMethod = ScrollingMovementMethod()
-        }
-        messagesContainer.addView(tv)
-        scrollView.post { scrollView.fullScroll(View.FOCUS_DOWN) }
-    }
-
-    private fun addSystemLine(text: String) {
-        val tv = TextView(this).apply {
-            this.text = text
-            setTextColor(neonCyan)
-            setPadding(12)
-            textSize = 13f
-            typeface = Typeface.SANS_SERIF
-        }
-        messagesContainer.addView(tv)
-        scrollView.post { scrollView.fullScroll(View.FOCUS_DOWN) }
-    }
-
-    /**
-     * Простая маршрутизация команд -> возвращает список строк-ответов
-     */
     private suspend fun parseCommand(commandRaw: String): List<String> {
         val cmd = commandRaw.trim()
         val lower = cmd.lowercase()
 
-        // Энтропия: "энтропия <...>"
-        if (lower.startsWith("энтроп") || lower.startsWith("эн")) {
-            val payload = cmd.substringAfter(' ').trim()
+        // --- Entropy command
+        // match a word containing the prefix from strings (like "энтроп") and capture everything after it
+        val prefix = getString(R.string.cmd_entropy_prefix)
+        val entropyPattern = Regex("""(?i)\b\w*${Regex.escape(prefix)}\w*\b[ :]*([\s\S]+)""")
+        val entMatch = entropyPattern.find(cmd)
+        if (entMatch != null) {
+            val payload = entMatch.groupValues.getOrNull(1)?.trim() ?: ""
             if (payload.isEmpty()) return listOf(getString(R.string.usage_entropy))
             // calculate both byte-based and codepoint-based entropy
-            val byteEntropyPerSymbol = shannonEntropyBytes(payload.toByteArray(Charsets.UTF_8))
-            val totalBitsBytes = byteEntropyPerSymbol * payload.toByteArray(Charsets.UTF_8).size
+            val bytes = payload.toByteArray(Charsets.UTF_8)
+            val byteEntropyPerSymbol = shannonEntropyBytes(bytes)
+            val totalBitsBytes = byteEntropyPerSymbol * bytes.size
             val codepoints = payload.codePointCount(0, payload.length)
             val codepointEntropyPerSymbol = shannonEntropyCodepoints(payload)
             val totalBitsCodepoints = codepointEntropyPerSymbol * codepoints
-
             val strengthLabel = entropyStrengthLabel(totalBitsBytes) // use byte-based total for strength
 
             return listOf(
                 getString(R.string.entropy_per_symbol_bytes, "%.4f".format(byteEntropyPerSymbol)),
-                getString(R.string.entropy_total_bits_bytes, "%.2f".format(totalBitsBytes), payload.toByteArray(Charsets.UTF_8).size),
+                getString(R.string.entropy_total_bits_bytes, "%.2f".format(totalBitsBytes), bytes.size),
                 getString(R.string.entropy_per_symbol_codepoints, "%.4f".format(codepointEntropyPerSymbol)),
                 getString(R.string.entropy_total_bits_codepoints, "%.2f".format(totalBitsCodepoints), codepoints),
                 getString(R.string.entropy_strength, strengthLabel)
             )
         }
 
-        // Трафик: "трафик 5gb" или просто "5gb трафик"
+        // --- Traffic command
         if (lower.contains("трафик") || Regex("""\d+\s*(gb|гб|mb|мб|kb|кб|b|байт)""").containsMatchIn(lower)) {
-            // try to find number + optional unit
             val m = Regex("""(\d+(?:[.,]\d+)?)\s*(gb|гб|mb|мб|kb|кб|b|байт)?""", RegexOption.IGNORE_CASE).find(lower)
             if (m == null) return listOf(getString(R.string.usage_traffic))
             val numStr = m.groupValues[1].replace(',', '.')
@@ -199,9 +154,8 @@ class VprActivity : AppCompatActivity() {
             )
         }
 
-        // Простые проценты: "простые проценты 100000 7% 3 года"
+        // --- Simple interest
         if (lower.contains("прост") && lower.contains("процент")) {
-            // ищем первую сумму
             val numMatch = Regex("""(\d+(?:[.,]\d+)?)""").find(cmd)
             if (numMatch == null) return listOf(getString(R.string.usage_simple_percent))
             val principal = try {
@@ -210,12 +164,9 @@ class VprActivity : AppCompatActivity() {
                 return listOf(getString(R.string.err_invalid_amount, numMatch.groupValues[1]))
             }
 
-            // ищем процент (число со знаком %)
             val rateMatch = Regex("""(\d+(?:[.,]\d+)?)\s*%""").find(cmd)
-            val rate = if (rateMatch != null) {
-                parsePercent(rateMatch.groupValues[0])
-            } else {
-                // fallback: следующая числовая токен после суммы
+            val rate = if (rateMatch != null) parsePercent(rateMatch.groupValues[0])
+            else {
                 val rest = cmd.substring(numMatch.range.last + 1)
                 val nextNum = Regex("""(\d+(?:[.,]\d+)?)""").find(rest)
                 if (nextNum != null) parsePercent(nextNum.groupValues[1]) else BigDecimal.ZERO
@@ -225,7 +176,7 @@ class VprActivity : AppCompatActivity() {
             return listOfNotNull(simpleInterestReport(principal, rate, timeYears))
         }
 
-        // Сложные проценты: "сложные проценты 100000 7% 3 года помесячно"
+        // --- Compound interest
         if (lower.contains("слож") && lower.contains("процент")) {
             val numMatch = Regex("""(\d+(?:[.,]\d+)?)""").find(cmd)
             if (numMatch == null) return listOf(getString(R.string.usage_compound_percent))
@@ -248,9 +199,8 @@ class VprActivity : AppCompatActivity() {
             return listOfNotNull(compoundInterestReport(principal, rate, timeYears, capitalization))
         }
 
-        // Месячный доход/расход: "месячный доход 120000 рабочие 8"
+        // --- Monthly conversion
         if (lower.contains("месяч") && (lower.contains("доход") || lower.contains("зарп") || lower.contains("расход"))) {
-            // ищем сумму в тексте
             val numMatch = Regex("""(\d+(?:[.,]\d+)?)""").find(cmd)
             if (numMatch == null) return listOf(getString(R.string.usage_monthly))
             val amount = try {
@@ -258,7 +208,6 @@ class VprActivity : AppCompatActivity() {
             } catch (e: Exception) {
                 return listOf(getString(R.string.err_invalid_amount, numMatch.groupValues[1]))
             }
-            // find working hours in the command (pattern "рабочие X")
             val workHoursMatch = Regex("""рабоч\w*\s+(\d{1,2})""", RegexOption.IGNORE_CASE).find(cmd)
             val workHours = workHoursMatch?.groupValues?.get(1)?.toIntOrNull() ?: 8
             return listOfNotNull(monthlyToRatesReport(amount, workHours))
@@ -269,22 +218,60 @@ class VprActivity : AppCompatActivity() {
     }
 
     // --------------------
-    // Helpers: parsing + calculations
+    // --- Entropy helpers
     // --------------------
+    private fun shannonEntropyBytes(bytes: ByteArray): Double {
+        if (bytes.isEmpty()) return 0.0
+        val freq = IntArray(256)
+        bytes.forEach { b -> freq[b.toInt() and 0xFF]++ }
+        val len = bytes.size.toDouble()
+        var entropy = 0.0
+        for (count in freq) {
+            if (count == 0) continue
+            val p = count / len
+            entropy -= p * (ln(p) / ln(2.0))
+        }
+        return entropy
+    }
 
-    private fun parseBytes(amount: Double, unitRaw: String?): Long {
-        val unit = unitRaw?.lowercase() ?: ""
-        return when (unit) {
-            "gb", "гб" -> (amount * 1000.0 * 1000.0 * 1000.0).toLong() // decimal GB
-            "mb", "мб" -> (amount * 1000.0 * 1000.0).toLong()
-            "kb", "кб" -> (amount * 1000.0).toLong()
-            "b", "байт" -> amount.toLong()
-            "" -> (amount).toLong() // assume bytes if no unit
-            else -> (amount).toLong()
+    private fun shannonEntropyCodepoints(s: String): Double {
+        val cps = s.codePoints().toArray()
+        if (cps.isEmpty()) return 0.0
+        val map = mutableMapOf<Int, Int>()
+        for (cp in cps) map[cp] = (map[cp] ?: 0) + 1
+        val len = cps.size.toDouble()
+        var entropy = 0.0
+        for ((_, count) in map) {
+            val p = count / len
+            entropy -= p * (ln(p) / ln(2.0))
+        }
+        return entropy
+    }
+
+    private fun entropyStrengthLabel(totalBits: Double): String {
+        return when {
+            totalBits < 28.0 -> getString(R.string.entropy_label_weak)
+            totalBits < 46.0 -> getString(R.string.entropy_label_acceptable)
+            totalBits < 71.0 -> getString(R.string.entropy_label_normal)
+            else -> getString(R.string.entropy_label_strong)
         }
     }
 
-    // Format bytes in decimal units (1000-based) with one decimal where appropriate
+    // --------------------
+    // --- Traffic helpers
+    // --------------------
+    private fun parseBytes(amount: Double, unitRaw: String?): Long {
+        val unit = unitRaw?.lowercase() ?: ""
+        return when (unit) {
+            "gb", "гб" -> (amount * 1000.0 * 1000.0 * 1000.0).toLong()
+            "mb", "мб" -> (amount * 1000.0 * 1000.0).toLong()
+            "kb", "кб" -> (amount * 1000.0).toLong()
+            "b", "байт" -> amount.toLong()
+            "" -> amount.toLong()
+            else -> amount.toLong()
+        }
+    }
+
     private fun formatBytesDecimal(bytes: Long): String {
         val kb = 1000.0
         val mb = kb * 1000.0
@@ -297,7 +284,6 @@ class VprActivity : AppCompatActivity() {
         }
     }
 
-    // Format bytes from double (rates) to decimal units with one decimal
     private fun formatBytesDecimalDouble(bytesDouble: Double): String {
         val kb = 1000.0
         val mb = kb * 1000.0
@@ -331,10 +317,9 @@ class VprActivity : AppCompatActivity() {
         return mapOf("B/day" to bDay, "B/hour" to bHour, "B/min" to bMin, "B/s" to bSec)
     }
 
-    private fun tokenizeNumbersAndUnits(cmd: String): List<String> {
-        return cmd.split(Regex("\\s+")).map { it.trim().trim(',', ';') }.filter { it.isNotEmpty() }
-    }
-
+    // --------------------
+    // --- Percent helpers
+    // --------------------
     private fun parsePercent(s: String): BigDecimal {
         val cleaned = s.replace("%", "").replace(',', '.').trim()
         return try {
@@ -344,44 +329,26 @@ class VprActivity : AppCompatActivity() {
         }
     }
 
-    // parse time expressions like "3 года", "18 месяцев", "2.5 года", "90 дней"
-    // returns time in years (Double)
     private fun parseTimeToYears(tail: String): Double {
-        if (tail.isBlank()) return 1.0 // default 1 year when no time specified
+        if (tail.isBlank()) return 1.0
         val lower = tail.lowercase()
-        // years
         val y = Regex("""(\d+(?:[.,]\d+)?)\s*(лет|года|год|year|y)""").find(lower)
-        if (y != null) {
-            val num = y.groupValues[1].replace(',', '.').toDoubleOrNull() ?: 1.0
-            return num
-        }
+        if (y != null) return y.groupValues[1].replace(',', '.').toDoubleOrNull() ?: 1.0
         val m = Regex("""(\d+(?:[.,]\d+)?)\s*(месяц|месяцев|мес|month)""").find(lower)
-        if (m != null) {
-            val num = m.groupValues[1].replace(',', '.').toDoubleOrNull() ?: 0.0
-            return num / 12.0
-        }
+        if (m != null) return (m.groupValues[1].replace(',', '.').toDoubleOrNull() ?: 0.0) / 12.0
         val d = Regex("""(\d+(?:[.,]\d+)?)\s*(дн|дня|дней|day)""").find(lower)
-        if (d != null) {
-            val num = d.groupValues[1].replace(',', '.').toDoubleOrNull() ?: 0.0
-            return num / 365.0
-        }
-        // if tail contains single number — assume years
+        if (d != null) return (d.groupValues[1].replace(',', '.').toDoubleOrNull() ?: 0.0) / 365.0
         val numOnly = Regex("""^(\d+(?:[.,]\d+)?)$""").find(lower)
-        if (numOnly != null) {
-            return numOnly.groupValues[1].replace(',', '.').toDoubleOrNull() ?: 1.0
-        }
-        // fallback default 1 year
+        if (numOnly != null) return numOnly.groupValues[1].replace(',', '.').toDoubleOrNull() ?: 1.0
         return 1.0
     }
 
-    // Simple interest report: returns formatted string
     private fun simpleInterestReport(principal: BigDecimal, annualRate: BigDecimal, years: Double): String {
         val principalMC = principal
         val rateBD = BigDecimal(annualRate.toPlainString())
         val yearsBD = BigDecimal.valueOf(years)
         val interest = principalMC.multiply(rateBD).multiply(yearsBD)
         val total = principalMC.add(interest)
-        // yearly profit
         val yearlyProfit = principalMC.multiply(rateBD)
         val perMonth = yearlyProfit.divide(BigDecimal(12), 10, RoundingMode.HALF_UP)
         val perDay = yearlyProfit.divide(BigDecimal(365), 10, RoundingMode.HALF_UP)
@@ -400,7 +367,6 @@ class VprActivity : AppCompatActivity() {
         }
     }
 
-    // Compound interest report. capitalization: "monthly" / "daily" / "yearly"
     private fun compoundInterestReport(principal: BigDecimal, annualRate: BigDecimal, years: Double, capitalization: String): String {
         val n = when (capitalization) {
             "monthly" -> 12
@@ -408,7 +374,6 @@ class VprActivity : AppCompatActivity() {
             "yearly" -> 1
             else -> 12
         }
-        // formula: A = P * (1 + r/n)^(n*t)
         val p = principal.toDouble()
         val r = annualRate.toDouble()
         val factor = (1.0 + r / n.toDouble()).pow(n.toDouble() * years)
@@ -449,49 +414,47 @@ class VprActivity : AppCompatActivity() {
         }
     }
 
-    // Shannon entropy in bits per symbol for a UTF-8 byte array
-    private fun shannonEntropyBytes(bytes: ByteArray): Double {
-        if (bytes.isEmpty()) return 0.0
-        val freq = IntArray(256)
-        bytes.forEach { b -> freq[b.toInt() and 0xFF]++ }
-        val len = bytes.size.toDouble()
-        var entropy = 0.0
-        for (count in freq) {
-            if (count == 0) continue
-            val p = count / len
-            entropy -= p * (ln(p) / ln(2.0))
+    // --------------------
+    // --- UI helpers (moved to end)
+    // --------------------
+    private fun addUserLine(text: String) {
+        val tv = TextView(this).apply {
+            this.text = text
+            setTextColor(userGray)
+            setPadding(14)
+            textSize = 14f
+            typeface = Typeface.MONOSPACE
         }
-        return entropy
+        messagesContainer.addView(tv)
+        scrollView.post { scrollView.fullScroll(ScrollView.FOCUS_DOWN) }
     }
 
-    // Shannon entropy per codepoint (characters) — uses codepoints as "symbols"
-    private fun shannonEntropyCodepoints(s: String): Double {
-        val cps = s.codePoints().toArray()
-        if (cps.isEmpty()) return 0.0
-        val map = mutableMapOf<Int, Int>()
-        for (cp in cps) {
-            map[cp] = (map[cp] ?: 0) + 1
+    private fun addAssistantLine(text: String) {
+        val tv = TextView(this).apply {
+            this.text = text
+            setTextColor(neonCyan)
+            setPadding(14)
+            textSize = 15f
+            typeface = Typeface.MONOSPACE
+            movementMethod = ScrollingMovementMethod()
         }
-        val len = cps.size.toDouble()
-        var entropy = 0.0
-        for ((_, count) in map) {
-            val p = count / len
-            entropy -= p * (ln(p) / ln(2.0))
-        }
-        return entropy
+        messagesContainer.addView(tv)
+        scrollView.post { scrollView.fullScroll(ScrollView.FOCUS_DOWN) }
     }
 
-    // Strength label based on total bits (byte-based total)
-    private fun entropyStrengthLabel(totalBits: Double): String {
-        return when {
-            totalBits < 28.0 -> getString(R.string.entropy_label_weak)
-            totalBits < 46.0 -> getString(R.string.entropy_label_acceptable)
-            totalBits < 71.0 -> getString(R.string.entropy_label_normal)
-            else -> getString(R.string.entropy_label_strong)
+    private fun addSystemLine(text: String) {
+        val tv = TextView(this).apply {
+            this.text = text
+            setTextColor(neonCyan)
+            setPadding(12)
+            textSize = 13f
+            typeface = Typeface.SANS_SERIF
         }
+        messagesContainer.addView(tv)
+        scrollView.post { scrollView.fullScroll(ScrollView.FOCUS_DOWN) }
     }
 
-    // Utility: generate random bytes (for quick entropy test) - not used by default but kept
+    // Utility: generate random bytes (unused but left)
     private fun randomBytes(size: Int): ByteArray {
         val rnd = SecureRandom()
         val arr = ByteArray(size)
