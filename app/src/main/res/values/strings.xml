@@ -42,7 +42,7 @@
     <string name="trigger_how_are_you">как дела</string>
     <string name="trigger_thanks">спасибо</string>
     <string name="unknown_value">неизвестно</string>
-    
+
     <!-- Диалоговые сообщения -->
     <string name="welcome_message">Добро пожаловать!</string>
     <string name="typing">печатает...</string>
@@ -98,7 +98,7 @@
     <string name="error_loading_batterycare">Ошибка загрузки batterycare.txt: %1$s</string>
 
     <!-- Строки, используемые в SetupActivity -->
-    <string name="error_no_permission">Нет прав для доступа к выбранной папки.</string>
+    <string name="error_no_permission">Нет прав для доступа к выбранной папке.</string>
     <string name="error_no_folder_selected">Папка не выбрана. Пожалуйста, укажите папку с шаблонами.</string>
     <string name="error_folder_unavailable">Указанная папка недоступна или была удалена.</string>
     <string name="no_supported_files_in_assets">В assets отсутствуют поддерживаемые файлы шаблонов.</string>
@@ -135,15 +135,16 @@
     <!-- Дополнительные строки (ассистент) -->
     <string name="hint_input">Введите команду (Enter = отправить)</string>
 
-    <!-- Welcome / help (в оригинале уже есть welcome_message; дополнительный пример не дублирую) -->
-
     <!-- Errors / usage -->
     <string name="err_empty_input">Пожалуйста, введите текст.</string>
     <string name="err_invalid_amount">Невалидная сумма: %1$s</string>
     <string name="err_processing_command">Ошибка при обработке команды</string>
 
     <string name="usage_entropy">Использование: энтропия &lt;текст&gt;</string>
+
+    <!-- usage_traffic: никаких обратных слэшей или фигурных вставок -->
     <string name="usage_traffic">Не могу распознать объём. Пример: 'трафик 5gb'</string>
+
     <string name="usage_simple_percent">Использование: простые проценты &lt;сумма&gt; &lt;ставка%&gt; [время]</string>
     <string name="usage_compound_percent">Использование: сложные проценты &lt;сумма&gt; &lt;ставка%&gt; [время] [помесячно/посуточно/годовая]</string>
     <string name="usage_monthly">Использование: месячный доход &lt;сумма&gt; [рабочие &lt;hours&gt;]</string>
