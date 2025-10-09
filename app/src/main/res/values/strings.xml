@@ -28,8 +28,8 @@
     <string name="user_label">Пользователь</string>
     <string name="setup">Установить</string>
     <string name="connecting">Подключение...</string>
-    <string name="choose_template_version">Выберите версию шаблонов:</string> <!-- Просьба бота -->
-    <string name="select_folder_instruction">Выберите папку для сохранения шаблонов</string> <!-- Инструкция -->
+    <string name="choose_template_version">Выберите версию шаблонов:</string>
+    <string name="select_folder_instruction">Выберите папку для сохранения шаблонов</string>
     <string name="select_folder">Выбрать папку</string>
     <string name="disable_screenshots">Запретить скриншоты</string>
     <string name="folder_selected">Папка выбрана</string>
@@ -39,9 +39,9 @@
     <string name="inp_text">Напиши сообщение...</string>
 
     <string name="trigger_hello">привет</string>
-<string name="trigger_how_are_you">как дела</string>
-<string name="trigger_thanks">спасибо</string>
-<string name="unknown_value">неизвестно</string>
+    <string name="trigger_how_are_you">как дела</string>
+    <string name="trigger_thanks">спасибо</string>
+    <string name="unknown_value">неизвестно</string>
     
     <!-- Диалоговые сообщения -->
     <string name="welcome_message">Добро пожаловать!</string>
@@ -98,7 +98,7 @@
     <string name="error_loading_batterycare">Ошибка загрузки batterycare.txt: %1$s</string>
 
     <!-- Строки, используемые в SetupActivity -->
-    <string name="error_no_permission">Нет прав для доступа к выбранной папке.</string>
+    <string name="error_no_permission">Нет прав для доступа к выбранной папки.</string>
     <string name="error_no_folder_selected">Папка не выбрана. Пожалуйста, укажите папку с шаблонами.</string>
     <string name="error_folder_unavailable">Указанная папка недоступна или была удалена.</string>
     <string name="no_supported_files_in_assets">В assets отсутствуют поддерживаемые файлы шаблонов.</string>
@@ -130,12 +130,12 @@
         <item>Математику не заказывали?</item>
         <item>Здесь ничего нет, честно!</item>
         <item>Запускаем матрицу...</item>
+    </string-array>
 
-    <string name="app_name">Offline Assistant</string>
+    <!-- Дополнительные строки (ассистент) -->
     <string name="hint_input">Введите команду (Enter = отправить)</string>
 
-    <!-- Welcome / help -->
-    <string name="welcome_message">Offline Assistant — режим оффлайн. Введите команду (напр.: "простые проценты 100000 7% 3 года")</string>
+    <!-- Welcome / help (в оригинале уже есть welcome_message; дополнительный пример не дублирую) -->
 
     <!-- Errors / usage -->
     <string name="err_empty_input">Пожалуйста, введите текст.</string>
@@ -193,5 +193,5 @@
     <string name="monthly_day">День (30d): %1$s</string>
     <string name="monthly_hour_24">В час (24/сут): %1$s</string>
     <string name="monthly_hour_work">В час (рабочие %1$d): %2$s</string>
-        </string-array>
+
 </resources>
