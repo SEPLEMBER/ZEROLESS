@@ -136,13 +136,14 @@ class VprActivity : AppCompatActivity() {
                 " - окупаемость 500000 20000/мес   — месяцы до окупаемости",
                 " - терминал                       — попытка открыть org.syndes.terminal или указанный пакет",
                 " - сравн цен <название цена ...>  — сравнить до 10 позиций",
-                " - настройки                      — подсказка: введите 114 или 411"
+                " - бюджет 3000 на 7 дней          — просчитать бюджет на N дней",
+                " - накопить 100000 к 7 ноября     — сколько откладывать в день/нед/мес"
             )
         }
 
         // --------------------
         // TERMINAL — open package (supports specifying package or short name)
-        // examples: "терминал", "терминал com.termux", "терминал termux"
+        // tries getLaunchIntentForPackage, then resolves via ACTION_MAIN+CATEGORY_LAUNCHER
         // --------------------
         if (lower.contains("терминал") || lower.contains("термин")) {
             // try to extract token after the word terminal (if present)
@@ -173,22 +174,42 @@ class VprActivity : AppCompatActivity() {
                 withContext(Dispatchers.Main) {
                     for (pkg in candidates) {
                         try {
-                            val intent = packageManager.getLaunchIntentForPackage(pkg)
+                            // first attempt: straightforward launch intent
+                            var intent = packageManager.getLaunchIntentForPackage(pkg)
                             if (intent != null) {
                                 intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                                 startActivity(intent)
                                 launchedPkg = pkg
                                 break
                             }
-                        } catch (_: Exception) {
-                            // ignore and try next candidate
+                            // second attempt: resolve ACTION_MAIN / CATEGORY_LAUNCHER activities within package
+                            intent = Intent(Intent.ACTION_MAIN).apply {
+                                addCategory(Intent.CATEGORY_LAUNCHER)
+                                setPackage(pkg)
+                            }
+                            val resolveInfos = packageManager.queryIntentActivities(intent, 0)
+                            if (resolveInfos.isNotEmpty()) {
+                                val ri = resolveInfos[0]
+                                val explicit = Intent(Intent.ACTION_MAIN).apply {
+                                    addCategory(Intent.CATEGORY_LAUNCHER)
+                                    setClassName(ri.activityInfo.packageName, ri.activityInfo.name)
+                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                }
+                                startActivity(explicit)
+                                launchedPkg = ri.activityInfo.packageName
+                                break
+                            }
+                        } catch (ex: Exception) {
+                            // ignore and continue
                         }
                     }
                 }
                 if (launchedPkg != null) {
                     listOf("Пытаюсь открыть терминал (пакет $launchedPkg). Если приложение установлено — оно запустится.")
                 } else {
-                    listOf("Не нашёл установленного терминала среди кандидатов (${candidates.joinToString(", ")}). Установите приложение или укажите корректный пакет, например: 'терминал com.termux'.")
+                    // offer to open application settings
+                    val candidatesStr = candidates.joinToString(", ")
+                    listOf("Не нашёл установленного терминала среди кандидатов ($candidatesStr). Укажите корректный пакет, например: 'терминал com.termux', или откройте страницу приложения в настройках.")
                 }
             } catch (t: Throwable) {
                 listOf("Не удалось запустить терминал: ${t.message ?: t::class.java.simpleName}")
@@ -238,7 +259,6 @@ class VprActivity : AppCompatActivity() {
         // --------------------
         val compareRoot = Regex("""(?i)\bсравн\w*\b""").find(lower)
         if (compareRoot != null && (lower.contains("цен") || lower.contains("цена") || lower.contains("цены"))) {
-            // find numbers and take name as the substring immediately preceding each number (up to previous number or root or colon)
             val numberRegex = Regex("""(\d+(?:[.,]\d+)?)""")
             val matches = numberRegex.findAll(cmd).toList()
             if (matches.size < 2) return listOf("Недостаточно цен для сравнения. Пример: 'сравн цен яблоки 120 апельсины 140'")
@@ -249,14 +269,8 @@ class VprActivity : AppCompatActivity() {
                 val m = matches[i]
                 val start = m.range.first
                 val prevEnd = if (i == 0) rootEnd else matches[i - 1].range.last + 1
-                // if colon exists and is between root and this price, prefer substring after colon
                 val effectivePrevEnd = if (colonIndex >= 0 && colonIndex < start && colonIndex >= prevEnd) colonIndex + 1 else prevEnd
-                val labelRaw = try {
-                    cmd.substring(effectivePrevEnd, start).trim()
-                } catch (e: Exception) {
-                    ""
-                }
-                // sanitize label: remove punctuation, split, drop stop words, take last up to 3 tokens
+                val labelRaw = try { cmd.substring(effectivePrevEnd, start).trim() } catch (e: Exception) { "" }
                 val stopWords = setOf("сравн", "сравнить", "сравнц", "цен", "цена", "цены", "цену", "эти", "пожалуйста", "пожалуйстa")
                 val tokens = labelRaw.split(Regex("\\s+")).map { it.trim().trim(',', ';', ':', '.', '\"', '\'') }
                     .filter { it.isNotEmpty() && it.lowercase() !in stopWords }
@@ -266,7 +280,6 @@ class VprActivity : AppCompatActivity() {
                 items.add(name to price)
             }
             if (items.size < 2) return listOf("Недостаточно пар название+цена для сравнения.")
-            // sort by price ascending
             val sorted = items.sortedBy { it.second }
             val cheapest = sorted.first().second
             val outputs = mutableListOf<String>()
@@ -311,8 +324,42 @@ class VprActivity : AppCompatActivity() {
         }
 
         // --------------------
+        // НАКОПИТЬ — new command: "накопить 100000 к 7 ноября", "накопить 50000 за 30 дней"
+        // --------------------
+        if (lower.contains("накоп") || lower.contains("накопить") || lower.contains("накопление") || lower.contains("отлож")) {
+            // payload after colon if present
+            val payload = if (colonIndex >= 0) cmd.substring(colonIndex + 1) else cmd
+            val nums = Regex("""(\d+(?:[.,]\d+)?)""").findAll(payload).map { it.groupValues[1].replace(',', '.') }.toList()
+            if (nums.isEmpty()) return listOf("Использование: накопить <сумма> к <дате> | накопить <сумма> за <N дней>")
+
+            val amount = try { BigDecimal(nums[0]) } catch (e: Exception) { BigDecimal.ZERO }
+            // try to get days via explicit expressions (k date, на/за N дней, недел)
+            val daysFromText = parseDaysFromText(payload)
+            val daysDouble = daysFromText?.toDouble()
+
+            val yearsFallback = parseTimeToYears(payload) // if days not found, maybe user provided months/years
+            val daysFromYears = (yearsFallback * 365.0)
+
+            val daysToUse = when {
+                daysDouble != null -> daysDouble
+                daysFromYears > 0.0 -> daysFromYears
+                else -> 30.0
+            }.coerceAtLeast(1.0)
+
+            val perDay = amount.divide(BigDecimal.valueOf(daysToUse), 10, RoundingMode.HALF_UP)
+            val perWeek = perDay.multiply(BigDecimal(7))
+            val perMonth = perDay.multiply(BigDecimal(daysToUse / 30.0))
+
+            val outputs = mutableListOf<String>()
+            outputs.add("Цель: ${amount.setScale(2, RoundingMode.HALF_UP)}")
+            if (daysFromText != null) outputs.add("Период: $daysFromText дней")
+            else outputs.add("Период (выбран по контексту): ${"%.1f".format(daysToUse)} дней")
+            outputs.add("Нужно откладывать: в день ${perDay.setScale(2, RoundingMode.HALF_UP)} ₽, в неделю ${perWeek.setScale(2, RoundingMode.HALF_UP)} ₽, в месяц ≈ ${perMonth.setScale(2, RoundingMode.HALF_UP)} ₽")
+            return outputs
+        }
+
+        // --------------------
         // Mortgage / Loan (ипотека / кредит) with optional amortization table
-        // percent-before-sum resilience: prefer any % token as rate, then use other numbers as amount
         // --------------------
         val mortgagePattern = Regex("""(?i)\b\w*(ипотек|кредит)\w*\b[ :]*([\s\S]+)""")
         val mortMatch = mortgagePattern.find(cmd)
@@ -329,12 +376,10 @@ class VprActivity : AppCompatActivity() {
             val allNums = Regex("""(\d+(?:[.,]\d+)?)""").findAll(payload).map { it.groupValues[1].replace(',', '.') }.toList()
 
             val principal = when {
-                // if percent present, choose first numeric value != percent value
                 percVal != null && allNums.isNotEmpty() -> {
                     val candidate = allNums.firstOrNull { it != percMatch?.groupValues?.getOrNull(1)?.replace(',', '.') } ?: allNums.first()
                     try { BigDecimal(candidate) } catch (e: Exception) { BigDecimal.ZERO }
                 }
-                // fallback: first number
                 allNums.isNotEmpty() -> try { BigDecimal(allNums[0]) } catch (e: Exception) { BigDecimal.ZERO }
                 else -> null
             }
@@ -370,7 +415,6 @@ class VprActivity : AppCompatActivity() {
             outputs.add("Средняя переплата: в год ${paymentPerYear.setScale(2, RoundingMode.HALF_UP)}, в месяц ${perMonthAvg.setScale(2, RoundingMode.HALF_UP)}, в день ${perDayAvg.setScale(4, RoundingMode.HALF_UP)}, в час ${perHourAvg.setScale(6, RoundingMode.HALF_UP)}")
 
             if (firstN != null && firstN > 0) {
-                // produce amortization rows (first N months), cap to reasonable max
                 val cap = firstN.coerceAtMost(240).coerceAtMost(months)
                 outputs.add("Первые $cap месяцев амортизации (платёж, проценты, погашение тела, остаток):")
                 outputs.addAll(generateAmortizationRows(principal, annualRate, monthlyPaymentBD, months, cap))
@@ -426,21 +470,15 @@ class VprActivity : AppCompatActivity() {
 
         // --------------------
         // Tax (налог, НДФЛ)
-        // Support '% before amount' like "на 13% от суммы 100 рублей"
         // --------------------
         if (lower.contains("налог") || lower.contains("ндфл")) {
-            // find percent first
             val percentRegex = Regex("""(\d+(?:[.,]\d+)?)\s*%""")
             val percMatch = percentRegex.find(cmd)
             val percVal = percMatch?.groupValues?.getOrNull(1)?.replace(',', '.')?.let {
                 try { BigDecimal(it).divide(BigDecimal(100)) } catch (e: Exception) { BigDecimal.ZERO }
             }
-
-            // all numbers
             val allNums = Regex("""(\d+(?:[.,]\d+)?)""").findAll(cmd).map { it.groupValues[1].replace(',', '.') }.toList()
-
             val amount = when {
-                // if percent exists, choose a number different from the percent value (if present)
                 percVal != null && allNums.isNotEmpty() -> {
                     val candidateStr = allNums.firstOrNull { it != percMatch.groupValues.getOrNull(1)?.replace(',', '.') } ?: allNums.first()
                     try { BigDecimal(candidateStr) } catch (e: Exception) { BigDecimal.ZERO }
@@ -462,14 +500,12 @@ class VprActivity : AppCompatActivity() {
         if (lower.contains("roi") || lower.contains("окупаем") || lower.contains("инвест")) {
             val nums = Regex("""(\d+(?:[.,]\d+)?)""").findAll(cmd).map { it.groupValues[1].replace(',', '.') }.toList()
             if (nums.isEmpty()) return listOf("Использование: roi <вложено> <итоговая сумма>  — или 'инвест 50000 прибыль 15000'")
-            // if contains 'прибыл' treat second as profit
             if (nums.size >= 2 && (lower.contains("прибыл") || lower.contains("прибыль"))) {
                 val invested = try { BigDecimal(nums[0]) } catch (e: Exception) { BigDecimal.ZERO }
                 val profit = try { BigDecimal(nums[1]) } catch (e: Exception) { BigDecimal.ZERO }
                 val roi = if (invested > BigDecimal.ZERO) profit.divide(invested, 6, RoundingMode.HALF_UP) else BigDecimal.ZERO
                 return listOf("Вложено: ${invested.setScale(2, RoundingMode.HALF_UP)}", "Прибыль: ${profit.setScale(2, RoundingMode.HALF_UP)}", "ROI: ${(roi.multiply(BigDecimal(100))).setScale(4, RoundingMode.HALF_UP)}%")
             } else if (nums.size >= 2) {
-                // treat as invested and final amount
                 val invested = try { BigDecimal(nums[0]) } catch (e: Exception) { BigDecimal.ZERO }
                 val final = try { BigDecimal(nums[1]) } catch (e: Exception) { BigDecimal.ZERO }
                 val profit = final.subtract(invested)
@@ -503,7 +539,6 @@ class VprActivity : AppCompatActivity() {
             if (nums.size < 2) return listOf("Использование: окупаемость <вложено> <прибыль в мес/год>")
             val invested = try { BigDecimal(nums[0]) } catch (e: Exception) { BigDecimal.ZERO }
             val profitNum = try { BigDecimal(nums[1]) } catch (e: Exception) { BigDecimal.ZERO }
-            // decide whether profit is monthly or yearly: check phrase
             val profitIsAnnual = lower.contains("год") || lower.contains("в год") || lower.contains("годовых")
             val monthlyProfit = if (profitIsAnnual) profitNum.divide(BigDecimal(12), 10, RoundingMode.HALF_UP) else profitNum
             if (monthlyProfit <= BigDecimal.ZERO) return listOf("Невалидная прибыль для расчёта окупаемости")
@@ -585,28 +620,25 @@ class VprActivity : AppCompatActivity() {
         }
 
         // --------------------
-        // Monthly conversion: supports "за N дней" to compute per-day/per-hour based on N days
-        // Example: "месячный доход 120000 за 15 дней"
+        // Monthly conversion & BUDGET: supports "за N дней" and "на N дней" and "на неделю"
+        // Examples: "месячный доход 120000 за 15 дней", "бюджет 3000 на 7 дней", "бюджет: 3000 на неделю"
         // --------------------
-        if (lower.contains("месяч") && (lower.contains("доход") || lower.contains("зарп") || lower.contains("расход"))) {
-            // check if user provided a specific days count like "за 15 дней" or "за 2-14 дней"
-            val daysRangeRegex = Regex("""за\s+(\d{1,4})(?:-(\d{1,4}))?\s*(дн|дня|дней|дн\.)""", RegexOption.IGNORE_CASE)
-            val daysMatch = daysRangeRegex.find(cmd)
-            val numMatch = Regex("""(\d+(?:[.,]\d+)?)""").find(cmd)
-            if (numMatch == null) return listOf(getString(R.string.usage_monthly))
-            val amount = try {
-                BigDecimal(numMatch.groupValues[1].replace(',', '.'))
-            } catch (e: Exception) {
-                return listOf(getString(R.string.err_invalid_amount, numMatch.groupValues[1]))
-            }
-            val workHoursMatch = Regex("""рабоч\w*\s+(\d{1,2})""", RegexOption.IGNORE_CASE).find(cmd)
+        if (lower.contains("бюджет") || (lower.contains("месяч") && (lower.contains("доход") || lower.contains("зарп") || lower.contains("расход")))) {
+            val payload = if (colonIndex >= 0) cmd.substring(colonIndex + 1) else cmd
+            val amountMatch = Regex("""(\d+(?:[.,]\d+)?)""").find(payload)
+            if (amountMatch == null) return listOf(getString(R.string.usage_monthly))
+            val amount = try { BigDecimal(amountMatch.groupValues[1].replace(',', '.')) } catch (e: Exception) { return listOf(getString(R.string.err_invalid_amount, amountMatch.groupValues[1])) }
+
+            val workHoursMatch = Regex("""рабоч\w*\s+(\d{1,2})""", RegexOption.IGNORE_CASE).find(payload)
             val workHours = workHoursMatch?.groupValues?.get(1)?.toIntOrNull() ?: 8
 
-            if (daysMatch != null) {
-                val days = daysMatch.groupValues[1].toIntOrNull() ?: 30
+            // try explicit days
+            val days = parseDaysFromText(payload)
+            if (days != null) {
                 return listOfNotNull(moneyPerDaysReport(amount, days, workHours))
             }
 
+            // fallback: monthly report
             return listOfNotNull(monthlyToRatesReport(amount, workHours))
         }
 
@@ -619,13 +651,11 @@ class VprActivity : AppCompatActivity() {
     // --------------------
     private fun calculateMonthlyAnnuity(principal: BigDecimal, annualRate: BigDecimal, months: Int): BigDecimal {
         if (months <= 0) return principal
-        val r = annualRate // BigDecimal fractional (e.g., 0.07)
+        val r = annualRate
         if (r == BigDecimal.ZERO) {
             return principal.divide(BigDecimal.valueOf(months.toLong()), 10, RoundingMode.HALF_UP)
         }
-        // monthly rate as BigDecimal
         val rMonth = r.divide(BigDecimal(12), 20, RoundingMode.HALF_UP)
-        // compute (1+r)^n using Double (safe enough) -> convert to BigDecimal
         val rMonthDouble = rMonth.toDouble()
         val factor = (1.0 + rMonthDouble).pow(months.toDouble())
         val numerator = principal.toDouble() * (rMonthDouble * factor)
@@ -648,7 +678,6 @@ class VprActivity : AppCompatActivity() {
         for (i in 1..maxShow) {
             val interest = remaining.multiply(rMonthBD).setScale(10, RoundingMode.HALF_UP)
             var principalPaid = monthlyPayment.subtract(interest).setScale(10, RoundingMode.HALF_UP)
-            // in last payment adjust rounding issues
             if (i == totalMonths) {
                 principalPaid = remaining
             }
@@ -667,7 +696,6 @@ class VprActivity : AppCompatActivity() {
 
     // Helper to find "первые N" or "табл N" pattern in payload
     private fun findRequestedFirstN(payload: String): Int? {
-        // look for "первые N", "первыеN", "табл N", "таблица N"
         val patterns = listOf(
             Regex("""первые\s*(\d{1,3})""", RegexOption.IGNORE_CASE),
             Regex("""табл(?:\.)?\s*(\d{1,3})""", RegexOption.IGNORE_CASE),
@@ -814,9 +842,51 @@ class VprActivity : AppCompatActivity() {
     }
 
     /**
+     * parseDaysFromText:
+     * - распознаёт "на N дней", "за N дней", "на неделю", "на 2 недели", "на 7 дней"
+     * - возвращает количество дней (Int) либо null
+     * - учитывает "к 7 ноября", "2 числа", "7 ноября" через parseDaysUntilTargetDate
+     */
+    private fun parseDaysFromText(textRaw: String): Int? {
+        val text = textRaw.lowercase()
+
+        // explicit "на 7 дней" / "за 7 дней" / "7 дней"
+        val explicitDays = Regex("""\b(?:на|за)?\s*(\d{1,4})(?:-(\d{1,4}))?\s*(дн|дня|дней|дн\.)\b""", RegexOption.IGNORE_CASE).find(text)
+        if (explicitDays != null) {
+            val days = explicitDays.groupValues[1].toIntOrNull() ?: return null
+            return days.coerceAtLeast(1)
+        }
+
+        // "на неделю", "на 2 недели", "2 недели", "за неделю"
+        val weeks = Regex("""\b(?:на|за)?\s*(\d{1,3})?\s*(недел|нед|недели|неделя)\b""", RegexOption.IGNORE_CASE).find(text)
+        if (weeks != null) {
+            val maybeNum = weeks.groupValues[1]
+            val num = if (maybeNum.isBlank()) 1 else maybeNum.toIntOrNull() ?: 1
+            return (num * 7).coerceAtLeast(1)
+        }
+
+        // short "неделя" without number
+        if (Regex("""\b(?:на|за)?\s*недел(?:я|и|ь)\b""", RegexOption.IGNORE_CASE).containsMatchIn(text)) return 7
+
+        // day-only like "2 числа" or "числа 2"
+        val dayOnly = Regex("""\b(\d{1,2})\s*(числ|числа|число)\b""", RegexOption.IGNORE_CASE).find(text)
+        if (dayOnly != null) {
+            val daysToDate = parseDaysUntilTargetDate(text)
+            if (daysToDate != null) return daysToDate.toInt().coerceAtLeast(1)
+        }
+
+        // absolute date "7 ноября", "к 7 ноября"
+        val daysToDate = parseDaysUntilTargetDate(text)
+        if (daysToDate != null) return daysToDate.toInt().coerceAtLeast(1)
+
+        // fallback null
+        return null
+    }
+
+    /**
      * parseTimeToYears:
      * - supports "3 года", "18 месяцев", "90 дней"
-     * - supports "недел" as weeks (week = 7 days)
+     * - supports "недел" as weeks
      * - supports "X-Y дней" (takes X)
      * - supports "год" without number -> 1.0
      * - supports "к N числа" and "D месяц" (like "7 ноября") -> computes days until that date
@@ -836,29 +906,22 @@ class VprActivity : AppCompatActivity() {
         val m = Regex("""(\d+(?:[.,]\d+)?)\s*(месяц|месяцев|мес|month)""").find(lower)
         if (m != null) return (m.groupValues[1].replace(',', '.').toDoubleOrNull() ?: 0.0) / 12.0
 
-        // days (supports ranges like 2-14 дней -> takes first number)
-        val dRange = Regex("""(\d{1,4})(?:-(\d{1,4}))?\s*(дн|дня|дней|day)""").find(lower)
-        if (dRange != null) {
-            val days = dRange.groupValues[1].toDoubleOrNull() ?: 0.0
-            return days / 365.0
-        }
+        // try days via parseDaysFromText
+        val days = parseDaysFromText(lower)
+        if (days != null) return days.toDouble() / 365.0
+
+        // days pattern generic
         val d = Regex("""(\d+(?:[.,]\d+)?)\s*(дн|дня|дней|day)""").find(lower)
         if (d != null) return (d.groupValues[1].replace(',', '.').toDoubleOrNull() ?: 0.0) / 365.0
 
-        // weeks: "2 недел", "недел" with number
+        // weeks
         val w = Regex("""(\d+(?:[.,]\d+)?)\s*(недел|нед|недели|неделя)""").find(lower)
         if (w != null) {
             val weeks = w.groupValues[1].replace(',', '.').toDoubleOrNull() ?: 0.0
             return (weeks * 7.0) / 365.0
         }
 
-        // shorthand like "дв недел" (две недели) - try to catch "дв" or "две"
-        val dv = Regex("""\b(дв|две)\s*недел""").find(lower)
-        if (dv != null) {
-            return (2.0 * 7.0) / 365.0
-        }
-
-        // if tail looks like a day number or "к N числа" or "N числа" or "7 ноября"
+        // parse days until date (like "к 7 ноября")
         val daysToDate = parseDaysUntilTargetDate(lower)
         if (daysToDate != null) return daysToDate / 365.0
 
@@ -866,7 +929,6 @@ class VprActivity : AppCompatActivity() {
         val numOnly = Regex("""^(\d+(?:[.,]\d+)?)$""").find(lower)
         if (numOnly != null) return numOnly.groupValues[1].replace(',', '.').toDoubleOrNull() ?: 1.0
 
-        // fallback default 1 year
         return 1.0
     }
 
@@ -900,7 +962,6 @@ class VprActivity : AppCompatActivity() {
             val month = monthMap[monthRaw] ?: return null
             var target = LocalDate.of(today.year, month, day.coerceIn(1, month.length(today.isLeapYear)))
             if (!target.isAfter(today)) {
-                // move to next year
                 target = target.plusYears(1)
             }
             val delta = ChronoUnit.DAYS.between(today, target).toDouble()
