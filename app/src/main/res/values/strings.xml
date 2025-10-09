@@ -130,5 +130,68 @@
         <item>Математику не заказывали?</item>
         <item>Здесь ничего нет, честно!</item>
         <item>Запускаем матрицу...</item>
-    </string-array>
+
+    <string name="app_name">Offline Assistant</string>
+    <string name="hint_input">Введите команду (Enter = отправить)</string>
+
+    <!-- Welcome / help -->
+    <string name="welcome_message">Offline Assistant — режим оффлайн. Введите команду (напр.: "простые проценты 100000 7% 3 года")</string>
+
+    <!-- Errors / usage -->
+    <string name="err_empty_input">Пожалуйста, введите текст.</string>
+    <string name="err_invalid_amount">Невалидная сумма: %1$s</string>
+    <string name="err_processing_command">Ошибка при обработке команды</string>
+
+    <string name="usage_entropy">Использование: энтропия &lt;текст&gt;</string>
+    <string name="usage_traffic">Не могу распознать объём. Пример: 'трафик 5gb'</string>
+    <string name="usage_simple_percent">Использование: простые проценты &lt;сумма&gt; &lt;ставка%&gt; [время]</string>
+    <string name="usage_compound_percent">Использование: сложные проценты &lt;сумма&gt; &lt;ставка%&gt; [время] [помесячно/посуточно/годовая]</string>
+    <string name="usage_monthly">Использование: месячный доход &lt;сумма&gt; [рабочие &lt;hours&gt;]</string>
+    <string name="fallback_unknown_command">Не распознанная команда. Поддерживаемые: энтропия, трафик, простые проценты, сложные проценты, месячный доход.</string>
+
+    <!-- Entropy outputs -->
+    <string name="entropy_per_symbol_bytes">Энтропия (байт): %1$s бит/символ</string>
+    <string name="entropy_total_bits_bytes">Полная энтропия (байты): %1$s бит (длина %2$d байт)</string>
+    <string name="entropy_per_symbol_codepoints">Энтропия (символы): %1$s бит/символ</string>
+    <string name="entropy_total_bits_codepoints">Полная энтропия (символы): %1$s бит (длина %2$d символов)</string>
+    <string name="entropy_strength">Оценка силы: %1$s</string>
+
+    <string name="entropy_label_weak">Слабо</string>
+    <string name="entropy_label_acceptable">Приемлемо</string>
+    <string name="entropy_label_normal">Нормально</string>
+    <string name="entropy_label_strong">Сильно</string>
+
+    <!-- Traffic outputs -->
+    <string name="traffic_input_approx">%1$s ≈ %2$s / мес</string>
+    <string name="traffic_per_day">В день: %1$s</string>
+    <string name="traffic_per_hour">В час: %1$s</string>
+    <string name="traffic_per_min">В минуту: %1$s</string>
+    <string name="traffic_per_sec">Секунда / скорость: %1$s</string>
+
+    <!-- Simple percent outputs -->
+    <string name="simple_percent_header">Простой процент:</string>
+    <string name="simple_percent_principal">Вложено: %1$s</string>
+    <string name="simple_percent_rate">Годовая ставка: %1$s%%</string>
+    <string name="simple_percent_period">Период: %1$s лет</string>
+    <string name="simple_percent_total">Итого через период: %1$s (прибыль %2$s)</string>
+    <string name="simple_percent_yearly">Прибыль в год (средн.): %1$s</string>
+    <string name="simple_percent_month_day_hour">в месяц: %1$s, в день: %2$s, в час: %3$s</string>
+
+    <!-- Compound percent outputs -->
+    <string name="compound_percent_header">Сложные проценты (%1$s):</string>
+    <string name="compound_percent_principal">Вложено: %1$s</string>
+    <string name="compound_percent_rate">Годовая ставка: %1$s%%</string>
+    <string name="compound_percent_period">Период: %1$s лет</string>
+    <string name="compound_percent_total">Итоговая сумма: %1$s (прибыль %2$s)</string>
+    <string name="compound_percent_avg_year">Средняя прибыль в год: %1$s</string>
+    <string name="compound_percent_month_day_hour">в месяц: %1$s, в день: %2$s, в час: %3$s</string>
+
+    <!-- Monthly conversion -->
+    <string name="monthly_header">Перевод месячной суммы:</string>
+    <string name="monthly_amount">Месячная сумма: %1$s</string>
+    <string name="monthly_year">Год: %1$s</string>
+    <string name="monthly_day">День (30d): %1$s</string>
+    <string name="monthly_hour_24">В час (24/сут): %1$s</string>
+    <string name="monthly_hour_work">В час (рабочие %1$d): %2$s</string>
+        </string-array>
 </resources>
