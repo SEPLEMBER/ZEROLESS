@@ -195,5 +195,5 @@
     <string name="monthly_hour_work">В час (рабочие %1$d): %2$s</string>
 
     <string name="welcome_messagen">Offline Assistant — режим оффлайн. Введите команду (напр.: "простые проценты 100000 7% 3 года")</string>
-
+    <string name="cmd_entropy_prefix">энтроп</string>
 </resources>
