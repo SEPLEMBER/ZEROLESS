@@ -1,7 +1,10 @@
 package com.nemesis.droidcrypt
 
+import android.content.Intent
 import android.graphics.Typeface
+import android.net.Uri
 import android.os.Bundle
+import android.provider.Settings
 import android.text.Editable
 import android.text.InputType
 import android.text.method.ScrollingMovementMethod
@@ -110,7 +113,140 @@ class VprActivity : AppCompatActivity() {
         val cmd = commandRaw.trim()
         val lower = cmd.lowercase()
 
-        // --- Entropy command (already present, preserved behavior)
+        // --------------------
+        // help / справка
+        // --------------------
+        if (lower.contains("справк") || lower == "help" || lower.contains("помощ")) {
+            return listOf(
+                "Поддерживаемые команды (примеры):",
+                " - энтроп/энтропия <текст>        — посчитать энтропию",
+                " - трафик 5gb                     — разделить трафик по дням/часам/сек",
+                " - простые проценты 100000 7% 3 года",
+                " - сложные проценты 100000 7% 3 года помесячно",
+                " - месячный доход 120000 рабочие 8",
+                " - ипотек/кредит 3000000 9% 15 лет [первые 12] — платёж и первые N мес амортизации",
+                " - инфляц 100000 8% 3 года        — инфляция / эквивалент",
+                " - налог 100000 13%               — налог и чистая сумма",
+                " - roi 50000 80000                — ROI (инвестиция, итоговая сумма)",
+                " - амортиз 200000 5 лет           — линейная амортизация (год/мес)",
+                " - окупаемость 500000 20000/мес   — месяцы до окупаемости",
+                " - терминал                       — попытка открыть com.example.app",
+                " - сравн цен <название цена ...>  — сравнить до 10 позиций",
+                " - настройки                      — подсказка: введите 114 или 411"
+            )
+        }
+
+        // --------------------
+        // TERMINAL — open package com.example.app (runs on main thread)
+        // --------------------
+        if (lower.contains("терминал") || lower.contains("термин")) {
+            // Try to launch package com.example.app
+            val pkg = "com.example.app"
+            return try {
+                withContext(Dispatchers.Main) {
+                    val intent = packageManager.getLaunchIntentForPackage(pkg)
+                    if (intent != null) {
+                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        startActivity(intent)
+                        // Inform user
+                    } else {
+                        // can't start
+                    }
+                }
+                listOf("Пытаюсь открыть терминал (пакет $pkg). Если приложение установлено — оно запустится.")
+            } catch (t: Throwable) {
+                listOf("Не удалось запустить $pkg: ${t.message ?: t::class.java.simpleName}")
+            }
+        }
+
+        // --------------------
+        // SETTINGS prompt / 114 / 411
+        // --------------------
+        if (lower.contains("настрой")) {
+            return listOf(
+                "Введите 114, если хотите попасть в системные настройки.",
+                "Введите 411, если хотите попасть в настройки приложения."
+            )
+        }
+        // open system settings if user typed exactly "114"
+        if (cmd == "114") {
+            return try {
+                withContext(Dispatchers.Main) {
+                    val intent = Intent(Settings.ACTION_SETTINGS)
+                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    startActivity(intent)
+                }
+                listOf("Открываю системные настройки...")
+            } catch (t: Throwable) {
+                listOf("Не удалось открыть системные настройки: ${t.message ?: t::class.java.simpleName}")
+            }
+        }
+        // open app-specific settings if user typed exactly "411"
+        if (cmd == "411") {
+            return try {
+                withContext(Dispatchers.Main) {
+                    val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                    intent.data = Uri.fromParts("package", packageName, null)
+                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    startActivity(intent)
+                }
+                listOf("Открываю настройки приложения...")
+            } catch (t: Throwable) {
+                listOf("Не удалось открыть настройки приложения: ${t.message ?: t::class.java.simpleName}")
+            }
+        }
+
+        // --------------------
+        // Compare prices: "сравн цен ..." up to 10 items
+        // --------------------
+        val compareRoot = Regex("""(?i)\bсравн\w*\b""").find(lower)
+        if (compareRoot != null && (lower.contains("цен") || lower.contains("цена") || lower.contains("цены"))) {
+            // find numbers and take name as the substring immediately preceding each number (up to previous number or root)
+            val numberRegex = Regex("""(\d+(?:[.,]\d+)?)""")
+            val matches = numberRegex.findAll(cmd).toList()
+            if (matches.size < 2) return listOf("Недостаточно цен для сравнения. Пример: 'сравн цен яблоки 120 апельсины 140'")
+            val rootEnd = compareRoot.range.last + 1
+            val stopWords = setOf("сравн", "сравнить", "сравнц", "цен", "цена", "цены", "цену")
+            val items = mutableListOf<Pair<String, BigDecimal>>()
+            val limit = matches.size.coerceAtMost(10)
+            for (i in 0 until limit) {
+                val m = matches[i]
+                val start = m.range.first
+                val prevEnd = if (i == 0) rootEnd else matches[i - 1].range.last + 1
+                val labelRaw = try {
+                    cmd.substring(prevEnd, start).trim()
+                } catch (e: Exception) {
+                    ""
+                }
+                // sanitize label: remove punctuation, split, drop stop words, take last up to 3 tokens
+                val tokens = labelRaw.split(Regex("\\s+")).map { it.trim().trim(',', ';', ':', '.', '\"', '\'') }
+                    .filter { it.isNotEmpty() && it.lowercase() !in stopWords }
+                val name = if (tokens.isEmpty()) "item${i + 1}" else tokens.takeLast(3).joinToString(" ")
+                val priceStr = m.groupValues[1].replace(',', '.')
+                val price = try { BigDecimal(priceStr) } catch (e: Exception) { BigDecimal.ZERO }
+                items.add(name to price)
+            }
+            if (items.size < 2) return listOf("Недостаточно пар название+цена для сравнения.")
+            // sort by price ascending
+            val sorted = items.sortedBy { it.second }
+            val cheapest = sorted.first().second
+            val outputs = mutableListOf<String>()
+            outputs.add("Товары по цене (по возрастанию):")
+            for ((idx, pair) in sorted.withIndex()) {
+                val name = pair.first
+                val price = pair.second.setScale(2, RoundingMode.HALF_UP)
+                val diffPercent = if (cheapest.compareTo(BigDecimal.ZERO) == 0) BigDecimal.ZERO
+                else pair.second.subtract(cheapest).divide(cheapest, 6, RoundingMode.HALF_UP).multiply(BigDecimal(100))
+                val diffPercentStr = diffPercent.setScale(2, RoundingMode.HALF_UP).toPlainString()
+                val extra = if (idx == 0) "" else " (+$diffPercentStr%)"
+                outputs.add("${idx + 1}) $name — ${price.toPlainString()} ₽$extra")
+            }
+            return outputs
+        }
+
+        // --------------------
+        // Entropy command
+        // --------------------
         val prefix = getString(R.string.cmd_entropy_prefix)
         val entropyPattern = Regex("""(?i)\b\w*${Regex.escape(prefix)}\w*\b[ :]*([\s\S]+)""")
         val entMatch = entropyPattern.find(cmd)
@@ -134,81 +270,85 @@ class VprActivity : AppCompatActivity() {
             )
         }
 
-        // --- Mortgage / Loan (ипотека / кредит)
-        // Accept words with root "ипотек" or "кредит" (any declension), capture trailing payload
+        // --------------------
+        // Mortgage / Loan (ипотека / кредит) with optional amortization table
+        // --------------------
         val mortgagePattern = Regex("""(?i)\b\w*(ипотек|кредит)\w*\b[ :]*([\s\S]+)""")
         val mortMatch = mortgagePattern.find(cmd)
         if (mortMatch != null) {
             val payload = mortMatch.groupValues.getOrNull(2)?.trim() ?: ""
-            // parse principal, rate, term
+            // parse principal
             val amountMatch = Regex("""(\d+(?:[.,]\d+)?)""").find(payload)
-            if (amountMatch == null) return listOf("Использование: ипотека <сумма> <ставка%> <срок (лет|месяцев)>")
+            if (amountMatch == null) return listOf("Использование: ипотека <сумма> <ставка%> <срок (лет|месяцев)> [первые N]")
             val principal = try {
                 BigDecimal(amountMatch.groupValues[1].replace(',', '.'))
             } catch (e: Exception) {
                 return listOf("Невалидная сумма: ${amountMatch.groupValues[1]}")
             }
+
+            // rate
             val rateMatch = Regex("""(\d+(?:[.,]\d+)?)\s*%""").find(payload)
             val annualRate = if (rateMatch != null) parsePercent(rateMatch.groupValues[0]) else BigDecimal.ZERO
-            // time: parseTimeToYears handles many variants; give payload to it
+
+            // time -> years
             val years = parseTimeToYears(payload)
-            // months
             val months = (years * 12.0).toInt().coerceAtLeast(1)
-            // monthly annuity payment
-            val rMonthDouble = annualRate.toDouble() / 12.0
-            val n = months.toDouble()
-            val principalDouble = principal.toDouble()
-            val monthlyPaymentDouble = if (rMonthDouble <= 0.0) principalDouble / n else {
-                val factor = (1.0 + rMonthDouble).pow(n)
-                principalDouble * (rMonthDouble * factor) / (factor - 1.0)
-            }
-            val monthlyPayment = BigDecimal.valueOf(monthlyPaymentDouble).setScale(2, RoundingMode.HALF_UP)
-            val totalPayment = monthlyPayment.multiply(BigDecimal.valueOf(months.toLong()))
+
+            // monthly payment (use BigDecimal where possible)
+            val monthlyPaymentBD = calculateMonthlyAnnuity(principal, annualRate, months)
+            val totalPayment = monthlyPaymentBD.multiply(BigDecimal.valueOf(months.toLong()))
             val totalInterest = totalPayment.subtract(principal)
 
-            // hourly/day breakdown of payment
+            // averages
             val paymentPerYear = if (years > 0.0) totalInterest.divide(BigDecimal.valueOf(years), 10, RoundingMode.HALF_UP) else BigDecimal.ZERO
             val perMonthAvg = paymentPerYear.divide(BigDecimal(12), 10, RoundingMode.HALF_UP)
             val perDayAvg = paymentPerYear.divide(BigDecimal(365), 10, RoundingMode.HALF_UP)
             val perHourAvg = perDayAvg.divide(BigDecimal(24), 10, RoundingMode.HALF_UP)
-
             val ratePercentStr = (annualRate.multiply(BigDecimal(100))).setScale(4, RoundingMode.HALF_UP).toPlainString()
-            return listOf(
-                "Кредит/Ипотека: вложено ${principal.setScale(2, RoundingMode.HALF_UP)}",
-                "Ставка (годовая): $ratePercentStr%",
-                "Срок: ${"%.4f".format(years)} лет (${months} мес)",
-                "Ежемесячный платёж (аннуитет): ${monthlyPayment.setScale(2, RoundingMode.HALF_UP)}",
-                "Общая выплата: ${totalPayment.setScale(2, RoundingMode.HALF_UP)} (переплата ${totalInterest.setScale(2, RoundingMode.HALF_UP)})",
-                "Средняя переплата в год: ${paymentPerYear.setScale(2, RoundingMode.HALF_UP)}, в месяц: ${perMonthAvg.setScale(2, RoundingMode.HALF_UP)}, в день: ${perDayAvg.setScale(4, RoundingMode.HALF_UP)}, в час: ${perHourAvg.setScale(6, RoundingMode.HALF_UP)}"
-            )
+
+            // check if user requested "первые N" or "табл N" or "первыеN"
+            val firstN = findRequestedFirstN(payload) // returns Int? or null
+            val outputs = mutableListOf<String>()
+            outputs.add("Кредит/Ипотека: сумма ${principal.setScale(2, RoundingMode.HALF_UP)}")
+            outputs.add("Ставка (годовая): $ratePercentStr%")
+            outputs.add("Срок: ${"%.4f".format(years)} лет (${months} мес)")
+            outputs.add("Ежемесячный платёж (аннуитет): ${monthlyPaymentBD.setScale(2, RoundingMode.HALF_UP)}")
+            outputs.add("Общая выплата: ${totalPayment.setScale(2, RoundingMode.HALF_UP)} (переплата ${totalInterest.setScale(2, RoundingMode.HALF_UP)})")
+            outputs.add("Средняя переплата: в год ${paymentPerYear.setScale(2, RoundingMode.HALF_UP)}, в месяц ${perMonthAvg.setScale(2, RoundingMode.HALF_UP)}, в день ${perDayAvg.setScale(4, RoundingMode.HALF_UP)}, в час ${perHourAvg.setScale(6, RoundingMode.HALF_UP)}")
+
+            if (firstN != null && firstN > 0) {
+                // produce amortization rows (first N months), cap to reasonable max
+                val cap = firstN.coerceAtMost(240).coerceAtMost(months)
+                outputs.add("Первые $cap месяцев амортизации (платёж, проценты, погашение тела, остаток):")
+                outputs.addAll(generateAmortizationRows(principal, annualRate, monthlyPaymentBD, months, cap))
+                if (cap < months) outputs.add("(Показаны первые $cap из $months месяцев)")
+            }
+
+            return outputs
         }
 
-        // --- Inflation (инфляция)
-        // Accept root "инфл" or "инфляц" to match different forms
+        // --------------------
+        // Inflation (инфляц)
+        // --------------------
         val inflationPattern = Regex("""(?i)\b\w*(инфл|инфляц)\w*\b[ :]*([\s\S]+)""")
         val inflMatch = inflationPattern.find(cmd)
         if (inflMatch != null) {
             val payload = inflMatch.groupValues.getOrNull(2)?.trim() ?: ""
-            // find amount (optional), rate %, time
             val amountMatch = Regex("""(\d+(?:[.,]\d+)?)""").find(payload)
             val amount = if (amountMatch != null) {
                 try {
                     BigDecimal(amountMatch.groupValues[1].replace(',', '.'))
-                } catch (e: Exception) {
-                    BigDecimal.ZERO
-                }
+                } catch (e: Exception) { BigDecimal.ZERO }
             } else BigDecimal.ZERO
 
             val rateMatch = Regex("""(\d+(?:[.,]\d+)?)\s*%""").find(payload)
             val annualRate = if (rateMatch != null) parsePercent(rateMatch.groupValues[0]) else BigDecimal.ZERO
             val years = parseTimeToYears(payload)
 
-            // compute future value and present value equivalents
             val factor = (1.0 + annualRate.toDouble()).pow(years)
             val futureValue = BigDecimal.valueOf(amount.toDouble() * factor).setScale(2, RoundingMode.HALF_UP)
             val presentEquivalent = if (factor != 0.0) BigDecimal.valueOf(amount.toDouble() / factor).setScale(2, RoundingMode.HALF_UP) else BigDecimal.ZERO
 
-            // hourly/daily rates from annual
             val annualDouble = annualRate.toDouble()
             val perDayRate = (1.0 + annualDouble).pow(1.0 / 365.0) - 1.0
             val perHourRate = (1.0 + annualDouble).pow(1.0 / (365.0 * 24.0)) - 1.0
@@ -216,7 +356,6 @@ class VprActivity : AppCompatActivity() {
             val ratePercentStr = (annualRate.multiply(BigDecimal(100))).setScale(4, RoundingMode.HALF_UP).toPlainString()
             val perDayPercent = String.format("%.6f", perDayRate * 100.0)
             val perHourPercent = String.format("%.8f", perHourRate * 100.0)
-
             val amountStr = if (amount > BigDecimal.ZERO) amount.setScale(2, RoundingMode.HALF_UP).toPlainString() else "—"
 
             val results = mutableListOf<String>()
@@ -225,13 +364,85 @@ class VprActivity : AppCompatActivity() {
                 results.add("Сейчас: $amountStr → Через период (номинал): ${futureValue.toPlainString()}")
                 results.add("Эквивалент в сегодняшних деньгах: ${presentEquivalent.toPlainString()}")
             } else {
-                results.add("Сумма не указана — можно задать: 'инфляция 100000 8% 3 года'")
+                results.add("Сумма не указана — пример: 'инфляция 100000 8% 3 года'")
             }
             results.add("Приведённые ставки: в день ≈ $perDayPercent%, в час ≈ $perHourPercent%")
             return results
         }
 
-        // --- Traffic command (existing)
+        // --------------------
+        // Tax (налог, НДФЛ)
+        // --------------------
+        if (lower.contains("налог") || lower.contains("ндфл")) {
+            val numMatch = Regex("""(\d+(?:[.,]\d+)?)""").find(cmd)
+            if (numMatch == null) return listOf("Использование: налог <сумма> [ставка%]")
+            val amount = try { BigDecimal(numMatch.groupValues[1].replace(',', '.')) } catch (e: Exception) { return listOf("Невалидная сумма") }
+            val rateMatch = Regex("""(\d+(?:[.,]\d+)?)\s*%""").find(cmd)
+            val rate = if (rateMatch != null) parsePercent(rateMatch.groupValues[0]) else BigDecimal("0.13") // default 13%
+            val tax = amount.multiply(rate).setScale(2, RoundingMode.HALF_UP)
+            val net = amount.subtract(tax).setScale(2, RoundingMode.HALF_UP)
+            return listOf("Сумма: ${amount.setScale(2, RoundingMode.HALF_UP)}", "Налог: ${tax.toPlainString()}", "После налога: ${net.toPlainString()}")
+        }
+
+        // --------------------
+        // ROI / инвестиции / окупаемость
+        // --------------------
+        if (lower.contains("roi") || lower.contains("окупаем") || lower.contains("инвест")) {
+            val nums = Regex("""(\d+(?:[.,]\d+)?)""").findAll(cmd).map { it.groupValues[1].replace(',', '.') }.toList()
+            if (nums.isEmpty()) return listOf("Использование: roi <вложено> <итоговая сумма>  — или 'инвест 50000 прибыль 15000'")
+            // if contains 'прибыл' treat second as profit
+            if (nums.size >= 2 && (lower.contains("прибыл") || lower.contains("прибыль"))) {
+                val invested = try { BigDecimal(nums[0]) } catch (e: Exception) { BigDecimal.ZERO }
+                val profit = try { BigDecimal(nums[1]) } catch (e: Exception) { BigDecimal.ZERO }
+                val roi = if (invested > BigDecimal.ZERO) profit.divide(invested, 6, RoundingMode.HALF_UP) else BigDecimal.ZERO
+                return listOf("Вложено: ${invested.setScale(2, RoundingMode.HALF_UP)}", "Прибыль: ${profit.setScale(2, RoundingMode.HALF_UP)}", "ROI: ${(roi.multiply(BigDecimal(100))).setScale(4, RoundingMode.HALF_UP)}%")
+            } else if (nums.size >= 2) {
+                // treat as invested and final amount
+                val invested = try { BigDecimal(nums[0]) } catch (e: Exception) { BigDecimal.ZERO }
+                val final = try { BigDecimal(nums[1]) } catch (e: Exception) { BigDecimal.ZERO }
+                val profit = final.subtract(invested)
+                val roi = if (invested > BigDecimal.ZERO) profit.divide(invested, 6, RoundingMode.HALF_UP) else BigDecimal.ZERO
+                return listOf("Вложено: ${invested.setScale(2, RoundingMode.HALF_UP)}", "Итог: ${final.setScale(2, RoundingMode.HALF_UP)}", "Прибыль: ${profit.setScale(2, RoundingMode.HALF_UP)}", "ROI: ${(roi.multiply(BigDecimal(100))).setScale(4, RoundingMode.HALF_UP)}%")
+            } else {
+                return listOf("Недостаточно данных. Пример: 'roi 50000 65000' или 'инвест 50000 прибыль 15000'")
+            }
+        }
+
+        // --------------------
+        // Linear amortization (амортизация)
+        // --------------------
+        if (lower.contains("амортиз") || lower.contains("амортизац")) {
+            val nums = Regex("""(\d+(?:[.,]\d+)?)""").findAll(cmd).map { it.groupValues[1].replace(',', '.') }.toList()
+            if (nums.isEmpty()) return listOf("Использование: амортиз <стоимость> <срок в годах> [ликв. стоимость]")
+            val cost = try { BigDecimal(nums[0]) } catch (e: Exception) { BigDecimal.ZERO }
+            val years = if (nums.size >= 2) try { nums[1].toDouble() } catch (e: Exception) { 1.0 } else 1.0
+            val salvage = if (nums.size >= 3) try { BigDecimal(nums[2]) } catch (e: Exception) { BigDecimal.ZERO } else BigDecimal.ZERO
+            val usefulYears = if (years <= 0.0) 1.0 else years
+            val annual = (cost.subtract(salvage)).divide(BigDecimal.valueOf(usefulYears.toLong()), 10, RoundingMode.HALF_UP)
+            val monthly = annual.divide(BigDecimal(12), 10, RoundingMode.HALF_UP)
+            return listOf("Амортизация (линейная): стоимость ${cost.setScale(2, RoundingMode.HALF_UP)}", "Срок (лет): ${"%.4f".format(usefulYears)}", "Ежегодно: ${annual.setScale(2, RoundingMode.HALF_UP)}", "Ежемесячно: ${monthly.setScale(2, RoundingMode.HALF_UP)}")
+        }
+
+        // --------------------
+        // Payback / окупаемость (в мес/годах)
+        // --------------------
+        if (lower.contains("окупа") || lower.contains("окупаемость")) {
+            val nums = Regex("""(\d+(?:[.,]\d+)?)""").findAll(cmd).map { it.groupValues[1].replace(',', '.') }.toList()
+            if (nums.size < 2) return listOf("Использование: окупаемость <вложено> <прибыль в мес/год>")
+            val invested = try { BigDecimal(nums[0]) } catch (e: Exception) { BigDecimal.ZERO }
+            val profitNum = try { BigDecimal(nums[1]) } catch (e: Exception) { BigDecimal.ZERO }
+            // decide whether profit is monthly or yearly: check phrase
+            val profitIsAnnual = lower.contains("год") || lower.contains("в год") || lower.contains("годовых")
+            val monthlyProfit = if (profitIsAnnual) profitNum.divide(BigDecimal(12), 10, RoundingMode.HALF_UP) else profitNum
+            if (monthlyProfit <= BigDecimal.ZERO) return listOf("Невалидная прибыль для расчёта окупаемости")
+            val months = invested.divide(monthlyProfit, 4, RoundingMode.HALF_UP)
+            val years = months.divide(BigDecimal(12), 4, RoundingMode.HALF_UP)
+            return listOf("Вложено: ${invested.setScale(2, RoundingMode.HALF_UP)}", "Ежемесячная прибыль: ${monthlyProfit.setScale(2, RoundingMode.HALF_UP)}", "Окупаемость: ${months.setScale(2, RoundingMode.HALF_UP)} мес (~${years.setScale(2, RoundingMode.HALF_UP)} лет)")
+        }
+
+        // --------------------
+        // Traffic command (existing)
+        // --------------------
         if (lower.contains("трафик") || Regex("""\d+\s*(gb|гб|mb|мб|kb|кб|b|байт)""").containsMatchIn(lower)) {
             val m = Regex("""(\d+(?:[.,]\d+)?)\s*(gb|гб|mb|мб|kb|кб|b|байт)?""", RegexOption.IGNORE_CASE).find(lower)
             if (m == null) return listOf(getString(R.string.usage_traffic))
@@ -249,7 +460,9 @@ class VprActivity : AppCompatActivity() {
             )
         }
 
-        // --- Simple interest
+        // --------------------
+        // Simple interest
+        // --------------------
         if (lower.contains("прост") && lower.contains("процент")) {
             val numMatch = Regex("""(\d+(?:[.,]\d+)?)""").find(cmd)
             if (numMatch == null) return listOf(getString(R.string.usage_simple_percent))
@@ -269,7 +482,9 @@ class VprActivity : AppCompatActivity() {
             return listOfNotNull(simpleInterestReport(principal, rate, timeYears))
         }
 
-        // --- Compound interest
+        // --------------------
+        // Compound interest
+        // --------------------
         if (lower.contains("слож") && lower.contains("процент")) {
             val numMatch = Regex("""(\d+(?:[.,]\d+)?)""").find(cmd)
             if (numMatch == null) return listOf(getString(R.string.usage_compound_percent))
@@ -290,7 +505,9 @@ class VprActivity : AppCompatActivity() {
             return listOfNotNull(compoundInterestReport(principal, rate, timeYears, capitalization))
         }
 
-        // --- Monthly conversion
+        // --------------------
+        // Monthly conversion
+        // --------------------
         if (lower.contains("месяч") && (lower.contains("доход") || lower.contains("зарп") || lower.contains("расход"))) {
             val numMatch = Regex("""(\d+(?:[.,]\d+)?)""").find(cmd)
             if (numMatch == null) return listOf(getString(R.string.usage_monthly))
@@ -306,6 +523,79 @@ class VprActivity : AppCompatActivity() {
 
         // fallback
         return listOf(getString(R.string.fallback_unknown_command))
+    }
+
+    // --------------------
+    // Helpers: mortgage amortization generator
+    // --------------------
+    private fun calculateMonthlyAnnuity(principal: BigDecimal, annualRate: BigDecimal, months: Int): BigDecimal {
+        if (months <= 0) return principal
+        val r = annualRate // BigDecimal fractional (e.g., 0.07)
+        if (r == BigDecimal.ZERO) {
+            return principal.divide(BigDecimal.valueOf(months.toLong()), 10, RoundingMode.HALF_UP)
+        }
+        // monthly rate as BigDecimal
+        val rMonth = r.divide(BigDecimal(12), 20, RoundingMode.HALF_UP)
+        // formula P * (r(1+r)^n) / ((1+r)^n - 1)
+        val one = BigDecimal.ONE
+        // compute (1+r)^n using Double (safe enough) -> convert to BigDecimal
+        val rMonthDouble = rMonth.toDouble()
+        val factor = (1.0 + rMonthDouble).pow(months.toDouble())
+        val numerator = principal.toDouble() * (rMonthDouble * factor)
+        val denominator = (factor - 1.0)
+        val payment = if (denominator == 0.0) principal.toDouble() / months.toDouble() else numerator / denominator
+        return BigDecimal.valueOf(payment).setScale(10, RoundingMode.HALF_UP)
+    }
+
+    private fun generateAmortizationRows(
+        principalInput: BigDecimal,
+        annualRate: BigDecimal,
+        monthlyPayment: BigDecimal,
+        totalMonths: Int,
+        showFirst: Int
+    ): List<String> {
+        val rows = mutableListOf<String>()
+        var remaining = principalInput.setScale(10, RoundingMode.HALF_UP)
+        val rMonthBD = annualRate.divide(BigDecimal(12), 20, RoundingMode.HALF_UP)
+        val maxShow = showFirst.coerceAtMost(totalMonths)
+        for (i in 1..maxShow) {
+            val interest = remaining.multiply(rMonthBD).setScale(10, RoundingMode.HALF_UP)
+            var principalPaid = monthlyPayment.subtract(interest).setScale(10, RoundingMode.HALF_UP)
+            // in last payment adjust rounding issues
+            if (i == totalMonths) {
+                principalPaid = remaining
+            }
+            remaining = remaining.subtract(principalPaid).setScale(10, RoundingMode.HALF_UP)
+            rows.add(String.format("Мес %d: платёж %s, проценты %s, погашение %s, остаток %s",
+                i,
+                monthlyPayment.setScale(2, RoundingMode.HALF_UP).toPlainString(),
+                interest.setScale(2, RoundingMode.HALF_UP).toPlainString(),
+                principalPaid.setScale(2, RoundingMode.HALF_UP).toPlainString(),
+                remaining.max(BigDecimal.ZERO).setScale(2, RoundingMode.HALF_UP).toPlainString()
+            ))
+            if (remaining <= BigDecimal.ZERO) break
+        }
+        return rows
+    }
+
+    // Helper to find "первые N" or "табл N" pattern in payload
+    private fun findRequestedFirstN(payload: String): Int? {
+        // look for "первые N", "первыеN", "табл N", "таблица N"
+        val patterns = listOf(
+            Regex("""первые\s*(\d{1,3})""", RegexOption.IGNORE_CASE),
+            Regex("""табл(?:\.)?\s*(\d{1,3})""", RegexOption.IGNORE_CASE),
+            Regex("""таблица\s*(\d{1,3})""", RegexOption.IGNORE_CASE),
+            Regex("""показать\s*(\d{1,3})\s*месяц""", RegexOption.IGNORE_CASE),
+            Regex("""(\d{1,3})\s*первых\s*месяцев""", RegexOption.IGNORE_CASE)
+        )
+        for (pat in patterns) {
+            val m = pat.find(payload)
+            if (m != null) {
+                val n = m.groupValues.getOrNull(1)?.toIntOrNull()
+                if (n != null && n > 0) return n
+            }
+        }
+        return null
     }
 
     // --------------------
