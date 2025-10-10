@@ -665,13 +665,13 @@ class VprActivity : AppCompatActivity() {
                 return listOfNotNull(moneyPerDaysReport(amount, days, workHours))
             }
 
-            // if it's a monthly income (not budget), use monthlyToRatesReport
+            // if it's a monthly income (not budget), use monthlyIncomeReport
             if (lower.contains("месяч") && (lower.contains("доход") || lower.contains("зарп") || lower.contains("расход"))) {
-                return listOfNotNull(monthlyToRatesReport(amount, workHours))
+                return listOfNotNull(monthlyIncomeReport(amount, workHours))
             }
 
             // fallback: monthly conversion semantics assume this is income if "месяч" phrase present, else present budgets as monthly->rates
-            return listOfNotNull(monthlyToRatesReport(amount, workHours))
+            return listOfNotNull(monthlyIncomeReport(amount, workHours))
         }
 
         // fallback
@@ -911,11 +911,11 @@ class VprActivity : AppCompatActivity() {
     }
 
     /**
-     * monthlyToRatesReport:
+     * monthlyIncomeReport:
      * Используется для команды "месячный доход X" — превращает месячный доход в:
      * год, неделя (условно 7/30 части месяца), день (30-дн), час, рабочий час.
      */
-    private fun monthlyToRatesReport(monthly: BigDecimal, workingHours: Int): String {
+    private fun monthlyIncomeReport(monthly: BigDecimal, workingHours: Int): String {
         // assume month ~ 30 days for straightforward conversion
         val perMonth = monthly.setScale(2, RoundingMode.HALF_UP)
         val perYear = monthly.multiply(BigDecimal(12)).setScale(2, RoundingMode.HALF_UP)
@@ -932,6 +932,29 @@ class VprActivity : AppCompatActivity() {
             append("В день (30д/мес): ${perDay}").append("\n")
             append("В час (24ч): ${perHour24}").append("\n")
             append("За рабочий час (рабочие $workingHours): ${perWorkHour}")
+        }
+    }
+
+    /**
+     * monthlyConversionReport:
+     * Переименованный дубликат — сохранён, чтобы не потерять вариант расчётов,
+     * если где-то понадобится альтернативный формат вывода.
+     * (Этот метод сейчас не вызывается напрямую, но оставлен специально.)
+     */
+    private fun monthlyConversionReport(monthly: BigDecimal, workingHours: Int): String {
+        val yearly = monthly.multiply(BigDecimal(12))
+        val perDay = monthly.divide(BigDecimal(30), 10, RoundingMode.HALF_UP)
+        val per24Hour = perDay.divide(BigDecimal(24), 10, RoundingMode.HALF_UP)
+        val perWorkHour = if (workingHours > 0) perDay.divide(BigDecimal(workingHours), 10, RoundingMode.HALF_UP) else BigDecimal.ZERO
+        val perWeek = monthly.multiply(BigDecimal(7)).divide(BigDecimal(30), 10, RoundingMode.HALF_UP)
+        return buildString {
+            append(getString(R.string.monthly_header)).append("\n")
+            append(getString(R.string.monthly_amount, monthly.setScale(2, RoundingMode.HALF_UP))).append("\n")
+            append(getString(R.string.monthly_year, yearly.setScale(2, RoundingMode.HALF_UP))).append("\n")
+            append(getString(R.string.monthly_day, perDay.setScale(2, RoundingMode.HALF_UP))).append("\n")
+            append(getString(R.string.monthly_hour_24, per24Hour.setScale(2, RoundingMode.HALF_UP))).append("\n")
+            append(getString(R.string.monthly_hour_work, workingHours, perWorkHour.setScale(2, RoundingMode.HALF_UP))).append("\n")
+            append("В неделю (≈): ${perWeek.setScale(2, RoundingMode.HALF_UP)}")
         }
     }
 
@@ -1126,23 +1149,6 @@ class VprActivity : AppCompatActivity() {
                 perMonth.setScale(2, RoundingMode.HALF_UP),
                 perDay.setScale(4, RoundingMode.HALF_UP),
                 perHour.setScale(6, RoundingMode.HALF_UP)))
-        }
-    }
-
-    private fun monthlyToRatesReport(monthly: BigDecimal, workingHours: Int): String {
-        val yearly = monthly.multiply(BigDecimal(12))
-        val perDay = monthly.divide(BigDecimal(30), 10, RoundingMode.HALF_UP)
-        val per24Hour = perDay.divide(BigDecimal(24), 10, RoundingMode.HALF_UP)
-        val perWorkHour = if (workingHours > 0) perDay.divide(BigDecimal(workingHours), 10, RoundingMode.HALF_UP) else BigDecimal.ZERO
-        val perWeek = monthly.multiply(BigDecimal(7)).divide(BigDecimal(30), 10, RoundingMode.HALF_UP)
-        return buildString {
-            append(getString(R.string.monthly_header)).append("\n")
-            append(getString(R.string.monthly_amount, monthly.setScale(2, RoundingMode.HALF_UP))).append("\n")
-            append(getString(R.string.monthly_year, yearly.setScale(2, RoundingMode.HALF_UP))).append("\n")
-            append(getString(R.string.monthly_day, perDay.setScale(2, RoundingMode.HALF_UP))).append("\n")
-            append(getString(R.string.monthly_hour_24, per24Hour.setScale(2, RoundingMode.HALF_UP))).append("\n")
-            append(getString(R.string.monthly_hour_work, workingHours, perWorkHour.setScale(2, RoundingMode.HALF_UP))).append("\n")
-            append("В неделю (≈): ${perWeek.setScale(2, RoundingMode.HALF_UP)}")
         }
     }
 
