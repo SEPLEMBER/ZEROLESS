@@ -27,7 +27,7 @@ class EggActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_reg)
+        setContentView(R.layout.activity_egg)
 
         digitViews = listOf(
             findViewById(R.id.d1),
