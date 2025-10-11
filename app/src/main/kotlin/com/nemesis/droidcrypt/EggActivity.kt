@@ -10,7 +10,7 @@ import android.widget.Button
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 
-class EggActivity.kt : AppCompatActivity() {
+class EggActivity : AppCompatActivity() {
 
     private val PREFS = "app_prefs"
     private val KEY_PIN = "pin_code"
@@ -134,7 +134,7 @@ class EggActivity.kt : AppCompatActivity() {
 
         // Через 2 секунды переходим в StreetFoodActivity
         Handler(Looper.getMainLooper()).postDelayed({
-            startActivity(Intent(this@EggActivity.kt, StreetFoodActivity::class.java))
+            startActivity(Intent(this@EggActivity, StreetFoodActivity::class.java))
             finish()
         }, 2000L)
     }
