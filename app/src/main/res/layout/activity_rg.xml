@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RelativeLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#0A0A0A">
+
+    <!-- Центр: поле с welcome/dots/error — располагаем над клавиатурой -->
+    <LinearLayout
+        android:id="@+id/centerColumn"
+        android:orientation="vertical"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_horizontal"
+        android:layout_above="@id/keypad"
+        android:layout_marginTop="80dp"
+        android:layout_marginBottom="24dp"
+        android:paddingTop="40dp">
+
+        <TextView
+            android:id="@+id/welcomeText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text=""
+            android:textSize="20sp"
+            android:textColor="#FFFFFF"
+            android:visibility="gone"
+            android:layout_marginBottom="20dp"
+            android:shadowDx="0"
+            android:shadowDy="0"
+            android:shadowRadius="8"
+            android:shadowColor="#66FFFFFF"/>
+
+        <LinearLayout
+            android:id="@+id/dots"
+            android:orientation="horizontal"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:layout_marginBottom="12dp">
+
+            <TextView
+                android:id="@+id/d1"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:gravity="center"
+                android:text="○"
+                android:textSize="28sp"
+                android:textColor="#FFFFFF"/>
+
+            <TextView
+                android:id="@+id/d2"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:layout_marginStart="8dp"
+                android:gravity="center"
+                android:text="○"
+                android:textSize="28sp"
+                android:textColor="#FFFFFF"/>
+
+            <TextView
+                android:id="@+id/d3"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:layout_marginStart="8dp"
+                android:gravity="center"
+                android:text="○"
+                android:textSize="28sp"
+                android:textColor="#FFFFFF"/>
+
+            <TextView
+                android:id="@+id/d4"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:layout_marginStart="8dp"
+                android:gravity="center"
+                android:text="○"
+                android:textSize="28sp"
+                android:textColor="#FFFFFF"/>
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/errorText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Неверный код"
+            android:textSize="14sp"
+            android:textColor="#FF5252"
+            android:visibility="gone"/>
+    </LinearLayout>
+
+    <!-- Клавиатура: используем TableLayout (более старый API, без androidx) -->
+    <TableLayout
+        android:id="@+id/keypad"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_alignParentBottom="true"
+        android:layout_centerHorizontal="true"
+        android:layout_marginBottom="64dp"
+        android:padding="12dp">
+
+        <TableRow>
+            <Button android:id="@+id/btn1" android:layout_width="72dp" android:layout_height="72dp" android:text="1" android:textSize="20sp"/>
+            <Button android:id="@+id/btn2" android:layout_width="72dp" android:layout_height="72dp" android:text="2" android:textSize="20sp"/>
+            <Button android:id="@+id/btn3" android:layout_width="72dp" android:layout_height="72dp" android:text="3" android:textSize="20sp"/>
+        </TableRow>
+
+        <TableRow>
+            <Button android:id="@+id/btn4" android:layout_width="72dp" android:layout_height="72dp" android:text="4" android:textSize="20sp"/>
+            <Button android:id="@+id/btn5" android:layout_width="72dp" android:layout_height="72dp" android:text="5" android:textSize="20sp"/>
+            <Button android:id="@+id/btn6" android:layout_width="72dp" android:layout_height="72dp" android:text="6" android:textSize="20sp"/>
+        </TableRow>
+
+        <TableRow>
+            <Button android:id="@+id/btn7" android:layout_width="72dp" android:layout_height="72dp" android:text="7" android:textSize="20sp"/>
+            <Button android:id="@+id/btn8" android:layout_width="72dp" android:layout_height="72dp" android:text="8" android:textSize="20sp"/>
+            <Button android:id="@+id/btn9" android:layout_width="72dp" android:layout_height="72dp" android:text="9" android:textSize="20sp"/>
+        </TableRow>
+
+        <TableRow>
+            <!-- пустая ячейка для выравнивания -->
+            <View android:layout_width="72dp" android:layout_height="72dp"/>
+            <Button android:id="@+id/btn0" android:layout_width="72dp" android:layout_height="72dp" android:text="0" android:textSize="20sp"/>
+            <Button android:id="@+id/btnDelete" android:layout_width="72dp" android:layout_height="72dp" android:text="⌫" android:textSize="18sp"/>
+        </TableRow>
+    </TableLayout>
+
+</RelativeLayout>
