@@ -89,5 +89,19 @@
             android:theme="@style/VprTheme"
             android:configChanges="orientation|screenSize" />
 
+                <activity
+            android:name=".EggActivity"
+            android:exported="false"
+            android:parentActivityName=".MainActivity"
+            android:theme="@style/EggTheme"
+            android:configChanges="orientation|screenSize" />
+
+                <activity
+            android:name=".StreetFoodActivity"
+            android:exported="false"
+            android:parentActivityName=".EggActivity"
+            android:theme="@style/StreetFoodTheme"
+            android:configChanges="orientation|screenSize" />
+
     </application>
 </manifest>
