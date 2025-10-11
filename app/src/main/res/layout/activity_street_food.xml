@@ -1,64 +1,199 @@
 <?xml version="1.0" encoding="utf-8"?>
-<RelativeLayout
-    xmlns:android="http://schemas.android.com/apk/res/android"
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:id="@+id/root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="#0A0A0A">
 
-    <!-- Центр: хардкод текст -->
-    <TextView
-        android:id="@+id/centerText"
+    <!-- Центр: поле с dots/error — располагаем в центре -->
+    <LinearLayout
+        android:id="@+id/centerColumn"
+        android:orientation="vertical"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_horizontal"
+        android:layout_centerInParent="true"
+        android:paddingHorizontal="16dp"
+        android:paddingVertical="24dp">
+
+        <LinearLayout
+            android:id="@+id/dots"
+            android:orientation="horizontal"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:layout_marginBottom="16dp">
+
+            <TextView
+                android:id="@+id/d1"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:gravity="center"
+                android:text="°"
+                android:textSize="32sp"
+                android:textColor="#00FFFF"
+                android:background="#333333"
+                android:layout_marginEnd="12dp"/>
+
+            <TextView
+                android:id="@+id/d2"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:gravity="center"
+                android:text="°"
+                android:textSize="32sp"
+                android:textColor="#00FFFF"
+                android:background="#333333"
+                android:layout_marginEnd="12dp"/>
+
+            <TextView
+                android:id="@+id/d3"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:gravity="center"
+                android:text="°"
+                android:textSize="32sp"
+                android:textColor="#00FFFF"
+                android:background="#333333"
+                android:layout_marginEnd="12dp"/>
+
+            <TextView
+                android:id="@+id/d4"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:gravity="center"
+                android:text="°"
+                android:textSize="32sp"
+                android:textColor="#00FFFF"
+                android:background="#333333"/>
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/errorText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Неверный код"
+            android:textSize="16sp"
+            android:textColor="#FF5252"
+            android:visibility="gone"/>
+    </LinearLayout>
+
+    <!-- Клавиатура: TableLayout с TextView вместо Button -->
+    <TableLayout
+        android:id="@+id/keypad"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="здесь ничего нет."
-        android:textColor="#FFFFFF"
-        android:textSize="18sp"
+        android:layout_below="@id/centerColumn"
         android:layout_centerHorizontal="true"
-        android:layout_centerVertical="true"
-        android:layout_marginBottom="80dp"/>
+        android:layout_marginTop="32dp"
+        android:padding="16dp">
 
-    <!-- Статус (над полем ввода) -->
-    <TextView
-        android:id="@+id/statusText"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text=""
-        android:textSize="14sp"
-        android:visibility="gone"
-        android:gravity="center"
-        android:layout_above="@id/bottomRow"
-        android:layout_marginStart="24dp"
-        android:layout_marginEnd="24dp"
-        android:layout_marginBottom="8dp"/>
+        <TableRow>
+            <TextView android:id="@+id/btn1" android:layout_width="80dp" android:layout_height="80dp" android:text="1" android:textSize="24sp" android:background="#808080" android:textColor="#00FFFF" android:gravity="center" android:clickable="true" android:focusable="true" android:layout_margin="8dp"/>
+            <TextView android:id="@+id/btn2" android:layout_width="80dp" android:layout_height="80dp" android:text="2" android:textSize="24sp" android:background="#808080" android:textColor="#00FFFF" android:gravity="center" android:clickable="true" android:focusable="true" android:layout_margin="8dp"/>
+            <TextView android:id="@+id/btn3" android:layout_width="80dp" android:layout_height="80dp" android:text="3" android:textSize="24sp" android:background="#808080" android:textColor="#00FFFF" android:gravity="center" android:clickable="true" android:focusable="true" android:layout_margin="8dp"/>
+        </TableRow>
 
-    <!-- Поле ввода и кнопка внизу для смены PIN -->
+        <TableRow>
+            <TextView android:id="@+id/btn4" android:layout_width="80dp" android:layout_height="80dp" android:text="4" android:textSize="24sp" android:background="#808080" android:textColor="#00FFFF" android:gravity="center" android:clickable="true" android:focusable="true" android:layout_margin="8dp"/>
+            <TextView android:id="@+id/btn5" android:layout_width="80dp" android:layout_height="80dp" android:text="5" android:textSize="24sp" android:background="#808080" android:textColor="#00FFFF" android:gravity="center" android:clickable="true" android:focusable="true" android:layout_margin="8dp"/>
+            <TextView android:id="@+id/btn6" android:layout_width="80dp" android:layout_height="80dp" android:text="6" android:textSize="24sp" android:background="#808080" android:textColor="#00FFFF" android:gravity="center" android:clickable="true" android:focusable="true" android:layout_margin="8dp"/>
+        </TableRow>
+
+        <TableRow>
+            <TextView android:id="@+id/btn7" android:layout_width="80dp" android:layout_height="80dp" android:text="7" android:textSize="24sp" android:background="#808080" android:textColor="#00FFFF" android:gravity="center" android:clickable="true" android:focusable="true" android:layout_margin="8dp"/>
+            <TextView android:id="@+id/btn8" android:layout_width="80dp" android:layout_height="80dp" android:text="8" android:textSize="24sp" android:background="#808080" android:textColor="#00FFFF" android:gravity="center" android:clickable="true" android:focusable="true" android:layout_margin="8dp"/>
+            <TextView android:id="@+id/btn9" android:layout_width="80dp" android:layout_height="80dp" android:text="9" android:textSize="24sp" android:background="#808080" android:textColor="#00FFFF" android:gravity="center" android:clickable="true" android:focusable="true" android:layout_margin="8dp"/>
+        </TableRow>
+
+        <TableRow>
+            <!-- пустая ячейка для выравнивания -->
+            <View android:layout_width="80dp" android:layout_height="80dp" android:layout_margin="8dp"/>
+            <TextView android:id="@+id/btn0" android:layout_width="80dp" android:layout_height="80dp" android:text="0" android:textSize="24sp" android:background="#808080" android:textColor="#00FFFF" android:gravity="center" android:clickable="true" android:focusable="true" android:layout_margin="8dp"/>
+            <TextView android:id="@+id/btnDelete" android:layout_width="80dp" android:layout_height="80dp" android:text="⌫" android:textSize="24sp" android:background="#808080" android:textColor="#00FFFF" android:gravity="center" android:clickable="true" android:focusable="true" android:layout_margin="8dp"/>
+        </TableRow>
+    </TableLayout>
+
+    <!-- Прогресс: overlay в центре -->
     <LinearLayout
-        android:id="@+id/bottomRow"
-        android:layout_width="match_parent"
+        android:id="@+id/progressLayout"
+        android:orientation="vertical"
+        android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:padding="12dp"
-        android:layout_alignParentBottom="true">
+        android:gravity="center"
+        android:layout_centerInParent="true"
+        android:visibility="gone">
 
-        <EditText
-            android:id="@+id/editPin"
-            android:layout_width="0dp"
+        <com.google.android.material.progressindicator.CircularProgressIndicator
+            android:id="@+id/progressBar"
+            android:layout_width="48dp"
             android:layout_height="48dp"
-            android:layout_weight="1"
-            android:inputType="number"
-            android:hint="Текущий: 5387"
-            android:maxLines="1"
-            android:textColor="#FFFFFF"
-            android:textColorHint="#AAAAAA"
-            android:padding="8dp"/>
+            app:indicatorColor="#00FFFF"
+            app:trackColor="#333333"/>
 
-        <Button
-            android:id="@+id/btnSavePin"
+        <TextView
+            android:id="@+id/progressText"
             android:layout_width="wrap_content"
-            android:layout_height="48dp"
-            android:layout_marginStart="8dp"
-            android:text="Сохранить"/>
+            android:layout_height="wrap_content"
+            android:text="В процессе..."
+            android:textSize="16sp"
+            android:textColor="#00FFFF"
+            android:layout_marginTop="8dp"/>
     </LinearLayout>
+
+    <!-- Safe UI: кнопки импорта и смены PIN, внизу -->
+    <LinearLayout
+        android:id="@+id/safeControls"
+        android:orientation="horizontal"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_alignParentBottom="true"
+        android:layout_centerHorizontal="true"
+        android:layout_marginBottom="32dp"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/btnImport"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Импорт"
+            android:textSize="20sp"
+            android:textColor="#00FFFF"
+            android:background="#808080"
+            android:padding="16dp"
+            android:clickable="true"
+            android:focusable="true"
+            android:layout_marginEnd="16dp"/>
+
+        <TextView
+            android:id="@+id/btnChangePin"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Сменить PIN"
+            android:textSize="20sp"
+            android:textColor="#00FFFF"
+            android:background="#808080"
+            android:padding="16dp"
+            android:clickable="true"
+            android:focusable="true"/>
+    </LinearLayout>
+
+    <!-- PANIC кнопка: внизу, центр -->
+    <TextView
+        android:id="@+id/btnPanic"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="PANIC"
+        android:textSize="24sp"
+        android:textColor="#00FFFF"
+        android:background="#808080"
+        android:padding="16dp"
+        android:clickable="true"
+        android:focusable="true"
+        android:layout_alignParentBottom="true"
+        android:layout_centerHorizontal="true"
+        android:layout_marginBottom="64dp"
+        android:visibility="gone"/>
 
 </RelativeLayout>
