@@ -12,7 +12,7 @@ import androidx.appcompat.app.AppCompatActivity
 
 class EggActivity : AppCompatActivity() {
 
-    private val PREFS = "app_prefs"
+    private val PREFS = "Pawstribe_prefs"
     private val KEY_PIN = "pin_code"
     private val DEFAULT_PIN = "5387"
 
