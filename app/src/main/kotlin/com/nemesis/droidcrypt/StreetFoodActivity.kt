@@ -2,6 +2,7 @@ package com.nemesis.droidcrypt
 
 import android.content.Context
 import android.content.Intent
+import android.graphics.Color
 import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
@@ -19,17 +20,15 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.lifecycleScope
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
 import java.io.InputStream
-import java.io.OutputStream
+import kotlin.coroutines.resume
 
 class StreetFoodActivity : AppCompatActivity() {
 
@@ -96,9 +95,9 @@ class StreetFoodActivity : AppCompatActivity() {
         // Предполагаем, что его нет в обновлённом XML
 
         // Настройка темы: neon cyan для текста
-        val neonCyan = 0xFF00FFFF // #00FFFF
+        val neonCyan = Color.parseColor("#00FFFF")
         dots.forEach { it.setTextColor(neonCyan) }
-        errorText.setTextColor(0xFFFF5252) // Красный для ошибок
+        errorText.setTextColor(Color.parseColor("#FF5252")) // Красный для ошибок
         panicButton.setTextColor(neonCyan)
         panicButton.text = "PANIC"
         panicButton.setOnClickListener { onPanicClick(it) }
@@ -129,7 +128,7 @@ class StreetFoodActivity : AppCompatActivity() {
         val btnIds = intArrayOf(R.id.btn1, R.id.btn2, R.id.btn3, R.id.btn4, R.id.btn5, R.id.btn6, R.id.btn7, R.id.btn8, R.id.btn9, R.id.btn0, R.id.btnDelete)
         for (id in btnIds) {
             val btn = findViewById<TextView>(id)
-            btn.setTextColor(0xFF00FFFF) // neon cyan
+            btn.setTextColor(Color.parseColor("#00FFFF")) // neon cyan
             btn.setOnClickListener { v -> onKeypadClick(btn.text.toString()) }
         }
     }
@@ -276,7 +275,7 @@ class StreetFoodActivity : AppCompatActivity() {
         }
 
         return withContext(Dispatchers.Main) {
-            kotlinx.coroutines.suspendCancellableCoroutine { cont ->
+            suspendCancellableCoroutine { cont ->
                 val builder = MaterialAlertDialogBuilder(this@StreetFoodActivity)
                 builder.setTitle("Конфликт: $name существует")
                 val options = if (isDir) {
@@ -303,10 +302,10 @@ class StreetFoodActivity : AppCompatActivity() {
                             else -> ConflictAction.SKIP
                         }
                     }
-                    cont.resumeWith(Result.success(action))
+                    cont.resume(action)
                 }
                 builder.setOnCancelListener {
-                    cont.resumeWith(Result.success(ConflictAction.SKIP))
+                    cont.resume(ConflictAction.SKIP)
                 }
                 builder.show()
             }
@@ -350,6 +349,6 @@ class StreetFoodActivity : AppCompatActivity() {
         progressBar.visibility = if (show) View.VISIBLE else View.GONE
         progressText.visibility = if (show) View.VISIBLE else View.GONE
         progressText.text = "В процессе..."
-        progressText.setTextColor(0xFF00FFFF) // neon cyan
+        progressText.setTextColor(Color.parseColor("#00FFFF")) // neon cyan
     }
 }
