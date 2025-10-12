@@ -38,7 +38,7 @@
             android:layout_height="wrap_content"
             android:hint="Название счёта"
             android:textColor="#00FFFF"
-            android:hintTextColor="#555555"
+            android:textColorHint="#555555"
             android:backgroundTint="#222222"
             android:padding="8dp"/>
 
@@ -49,7 +49,7 @@
             android:hint="Начальный баланс (например 1000)"
             android:inputType="numberDecimal"
             android:textColor="#00FFFF"
-            android:hintTextColor="#555555"
+            android:textColorHint="#555555"
             android:backgroundTint="#222222"
             android:padding="8dp"
             android:layout_marginTop="6dp"/>
@@ -112,7 +112,7 @@
             android:hint="Процент инфляции в год (например 5.0)"
             android:inputType="numberDecimal"
             android:textColor="#00FFFF"
-            android:hintTextColor="#555555"
+            android:textColorHint="#555555"
             android:backgroundTint="#222222"
             android:padding="8dp"
             android:layout_marginTop="6dp"/>
@@ -131,7 +131,7 @@
             android:hint="Новый пароль (оставьте пустым, если не менять)"
             android:inputType="textPassword"
             android:textColor="#00FFFF"
-            android:hintTextColor="#555555"
+            android:textColorHint="#555555"
             android:padding="8dp"
             android:backgroundTint="#222222"
             android:layout_marginTop="8dp"/>
@@ -143,7 +143,7 @@
             android:hint="Повторите пароль"
             android:inputType="textPassword"
             android:textColor="#00FFFF"
-            android:hintTextColor="#555555"
+            android:textColorHint="#555555"
             android:padding="8dp"
             android:backgroundTint="#222222"
             android:layout_marginTop="6dp"/>
