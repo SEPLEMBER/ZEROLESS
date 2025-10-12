@@ -1,22 +1,20 @@
 package com.nemesis.droidcrypt
 
-import android.app.AlertDialog
 import android.content.ContentResolver
 import android.content.Intent
 import android.content.SharedPreferences
 import android.net.Uri
 import android.os.Bundle
-import android.text.InputType
 import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
-import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.lifecycleScope
+import com.google.android.material.switchmaterial.SwitchMaterial
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -34,7 +32,7 @@ class FinHistoryActivity : AppCompatActivity() {
         private const val PREF_KEY_DISABLE_SCREENSHOTS = "disableScreenshots"
 
         private const val PREF_KEY_WALLET_PASSWORD_HASH = "walletPasswordHash"
-        private const val PREF_KEY_WALLET_PASSWORD_PLAIN = "walletPasswordPlain" // <-- используем плейн если есть
+        private const val PREF_KEY_WALLET_PASSWORD_PLAIN = "walletPasswordPlain" // используем plain если есть
         private const val PREF_KEY_WALLET_INFLATION_ENABLED = "walletInflationEnabled"
         private const val PREF_KEY_WALLET_INFLATION_PERCENT = "walletInflationPercent"
         private const val PREF_KEY_WALLET_INITIALIZED = "walletInitialized"
@@ -75,7 +73,10 @@ class FinHistoryActivity : AppCompatActivity() {
         prefs.getString(PREF_KEY_FOLDER_URI, null)?.let { s ->
             try {
                 folderUri = Uri.parse(s)
-                contentResolver.takePersistableUriPermission(folderUri!!, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+                contentResolver.takePersistableUriPermission(
+                    folderUri!!,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                )
             } catch (e: Exception) {
                 folderUri = null
             }
@@ -89,15 +90,14 @@ class FinHistoryActivity : AppCompatActivity() {
             return
         }
 
-        // Try to auto-load plain password from prefs if present
+        // Auto-load plain password from prefs if present. If not present — показываем сообщение и не запрашиваем диалог.
         val savedPlain = prefs.getString(PREF_KEY_WALLET_PASSWORD_PLAIN, null)
         if (!savedPlain.isNullOrEmpty()) {
             currentPasswordChars = savedPlain.toCharArray()
-            // attempt load; if decrypt fails — promptForPasswordAndLoad will be called by loadHistoryAndRender
             loadHistoryAndRender()
         } else {
-            // no plain saved — ask user
-            promptForPasswordAndLoad()
+            messageText.text = "Пароль не установлен. Данные недоступны."
+            messageText.visibility = View.VISIBLE
         }
 
         clearHistoryButton.setOnClickListener {
@@ -113,42 +113,7 @@ class FinHistoryActivity : AppCompatActivity() {
         }
     }
 
-    private fun promptForPasswordAndLoad() {
-        val input = EditText(this).apply {
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
-            hint = "Введите пароль"
-            setPadding(24, 24, 24, 24)
-        }
-        AlertDialog.Builder(this)
-            .setTitle("Введите пароль кошелька")
-            .setView(input)
-            .setCancelable(false)
-            .setPositiveButton("OK") { dialog, _ ->
-                val pwd = input.text?.toString() ?: ""
-                if (pwd.isEmpty()) {
-                    Toast.makeText(this, "Пароль пустой", Toast.LENGTH_SHORT).show()
-                    dialog.dismiss()
-                    return@setPositiveButton
-                }
-                val chars = pwd.toCharArray()
-                val hashedStored = prefs.getString(PREF_KEY_WALLET_PASSWORD_HASH, "") ?: ""
-                val hashedInput = sha256Hex(chars)
-                if (hashedInput.equals(hashedStored, ignoreCase = true)) {
-                    currentPasswordChars = chars
-                    // also save plain for future automatic use (ВАЖНО: небезопасно хранить plain)
-                    prefs.edit().putString(PREF_KEY_WALLET_PASSWORD_PLAIN, pwd).apply()
-                    dialog.dismiss()
-                    loadHistoryAndRender()
-                } else {
-                    for (i in chars.indices) chars[i] = '\u0000'
-                    Toast.makeText(this, "Неверный пароль", Toast.LENGTH_SHORT).show()
-                    dialog.dismiss()
-                }
-            }
-            .setNegativeButton("Отмена") { d, _ -> d.dismiss() }
-            .show()
-    }
-
+    // NOTE: no interactive password prompt here — password comes from sharedprefs (plain)
     private fun loadHistoryAndRender() {
         lifecycleScope.launch(Dispatchers.IO) {
             val uri = folderUri
@@ -196,33 +161,30 @@ class FinHistoryActivity : AppCompatActivity() {
 
                 val pwd = currentPasswordChars ?: run {
                     withContext(Dispatchers.Main) {
-                        Toast.makeText(this@FinHistoryActivity, "Пароль отсутствует.", Toast.LENGTH_SHORT).show()
-                        promptForPasswordAndLoad()
+                        messageText.text = "Пароль не загружен."
+                        messageText.visibility = View.VISIBLE
                     }
                     return@launch
                 }
 
+                // decrypt finman only when content non-blank; otherwise treat as empty
                 val finmanPlain = try {
-                    Secure.decrypt(pwd.copyOf(), finmanRaw)
+                    if (finmanRaw.isBlank()) "" else Secure.decrypt(pwd.copyOf(), finmanRaw)
                 } catch (e: Exception) {
-                    // automatic password failed — ask user interactively
                     withContext(Dispatchers.Main) {
-                        // clear auto-loaded password
-                        currentPasswordChars?.let { for (i in it.indices) it[i] = '\u0000' }
-                        currentPasswordChars = null
-                        promptForPasswordAndLoad()
+                        messageText.text = "Ошибка дешифровки finman. Проверьте пароль в настройках."
+                        messageText.visibility = View.VISIBLE
                     }
                     return@launch
                 }
 
                 val finhystPlain = try {
-                    // if file is blank or contains only the "space marker", treat as empty
                     if (finhystRaw.isBlank()) "" else {
                         val dec = Secure.decrypt(pwd.copyOf(), finhystRaw)
                         if (dec.trim().isEmpty()) "" else dec
                     }
                 } catch (e: Exception) {
-                    // if history decryption fails, continue with empty history
+                    // если история не декодируется — используем пустую
                     ""
                 }
 
@@ -307,7 +269,7 @@ class FinHistoryActivity : AppCompatActivity() {
     }
 
     private fun confirmAndClearHistory() {
-        AlertDialog.Builder(this)
+        androidx.appcompat.app.AlertDialog.Builder(this)
             .setTitle("Очистить историю?")
             .setMessage("Будут удалены все записи истории (hy...). Это действие необратимо.")
             .setPositiveButton("Очистить") { dialog, _ ->
@@ -352,8 +314,7 @@ class FinHistoryActivity : AppCompatActivity() {
                 // overwrite with non-empty encrypted marker (single space)
                 val pwd = currentPasswordChars ?: run {
                     withContext(Dispatchers.Main) {
-                        Toast.makeText(this@FinHistoryActivity, "Пароль не в памяти.", Toast.LENGTH_SHORT).show()
-                        promptForPasswordAndLoad()
+                        Toast.makeText(this@FinHistoryActivity, "Пароль не загружен.", Toast.LENGTH_SHORT).show()
                     }
                     return@withContext
                 }
