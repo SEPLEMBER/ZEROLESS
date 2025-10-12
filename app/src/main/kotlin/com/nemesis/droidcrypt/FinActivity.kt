@@ -1,16 +1,10 @@
 package com.nemesis.droidcrypt
 
-import android.app.AlertDialog
-import android.content.ContentResolver
 import android.content.Intent
 import android.content.SharedPreferences
 import android.net.Uri
 import android.os.Bundle
-import android.text.InputType
-import android.view.Gravity
-import android.view.View
 import android.view.WindowManager
-import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
@@ -116,7 +110,7 @@ class FinActivity : AppCompatActivity() {
             showAddTransactionDialog()
         }
 
-        // if wallet password not set -> inform user, else try auto-load plain password, otherwise prompt for password
+        // if wallet password not set -> inform user, else try to auto-load plain password (no interactive prompt)
         val hashed = prefs.getString(PREF_KEY_WALLET_PASSWORD_HASH, null)
         if (hashed.isNullOrEmpty()) {
             showMessage("Пароль не установлен. Данные недоступны.")
@@ -126,11 +120,12 @@ class FinActivity : AppCompatActivity() {
             val savedPlain = prefs.getString(PREF_KEY_WALLET_PASSWORD_PLAIN, null)
             if (!savedPlain.isNullOrEmpty()) {
                 currentPassword = savedPlain.toCharArray()
-                // attempt to load and decrypt; if decrypt fails we'll prompt the user interactively
+                // attempt to load and decrypt; if decrypt fails we'll clear saved plain and show message
                 loadFinMan()
             } else {
-                // no saved plain -> prompt user
-                showPasswordDialogAndLoadData()
+                // no saved plain -> do not prompt; show message
+                showMessage("Пароль не сохранён в настройках. Данные недоступны.")
+                renderEmptyState()
             }
         }
     }
@@ -145,65 +140,24 @@ class FinActivity : AppCompatActivity() {
     }
 
     private fun showMessage(text: String) {
-        messageTextView.visibility = View.VISIBLE
+        messageTextView.visibility = android.view.View.VISIBLE
         messageTextView.text = text
     }
 
     private fun hideMessage() {
-        messageTextView.visibility = View.GONE
-    }
-
-    private fun showPasswordDialogAndLoadData() {
-        val input = EditText(this).apply {
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
-            hint = "Введите пароль"
-            setPadding(24, 24, 24, 24)
-        }
-        AlertDialog.Builder(this)
-            .setTitle("Введите пароль кошелька")
-            .setView(input)
-            .setCancelable(false)
-            .setPositiveButton("OK") { dialog, _ ->
-                val pwd = input.text?.toString() ?: ""
-                if (pwd.isEmpty()) {
-                    Toast.makeText(this, "Пароль пустой", Toast.LENGTH_SHORT).show()
-                    renderEmptyState()
-                    dialog.dismiss()
-                    return@setPositiveButton
-                }
-                val pwdChars = pwd.toCharArray()
-                val hashedStored = prefs.getString(PREF_KEY_WALLET_PASSWORD_HASH, "") ?: ""
-                val hashedInput = sha256Hex(pwdChars)
-                if (hashedInput.equals(hashedStored, ignoreCase = true)) {
-                    // accepted: keep in memory and persist plain for auto-load (note: plain storage is insecure)
-                    currentPassword = pwdChars
-                    prefs.edit().putString(PREF_KEY_WALLET_PASSWORD_PLAIN, pwd).apply()
-                    hideMessage()
-                    loadFinMan()
-                } else {
-                    for (i in pwdChars.indices) pwdChars[i] = '\u0000'
-                    Toast.makeText(this, "Неверный пароль", Toast.LENGTH_SHORT).show()
-                    renderEmptyState()
-                }
-                dialog.dismiss()
-            }
-            .setNegativeButton("Отмена") { dialog, _ ->
-                dialog.dismiss()
-                renderEmptyState()
-            }
-            .show()
+        messageTextView.visibility = android.view.View.GONE
     }
 
     private fun renderEmptyState() {
         // show TOTAL = 0 and "У вас нет счетов."
         totalTextView.text = "0"
-        inflationTextView.visibility = View.GONE
+        inflationTextView.visibility = android.view.View.GONE
         accountsContainer.removeAllViews()
         val tv = TextView(this).apply {
             text = "У вас нет счетов."
             setTextColor(0xFF00FFFF.toInt()) // neon cyan
             textSize = 14f
-            gravity = Gravity.CENTER
+            gravity = android.view.Gravity.CENTER
             setPadding(24, 24, 24, 24)
         }
         accountsContainer.addView(tv)
@@ -276,13 +230,13 @@ class FinActivity : AppCompatActivity() {
                         // pass a copy to Secure.decrypt to avoid it zeroing our kept password
                         Secure.decrypt(pwd.copyOf(), rawEncrypted)
                     } catch (e: Exception) {
-                        // если автоматическая загрузка пароля (из prefs) была неверной, очистим и запросим ввод
+                        // автоматическая загрузка plain-пароля неверна — удаляем сохранённый plain и показываем сообщение
                         withContext(Dispatchers.Main) {
-                            // clear saved plain password to avoid repeated failures
                             prefs.edit().remove(PREF_KEY_WALLET_PASSWORD_PLAIN).apply()
                             currentPassword?.let { for (i in it.indices) it[i] = '\u0000' }
                             currentPassword = null
-                            showPasswordDialogAndLoadData()
+                            showMessage("Не удалось расшифровать данные. Проверьте пароль в настройках.")
+                            renderEmptyState()
                         }
                         return@launch
                     }
@@ -339,6 +293,7 @@ class FinActivity : AppCompatActivity() {
         lifecycleScope.launch(Dispatchers.Main) {
             totalAmount = total
             accountsList = accounts
+            hideMessage()
             renderFinScreen()
         }
     }
@@ -353,11 +308,11 @@ class FinActivity : AppCompatActivity() {
         if (inflationEnabled) {
             val pct = prefs.getFloat(PREF_KEY_WALLET_INFLATION_PERCENT, 0.0f)
             val inflated = totalAmount * (1.0 + pct / 100.0)
-            inflationTextView.visibility = View.VISIBLE
+            inflationTextView.visibility = android.view.View.VISIBLE
             inflationTextView.setTextColor(0xFF00FFFF.toInt())
             inflationTextView.text = "с учетом инфляции: ${formatMoney(inflated)}"
         } else {
-            inflationTextView.visibility = View.GONE
+            inflationTextView.visibility = android.view.View.GONE
         }
 
         // accounts
@@ -367,7 +322,7 @@ class FinActivity : AppCompatActivity() {
                 text = "У вас нет счетов."
                 setTextColor(0xFF00FFFF.toInt())
                 textSize = 14f
-                gravity = Gravity.CENTER
+                gravity = android.view.Gravity.CENTER
                 setPadding(24, 24, 24, 24)
             }
             accountsContainer.addView(tv)
@@ -381,7 +336,7 @@ class FinActivity : AppCompatActivity() {
                 }
                 accountsContainer.addView(row)
                 // separator
-                val sep = View(this).apply {
+                val sep = android.view.View(this).apply {
                     layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 1).also {
                         it.setMargins(8, 6, 8, 6)
                     }
@@ -452,7 +407,7 @@ class FinActivity : AppCompatActivity() {
 
     private fun showAddTransactionDialog() {
         if (currentPassword == null) {
-            Toast.makeText(this, "Нельзя добавить транзакцию без ввода пароля.", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Нельзя добавить транзакцию без введённого пароля в настройках.", Toast.LENGTH_SHORT).show()
             return
         }
 
@@ -461,20 +416,20 @@ class FinActivity : AppCompatActivity() {
             orientation = LinearLayout.VERTICAL
             setPadding(24, 24, 24, 24)
         }
-        val amountInput = EditText(this).apply {
+        val amountInput = android.widget.EditText(this).apply {
             hint = "Сумма (например: +500 или -120)"
-            inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_SIGNED or InputType.TYPE_NUMBER_FLAG_DECIMAL
+            inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_FLAG_SIGNED or android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL
             setPadding(12, 12, 12, 12)
         }
-        val accountInput = EditText(this).apply {
+        val accountInput = android.widget.EditText(this).apply {
             hint = "Название счета (опционально)"
-            inputType = InputType.TYPE_CLASS_TEXT
+            inputType = android.text.InputType.TYPE_CLASS_TEXT
             setPadding(12, 12, 12, 12)
         }
         layout.addView(amountInput)
         layout.addView(accountInput)
 
-        AlertDialog.Builder(this)
+        androidx.appcompat.app.AlertDialog.Builder(this)
             .setTitle("Добавить транзакцию")
             .setView(layout)
             .setPositiveButton("Сохранить") { dialog, _ ->
