@@ -6,14 +6,12 @@ import android.content.Intent
 import android.content.SharedPreferences
 import android.net.Uri
 import android.os.Bundle
-import android.provider.DocumentsContract
 import android.text.InputType
 import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
 import android.widget.EditText
 import android.widget.LinearLayout
-import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
@@ -153,7 +151,6 @@ class FinSettingsActivity : AppCompatActivity() {
         val input = EditText(this).apply {
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
             hint = "Введите текущий пароль"
-            // заменить setPadding(single) на 4-аргументный
             setPadding(24, 24, 24, 24)
         }
         AlertDialog.Builder(this)
@@ -161,7 +158,7 @@ class FinSettingsActivity : AppCompatActivity() {
             .setView(input)
             .setCancelable(false)
             .setPositiveButton("OK") { dialog, _ ->
-                val pwd = input.text?.toString() ?: ""
+                val pwd = input.text?.toString()?.trim() ?: ""
                 if (pwd.isEmpty()) {
                     Toast.makeText(this, "Пароль пустой", Toast.LENGTH_SHORT).show()
                     dialog.dismiss()
@@ -195,8 +192,7 @@ class FinSettingsActivity : AppCompatActivity() {
                 return@launch
             }
             try {
-                val tree = DocumentFile.fromTreeUri(this@FinSettingsActivity, uri)
-                if (tree == null) {
+                val tree = DocumentFile.fromTreeUri(this@FinSettingsActivity, uri) ?: run {
                     withContext(Dispatchers.Main) {
                         messageText.text = "Невалидная SAF папка."
                         messageText.visibility = View.VISIBLE
@@ -209,7 +205,6 @@ class FinSettingsActivity : AppCompatActivity() {
                     walletDir = tree.createDirectory(WALLET_DIR_NAME)
                 }
 
-                // после возможного присвоения безопасно зафиксируем non-null локальную переменную
                 if (walletDir == null) {
                     withContext(Dispatchers.Main) {
                         messageText.text = "Каталог wallet не найден и не создан."
@@ -217,7 +212,7 @@ class FinSettingsActivity : AppCompatActivity() {
                     }
                     return@launch
                 }
-                val wallet = walletDir // smart usage after null-check
+                val wallet = walletDir
 
                 val finmanFile = wallet.findFile(FILE_FINMAN)
                 if (finmanFile == null || !finmanFile.exists()) {
@@ -339,9 +334,10 @@ class FinSettingsActivity : AppCompatActivity() {
     }
 
     private fun onSaveClicked() {
-        // Validate new password fields if user set a new password
-        val newPwd = passwordNewInput.text?.toString() ?: ""
-        val confirm = passwordConfirmInput.text?.toString() ?: ""
+        // Trim inputs to avoid whitespace-only strings
+        val newPwd = passwordNewInput.text?.toString()?.trim() ?: ""
+        val confirm = passwordConfirmInput.text?.toString()?.trim() ?: ""
+
         if (newPwd.isNotEmpty()) {
             if (newPwd != confirm) {
                 Toast.makeText(this, "Пароли не совпадают", Toast.LENGTH_SHORT).show()
@@ -358,9 +354,19 @@ class FinSettingsActivity : AppCompatActivity() {
         lifecycleScope.launch(Dispatchers.IO) {
             try {
                 if (newPwd.isNotEmpty()) {
+                    val fUri = folderUri
+                    if (fUri == null) {
+                        withContext(Dispatchers.Main) {
+                            Toast.makeText(this@FinSettingsActivity, "SAF-папка не выбрана. Выберите папку в общих настройках прежде чем инициализировать кошелёк.", Toast.LENGTH_LONG).show()
+                        }
+                        return@launch
+                    }
+
                     val newChars = newPwd.toCharArray()
                     val newHash = sha256Hex(newChars)
+                    // Сохраняем хеш пароля сразу — чтобы приложение знало, что пароль задан даже если запись файлов не прошла.
                     prefs.edit().putString(PREF_KEY_WALLET_PASSWORD_HASH, newHash).apply()
+
                     // keep in memory for immediate encryption
                     currentPasswordChars?.let {
                         for (i in it.indices) it[i] = '\u0000'
@@ -371,7 +377,7 @@ class FinSettingsActivity : AppCompatActivity() {
                     val (finmanDoc, finhystDoc) = getOrCreateWalletFiles()
                     if (finmanDoc == null || finhystDoc == null) {
                         withContext(Dispatchers.Main) {
-                            Toast.makeText(this@FinSettingsActivity, "Не удалось создать файлы в SAF.", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(this@FinSettingsActivity, "Не удалось создать файлы в SAF. Проверьте разрешения и папку.", Toast.LENGTH_SHORT).show()
                         }
                         return@launch
                     }
@@ -449,14 +455,14 @@ class FinSettingsActivity : AppCompatActivity() {
     // --- SAF helpers -------------------------------------------------------
 
     private fun getOrCreateWalletFiles(): Pair<DocumentFile?, DocumentFile?> {
-        val tree = folderUri?.let { DocumentFile.fromTreeUri(this, it) }
-        var walletDir = tree?.findFile(WALLET_DIR_NAME)
+        val fUri = folderUri ?: return Pair(null, null)
+        val tree = DocumentFile.fromTreeUri(this, fUri) ?: return Pair(null, null)
+
+        var walletDir = tree.findFile(WALLET_DIR_NAME)
         if (walletDir == null) {
-            walletDir = tree?.createDirectory(WALLET_DIR_NAME)
+            walletDir = tree.createDirectory(WALLET_DIR_NAME)
         }
         if (walletDir == null) return Pair(null, null)
-
-        // фиксируем ненулевую ссылку локально, чтобы компилятор не жаловался
         val wallet = walletDir
 
         var finman = wallet.findFile(FILE_FINMAN)
