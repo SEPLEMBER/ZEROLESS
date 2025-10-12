@@ -97,7 +97,10 @@ class FinSettingsActivity : AppCompatActivity() {
         prefs.getString(PREF_KEY_FOLDER_URI, null)?.let { s ->
             try {
                 folderUri = Uri.parse(s)
-                contentResolver.takePersistableUriPermission(folderUri!!, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+                contentResolver.takePersistableUriPermission(
+                    folderUri!!,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                )
             } catch (e: Exception) {
                 folderUri = null
             }
@@ -150,7 +153,8 @@ class FinSettingsActivity : AppCompatActivity() {
         val input = EditText(this).apply {
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
             hint = "Введите текущий пароль"
-            setPadding(24)
+            // заменить setPadding(single) на 4-аргументный
+            setPadding(24, 24, 24, 24)
         }
         AlertDialog.Builder(this)
             .setTitle("Пароль кошелька")
@@ -199,11 +203,23 @@ class FinSettingsActivity : AppCompatActivity() {
                     }
                     return@launch
                 }
+
                 var walletDir = tree.findFile(WALLET_DIR_NAME)
                 if (walletDir == null || !walletDir.isDirectory) {
                     walletDir = tree.createDirectory(WALLET_DIR_NAME)
                 }
-                val finmanFile = walletDir.findFile(FILE_FINMAN)
+
+                // после возможного присвоения безопасно зафиксируем non-null локальную переменную
+                if (walletDir == null) {
+                    withContext(Dispatchers.Main) {
+                        messageText.text = "Каталог wallet не найден и не создан."
+                        messageText.visibility = View.VISIBLE
+                    }
+                    return@launch
+                }
+                val wallet = walletDir // smart usage after null-check
+
+                val finmanFile = wallet.findFile(FILE_FINMAN)
                 if (finmanFile == null || !finmanFile.exists()) {
                     withContext(Dispatchers.Main) {
                         messageText.text = "Файл finman.txt не найден."
@@ -274,7 +290,7 @@ class FinSettingsActivity : AppCompatActivity() {
                     setTextColor(0xFF00FFFF.toInt())
                     textSize = 14f
                     gravity = Gravity.CENTER
-                    setPadding(24)
+                    setPadding(24, 24, 24, 24)
                 }
                 accountsContainer.addView(tv)
             } else {
@@ -289,18 +305,18 @@ class FinSettingsActivity : AppCompatActivity() {
                         setTextColor(0xFF00FFFF.toInt())
                         textSize = 15f
                         layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-                        setPadding(8)
+                        setPadding(8, 8, 8, 8)
                     }
                     val balTv = TextView(this).apply {
                         text = String.format(Locale.getDefault(), "%.2f", p.second)
                         setTextColor(0xFF00FFFF.toInt())
                         textSize = 15f
-                        setPadding(8)
+                        setPadding(8, 8, 8, 8)
                     }
                     val del = TextView(this).apply {
                         text = "Удалить"
                         setTextColor(0xFF00FFFF.toInt())
-                        setPadding(8)
+                        setPadding(8, 8, 8, 8)
                         setOnClickListener {
                             accountsList.removeAt(idx)
                             renderAccountsList()
@@ -439,10 +455,14 @@ class FinSettingsActivity : AppCompatActivity() {
             walletDir = tree?.createDirectory(WALLET_DIR_NAME)
         }
         if (walletDir == null) return Pair(null, null)
-        var finman = walletDir.findFile(FILE_FINMAN)
-        if (finman == null) finman = walletDir.createFile("text/plain", FILE_FINMAN)
-        var finhyst = walletDir.findFile(FILE_FINHYST)
-        if (finhyst == null) finhyst = walletDir.createFile("text/plain", FILE_FINHYST)
+
+        // фиксируем ненулевую ссылку локально, чтобы компилятор не жаловался
+        val wallet = walletDir
+
+        var finman = wallet.findFile(FILE_FINMAN)
+        if (finman == null) finman = wallet.createFile("text/plain", FILE_FINMAN)
+        var finhyst = wallet.findFile(FILE_FINHYST)
+        if (finhyst == null) finhyst = wallet.createFile("text/plain", FILE_FINHYST)
         return Pair(finman, finhyst)
     }
 
