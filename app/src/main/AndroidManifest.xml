@@ -97,7 +97,7 @@
             android:configChanges="orientation|screenSize" />
 
                 <activity
-            android:name=".FinHistoyActivity"
+            android:name=".FinHistoryActivity"
             android:exported="false"
             android:parentActivityName=".FinActivity"
             android:theme="@style/VprTheme"
