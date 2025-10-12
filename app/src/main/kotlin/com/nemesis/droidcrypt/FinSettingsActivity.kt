@@ -1,12 +1,9 @@
 package com.nemesis.droidcrypt
 
-import android.app.AlertDialog
 import android.content.ContentResolver
-import android.content.Intent
 import android.content.SharedPreferences
 import android.net.Uri
 import android.os.Bundle
-import android.text.InputType
 import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
@@ -24,7 +21,6 @@ import kotlinx.coroutines.withContext
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.nio.charset.StandardCharsets
-import java.security.MessageDigest
 import java.util.Locale
 
 class FinSettingsActivity : AppCompatActivity() {
@@ -35,7 +31,7 @@ class FinSettingsActivity : AppCompatActivity() {
         private const val PREF_KEY_DISABLE_SCREENSHOTS = "disableScreenshots"
 
         private const val PREF_KEY_WALLET_PASSWORD_HASH = "walletPasswordHash"
-        private const val PREF_KEY_WALLET_PASSWORD_PLAIN = "walletPasswordPlain" // <-- новый ключ (plain)
+        private const val PREF_KEY_WALLET_PASSWORD_PLAIN = "walletPasswordPlain" // <-- plaintext для автозагрузки
         private const val PREF_KEY_WALLET_INFLATION_ENABLED = "walletInflationEnabled"
         private const val PREF_KEY_WALLET_INFLATION_PERCENT = "walletInflationPercent"
         private const val PREF_KEY_WALLET_INITIALIZED = "walletInitialized"
@@ -49,8 +45,6 @@ class FinSettingsActivity : AppCompatActivity() {
     private var folderUri: Uri? = null
 
     // UI
-    private lateinit var titleText: TextView
-    private lateinit var infoText: TextView
     private lateinit var addAccountNameInput: EditText
     private lateinit var addAccountBalanceInput: EditText
     private lateinit var addAccountButton: TextView
@@ -65,11 +59,10 @@ class FinSettingsActivity : AppCompatActivity() {
     // model
     private var accountsList: MutableList<Pair<String, Double>> = mutableListOf()
     private var walletInitialized: Boolean = false
-    private var currentPasswordChars: CharArray? = null // kept while editing
+    private var currentPasswordChars: CharArray? = null // plaintext из prefs
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
         prefs = getSharedPreferences(PREF_NAME, MODE_PRIVATE)
 
         if (prefs.getBoolean(PREF_KEY_DISABLE_SCREENSHOTS, false)) {
@@ -79,8 +72,6 @@ class FinSettingsActivity : AppCompatActivity() {
         setContentView(R.layout.activity_fin_settings)
 
         // Bind UI
-        titleText = findViewById(R.id.titleText)
-        infoText = findViewById(R.id.infoText)
         addAccountNameInput = findViewById(R.id.addAccountNameInput)
         addAccountBalanceInput = findViewById(R.id.addAccountBalanceInput)
         addAccountButton = findViewById(R.id.addAccountButton)
@@ -100,7 +91,7 @@ class FinSettingsActivity : AppCompatActivity() {
                     folderUri!!,
                     Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
                 )
-            } catch (e: Exception) {
+            } catch (_: Exception) {
                 folderUri = null
             }
         }
@@ -110,6 +101,18 @@ class FinSettingsActivity : AppCompatActivity() {
         inflationPercentInput.setText(String.format(Locale.getDefault(), "%.2f", prefs.getFloat(PREF_KEY_WALLET_INFLATION_PERCENT, 0.0f)))
 
         walletInitialized = prefs.getBoolean(PREF_KEY_WALLET_INITIALIZED, false)
+
+        // load password from prefs (plaintext)
+        prefs.getString(PREF_KEY_WALLET_PASSWORD_PLAIN, null)?.let { savedPlain ->
+            if (savedPlain.isNotEmpty()) {
+                currentPasswordChars = savedPlain.toCharArray()
+                loadFinManForSettings() // загружаем счета
+            }
+        } ?: run {
+            // кошелек не инициализирован
+            messageText.text = "Кошелёк не инициализирован. Для создания файлов установите пароль и нажмите Сохранить."
+            messageText.visibility = View.VISIBLE
+        }
 
         addAccountButton.setOnClickListener {
             val name = addAccountNameInput.text?.toString()?.trim() ?: ""
@@ -128,24 +131,6 @@ class FinSettingsActivity : AppCompatActivity() {
         saveButton.setOnClickListener {
             onSaveClicked()
         }
-
-        // If wallet initialized, try to auto-load plain password from prefs first,
-        // otherwise require current password from the user.
-        if (walletInitialized) {
-            val savedPlain = prefs.getString(PREF_KEY_WALLET_PASSWORD_PLAIN, null)
-            if (!savedPlain.isNullOrEmpty()) {
-                currentPasswordChars = savedPlain.toCharArray()
-                // try to load with stored plain; if fails, prompt will be shown by loadFinManForSettings
-                loadFinManForSettings()
-            } else {
-                promptForPasswordAndLoad()
-            }
-        } else {
-            // fresh state
-            renderAccountsList()
-            messageText.text = "Кошелёк не инициализирован. Для создания файлов установите пароль и нажмите Сохранить."
-            messageText.visibility = View.VISIBLE
-        }
     }
 
     override fun onDestroy() {
@@ -156,100 +141,23 @@ class FinSettingsActivity : AppCompatActivity() {
         }
     }
 
-    private fun promptForPasswordAndLoad() {
-        val input = EditText(this).apply {
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
-            hint = "Введите текущий пароль"
-            setPadding(24, 24, 24, 24)
-        }
-        AlertDialog.Builder(this)
-            .setTitle("Пароль кошелька")
-            .setView(input)
-            .setCancelable(false)
-            .setPositiveButton("OK") { dialog, _ ->
-                val pwd = input.text?.toString() ?: ""
-                if (pwd.isEmpty()) {
-                    Toast.makeText(this, "Пароль пустой", Toast.LENGTH_SHORT).show()
-                    dialog.dismiss()
-                    return@setPositiveButton
-                }
-                val chars = pwd.toCharArray()
-                val hashedStored = prefs.getString(PREF_KEY_WALLET_PASSWORD_HASH, "") ?: ""
-                val hashedInput = sha256Hex(chars)
-                if (hashedInput.equals(hashedStored, ignoreCase = true)) {
-                    currentPasswordChars = chars
-                    dialog.dismiss()
-                    loadFinManForSettings()
-                } else {
-                    for (i in chars.indices) chars[i] = '\u0000'
-                    Toast.makeText(this, "Неверный пароль", Toast.LENGTH_SHORT).show()
-                    dialog.dismiss()
-                }
-            }
-            .setNegativeButton("Отмена") { d, _ -> d.dismiss() }
-            .show()
-    }
-
     private fun loadFinManForSettings() {
         lifecycleScope.launch(Dispatchers.IO) {
-            val uri = folderUri
-            if (uri == null) {
-                withContext(Dispatchers.Main) {
-                    messageText.text = "SAF папка не выбрана в общих настройках."
-                    messageText.visibility = View.VISIBLE
-                }
-                return@launch
-            }
+            val uri = folderUri ?: return@launch
             try {
-                val tree = DocumentFile.fromTreeUri(this@FinSettingsActivity, uri) ?: run {
-                    withContext(Dispatchers.Main) {
-                        messageText.text = "Невалидная SAF папка."
-                        messageText.visibility = View.VISIBLE
-                    }
-                    return@launch
-                }
-
+                val tree = DocumentFile.fromTreeUri(this@FinSettingsActivity, uri) ?: return@launch
                 var walletDir = tree.findFile(WALLET_DIR_NAME)
                 if (walletDir == null || !walletDir.isDirectory) {
                     walletDir = tree.createDirectory(WALLET_DIR_NAME)
                 }
-
-                if (walletDir == null) {
-                    withContext(Dispatchers.Main) {
-                        messageText.text = "Каталог wallet не найден и не создан."
-                        messageText.visibility = View.VISIBLE
-                    }
-                    return@launch
-                }
-                val wallet = walletDir
-
+                val wallet = walletDir ?: return@launch
                 val finmanFile = wallet.findFile(FILE_FINMAN)
-                if (finmanFile == null || !finmanFile.exists()) {
-                    withContext(Dispatchers.Main) {
-                        messageText.text = "Файл finman.txt не найден."
-                        messageText.visibility = View.VISIBLE
-                    }
-                    return@launch
-                }
+                if (finmanFile == null || !finmanFile.exists()) return@launch
                 val raw = readTextFromUri(finmanFile.uri)
-
-                val pwd = currentPasswordChars ?: run {
-                    withContext(Dispatchers.Main) {
-                        Toast.makeText(this@FinSettingsActivity, "Пароль отсутствует в памяти", Toast.LENGTH_SHORT).show()
-                    }
-                    return@launch
-                }
-
+                val pwd = currentPasswordChars ?: return@launch
                 val plain = try {
                     Secure.decrypt(pwd.copyOf(), raw)
-                } catch (e: Exception) {
-                    // если автоматическая загрузка пароля (из prefs) была неверной, попросим ввести пароль вручную
-                    withContext(Dispatchers.Main) {
-                        // clear the auto-loaded password chars
-                        currentPasswordChars?.let { for (i in it.indices) it[i] = '\u0000' }
-                        currentPasswordChars = null
-                        promptForPasswordAndLoad()
-                    }
+                } catch (_: Exception) {
                     return@launch
                 }
                 parseFinManPlain(plain)
@@ -257,13 +165,7 @@ class FinSettingsActivity : AppCompatActivity() {
                     renderAccountsList()
                     messageText.visibility = View.GONE
                 }
-            } catch (e: Exception) {
-                e.printStackTrace()
-                withContext(Dispatchers.Main) {
-                    messageText.text = "Ошибка доступа к файлам: ${e.message}"
-                    messageText.visibility = View.VISIBLE
-                }
-            }
+            } catch (_: Exception) {}
         }
     }
 
@@ -276,14 +178,10 @@ class FinSettingsActivity : AppCompatActivity() {
             if (line.startsWith("WLT", ignoreCase = true)) {
                 val name = line.substringAfter(":", "").trim()
                 val next = if (i + 1 < lines.size) lines[i + 1] else null
-                if (next != null && next.startsWith("WNT", ignoreCase = true)) {
-                    val amt = next.substringAfter(":", "0").trim().toDoubleOrNull() ?: 0.0
-                    accs.add(Pair(name, amt))
-                    i += 2
-                    continue
-                } else {
-                    accs.add(Pair(name, 0.0))
-                }
+                val amt = next?.substringAfter(":", "0")?.trim()?.toDoubleOrNull() ?: 0.0
+                accs.add(Pair(name, amt))
+                i += 2
+                continue
             }
             i++
         }
@@ -306,8 +204,7 @@ class FinSettingsActivity : AppCompatActivity() {
                 for ((idx, p) in accountsList.withIndex()) {
                     val row = LinearLayout(this).apply {
                         orientation = LinearLayout.HORIZONTAL
-                        val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
-                        layoutParams = lp
+                        layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
                     }
                     val nameTv = TextView(this).apply {
                         text = p.first
@@ -348,69 +245,53 @@ class FinSettingsActivity : AppCompatActivity() {
     }
 
     private fun onSaveClicked() {
-        // Trim inputs to avoid whitespace-only strings
         val newPwd = passwordNewInput.text?.toString()?.trim() ?: ""
         val confirm = passwordConfirmInput.text?.toString()?.trim() ?: ""
-
-        if (newPwd.isNotEmpty()) {
-            if (newPwd != confirm) {
-                Toast.makeText(this, "Пароли не совпадают", Toast.LENGTH_SHORT).show()
-                return
-            }
+        if (newPwd.isNotEmpty() && newPwd != confirm) {
+            Toast.makeText(this, "Пароли не совпадают", Toast.LENGTH_SHORT).show()
+            return
         }
 
-        // Save inflation prefs immediately
+        // Save inflation prefs
         prefs.edit().putBoolean(PREF_KEY_WALLET_INFLATION_ENABLED, inflationSwitch.isChecked).apply()
         val pct = inflationPercentInput.text?.toString()?.replace(",", ".")?.toFloatOrNull() ?: 0.0f
         prefs.edit().putFloat(PREF_KEY_WALLET_INFLATION_PERCENT, pct).apply()
 
-        // If new password provided -> set it and create wallet files
         lifecycleScope.launch(Dispatchers.IO) {
             try {
                 if (newPwd.isNotEmpty()) {
-                    val fUri = folderUri
-                    if (fUri == null) {
+                    val fUri = folderUri ?: run {
                         withContext(Dispatchers.Main) {
-                            Toast.makeText(this@FinSettingsActivity, "SAF-папка не выбрана. Выберите папку в общих настройках прежде чем инициализировать кошелёк.", Toast.LENGTH_LONG).show()
+                            Toast.makeText(this@FinSettingsActivity, "SAF-папка не выбрана", Toast.LENGTH_LONG).show()
                         }
                         return@launch
                     }
-
                     val newChars = newPwd.toCharArray()
                     val newHash = sha256Hex(newChars)
-                    // Сохраняем хеш пароля
                     prefs.edit().putString(PREF_KEY_WALLET_PASSWORD_HASH, newHash).apply()
-                    // Сохраняем plain пароль для автозагрузки (ВАЖНО: небезопасно хранить plaintext).
                     prefs.edit().putString(PREF_KEY_WALLET_PASSWORD_PLAIN, newPwd).apply()
-
-                    // keep in memory for immediate encryption
-                    currentPasswordChars?.let {
-                        for (i in it.indices) it[i] = '\u0000'
-                    }
+                    currentPasswordChars?.let { for (i in it.indices) it[i] = '\u0000' }
                     currentPasswordChars = newChars
 
-                    // create files (finman + finhyst) encrypted
                     val (finmanDoc, finhystDoc) = getOrCreateWalletFiles()
                     if (finmanDoc == null || finhystDoc == null) {
                         withContext(Dispatchers.Main) {
-                            Toast.makeText(this@FinSettingsActivity, "Не удалось создать файлы в SAF. Проверьте разрешения и папку.", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(this@FinSettingsActivity, "Не удалось создать файлы в SAF.", Toast.LENGTH_SHORT).show()
                         }
                         return@launch
                     }
-                    // build finman plain
-                    val total = accountsList.fold(0.0) { acc, p -> acc + p.second }
+
+                    val total = accountsList.sumOf { it.second }
                     val sb = StringBuilder()
                     sb.append("TOTAL:${String.format(Locale.getDefault(), "%.2f", total)}\n")
-                    for ((idx, p) in accountsList.withIndex()) {
+                    accountsList.forEachIndexed { idx, p ->
                         val id = idx + 1
                         sb.append("WLT${id}:${p.first}\n")
                         sb.append("WNT${id}:${String.format(Locale.getDefault(), "%.2f", p.second)}\n")
                     }
-                    val finmanPlain = sb.toString().trim()
-                    val encryptedFinman = Secure.encrypt(currentPasswordChars!!.copyOf(), finmanPlain)
+                    val encryptedFinman = Secure.encrypt(currentPasswordChars!!.copyOf(), sb.toString().trim())
                     writeTextToDocument(finmanDoc, encryptedFinman)
 
-                    // create empty history -> encrypt a single space (не пустая строка)
                     val encryptedHist = Secure.encrypt(currentPasswordChars!!.copyOf(), " ")
                     writeTextToDocument(finhystDoc, encryptedHist)
 
@@ -420,43 +301,28 @@ class FinSettingsActivity : AppCompatActivity() {
                         finish()
                     }
                     return@launch
-                } else {
-                    // No new password - if wallet already initialized, allow updating accounts only if we have currentPasswordChars
-                    if (walletInitialized) {
-                        if (currentPasswordChars == null) {
-                            withContext(Dispatchers.Main) {
-                                Toast.makeText(this@FinSettingsActivity, "Для изменения кошелька введите пароль (вернитесь и заново откройте настройки).", Toast.LENGTH_LONG).show()
-                            }
-                            return@launch
-                        }
-                        // update finman with current password
-                        val (finmanDoc, _) = getOrCreateWalletFiles()
-                        if (finmanDoc == null) {
-                            withContext(Dispatchers.Main) {
-                                Toast.makeText(this@FinSettingsActivity, "Не удалось найти finman.txt", Toast.LENGTH_SHORT).show()
-                            }
-                            return@launch
-                        }
-                        val total = accountsList.fold(0.0) { acc, p -> acc + p.second }
+                } else if (walletInitialized && currentPasswordChars != null) {
+                    // update only accounts
+                    val (finmanDoc, _) = getOrCreateWalletFiles()
+                    if (finmanDoc != null) {
+                        val total = accountsList.sumOf { it.second }
                         val sb = StringBuilder()
                         sb.append("TOTAL:${String.format(Locale.getDefault(), "%.2f", total)}\n")
-                        for ((idx, p) in accountsList.withIndex()) {
+                        accountsList.forEachIndexed { idx, p ->
                             val id = idx + 1
                             sb.append("WLT${id}:${p.first}\n")
                             sb.append("WNT${id}:${String.format(Locale.getDefault(), "%.2f", p.second)}\n")
                         }
-                        val finmanPlain = sb.toString().trim()
-                        val encryptedFinman = Secure.encrypt(currentPasswordChars!!.copyOf(), finmanPlain)
+                        val encryptedFinman = Secure.encrypt(currentPasswordChars!!.copyOf(), sb.toString().trim())
                         writeTextToDocument(finmanDoc, encryptedFinman)
                         withContext(Dispatchers.Main) {
                             Toast.makeText(this@FinSettingsActivity, "Настройки кошелька сохранены.", Toast.LENGTH_SHORT).show()
                             finish()
                         }
-                    } else {
-                        // wallet not initialized and no password entered -> nothing to save
-                        withContext(Dispatchers.Main) {
-                            Toast.makeText(this@FinSettingsActivity, "Укажите новый пароль для инициализации кошелька.", Toast.LENGTH_LONG).show()
-                        }
+                    }
+                } else {
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(this@FinSettingsActivity, "Укажите новый пароль для инициализации кошелька.", Toast.LENGTH_LONG).show()
                     }
                 }
             } catch (e: Exception) {
@@ -468,35 +334,23 @@ class FinSettingsActivity : AppCompatActivity() {
         }
     }
 
-    // --- SAF helpers -------------------------------------------------------
-
     private fun getOrCreateWalletFiles(): Pair<DocumentFile?, DocumentFile?> {
         val fUri = folderUri ?: return Pair(null, null)
         val tree = DocumentFile.fromTreeUri(this, fUri) ?: return Pair(null, null)
-
-        var walletDir = tree.findFile(WALLET_DIR_NAME)
-        if (walletDir == null) {
-            walletDir = tree.createDirectory(WALLET_DIR_NAME)
-        }
-        if (walletDir == null) return Pair(null, null)
-        val wallet = walletDir
-
-        var finman = wallet.findFile(FILE_FINMAN)
-        if (finman == null) finman = wallet.createFile("text/plain", FILE_FINMAN)
-        var finhyst = wallet.findFile(FILE_FINHYST)
-        if (finhyst == null) finhyst = wallet.createFile("text/plain", FILE_FINHYST)
+        var walletDir = tree.findFile(WALLET_DIR_NAME) ?: tree.createDirectory(WALLET_DIR_NAME)
+        val wallet = walletDir ?: return Pair(null, null)
+        var finman = wallet.findFile(FILE_FINMAN) ?: wallet.createFile("text/plain", FILE_FINMAN)
+        var finhyst = wallet.findFile(FILE_FINHYST) ?: wallet.createFile("text/plain", FILE_FINHYST)
         return Pair(finman, finhyst)
     }
 
     private fun readTextFromUri(uri: Uri): String {
-        val cr: ContentResolver = contentResolver
         val sb = StringBuilder()
-        cr.openInputStream(uri)?.use { input ->
+        contentResolver.openInputStream(uri)?.use { input ->
             BufferedReader(InputStreamReader(input, StandardCharsets.UTF_8)).use { br ->
                 var line = br.readLine()
                 while (line != null) {
-                    sb.append(line)
-                    sb.append("\n")
+                    sb.append(line).append("\n")
                     line = br.readLine()
                 }
             }
@@ -505,23 +359,17 @@ class FinSettingsActivity : AppCompatActivity() {
     }
 
     private fun writeTextToDocument(document: DocumentFile, text: String) {
-        val uri = document.uri
-        contentResolver.openOutputStream(uri)?.use { os ->
+        contentResolver.openOutputStream(document.uri)?.use { os ->
             os.write(text.toByteArray(StandardCharsets.UTF_8))
             os.flush()
         }
     }
 
-    // --- util --------------------------------------------------------------
-
     private fun sha256Hex(chars: CharArray): String {
-        val md = MessageDigest.getInstance("SHA-256")
-        val bytes = String(chars).toByteArray(StandardCharsets.UTF_8)
-        val digest = md.digest(bytes)
+        val md = java.security.MessageDigest.getInstance("SHA-256")
+        val digest = md.digest(String(chars).toByteArray(StandardCharsets.UTF_8))
         val sb = StringBuilder()
-        for (b in digest) {
-            sb.append(String.format("%02x", b))
-        }
+        digest.forEach { b -> sb.append(String.format("%02x", b)) }
         return sb.toString()
     }
 }
