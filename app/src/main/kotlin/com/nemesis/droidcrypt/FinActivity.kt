@@ -13,13 +13,10 @@ import android.view.View
 import android.view.WindowManager
 import android.widget.EditText
 import android.widget.LinearLayout
-import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
-import androidx.activity.ComponentActivity
 import androidx.appcompat.app.AppCompatActivity
 import androidx.constraintlayout.widget.ConstraintLayout
-import androidx.core.view.setPadding
 import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
@@ -152,7 +149,7 @@ class FinActivity : AppCompatActivity() {
         val input = EditText(this).apply {
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
             hint = "Введите пароль"
-            setPadding(24)
+            setPadding(24, 24, 24, 24)
         }
         AlertDialog.Builder(this)
             .setTitle("Введите пароль кошелька")
@@ -199,7 +196,7 @@ class FinActivity : AppCompatActivity() {
             setTextColor(0xFF00FFFF.toInt()) // neon cyan
             textSize = 14f
             gravity = Gravity.CENTER
-            setPadding(24)
+            setPadding(24, 24, 24, 24)
         }
         accountsContainer.addView(tv)
     }
@@ -224,15 +221,25 @@ class FinActivity : AppCompatActivity() {
                     }
                     return@launch
                 }
+                // tree is non-null here
+                val treeNonNull = tree
 
                 // find or create wallet dir
-                var walletDir = tree.findFile(WALLET_DIR_NAME)
+                var walletDir = treeNonNull.findFile(WALLET_DIR_NAME)
                 if (walletDir == null || !walletDir.isDirectory) {
-                    // may not exist
-                    walletDir = tree.createDirectory(WALLET_DIR_NAME)
+                    walletDir = treeNonNull.createDirectory(WALLET_DIR_NAME)
                 }
 
-                val finmanFile = walletDir.findFile(FILE_FINMAN)
+                if (walletDir == null) {
+                    withContext(Dispatchers.Main) {
+                        showMessage("Каталог wallet не найден.")
+                        renderEmptyState()
+                    }
+                    return@launch
+                }
+                val wallet = walletDir
+
+                val finmanFile = wallet.findFile(FILE_FINMAN)
 
                 if (finmanFile == null || !finmanFile.exists()) {
                     // nothing to read
@@ -344,7 +351,7 @@ class FinActivity : AppCompatActivity() {
                 setTextColor(0xFF00FFFF.toInt())
                 textSize = 14f
                 gravity = Gravity.CENTER
-                setPadding(24)
+                setPadding(24, 24, 24, 24)
             }
             accountsContainer.addView(tv)
         } else {
@@ -353,7 +360,7 @@ class FinActivity : AppCompatActivity() {
                     text = "$name — ${formatMoney(amt)}"
                     setTextColor(0xFF00FFFF.toInt()) // neon cyan
                     textSize = 16f
-                    setPadding(16)
+                    setPadding(16, 16, 16, 16)
                 }
                 accountsContainer.addView(row)
                 // separator
@@ -403,20 +410,23 @@ class FinActivity : AppCompatActivity() {
 
     // helper: find or create wallet dir and files
     private fun getOrCreateWalletFiles(): Pair<DocumentFile?, DocumentFile?> {
-        val tree = DocumentFile.fromTreeUri(this, folderUri!!)
-        var walletDir = tree?.findFile(WALLET_DIR_NAME)
-        if (walletDir == null || !walletDir.isDirectory) {
-            walletDir = tree?.createDirectory(WALLET_DIR_NAME)
-        }
-        walletDir ?: return Pair(null, null)
+        val fUri = folderUri ?: return Pair(null, null)
+        val tree = DocumentFile.fromTreeUri(this, fUri) ?: return Pair(null, null)
 
-        var finman = walletDir.findFile(FILE_FINMAN)
-        if (finman == null) {
-            finman = walletDir.createFile("text/plain", FILE_FINMAN)
+        var walletDir = tree.findFile(WALLET_DIR_NAME)
+        if (walletDir == null || !walletDir.isDirectory) {
+            walletDir = tree.createDirectory(WALLET_DIR_NAME)
         }
-        var finhyst = walletDir.findFile(FILE_FINHYST)
+        if (walletDir == null) return Pair(null, null)
+        val wallet = walletDir
+
+        var finman = wallet.findFile(FILE_FINMAN)
+        if (finman == null) {
+            finman = wallet.createFile("text/plain", FILE_FINMAN)
+        }
+        var finhyst = wallet.findFile(FILE_FINHYST)
         if (finhyst == null) {
-            finhyst = walletDir.createFile("text/plain", FILE_FINHYST)
+            finhyst = wallet.createFile("text/plain", FILE_FINHYST)
         }
         return Pair(finman, finhyst)
     }
@@ -432,15 +442,17 @@ class FinActivity : AppCompatActivity() {
         // simple dialog: amount (with sign), account name (optional)
         val layout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(24)
+            setPadding(24, 24, 24, 24)
         }
         val amountInput = EditText(this).apply {
             hint = "Сумма (например: +500 или -120)"
             inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_SIGNED or InputType.TYPE_NUMBER_FLAG_DECIMAL
+            setPadding(12, 12, 12, 12)
         }
         val accountInput = EditText(this).apply {
             hint = "Название счета (опционально)"
             inputType = InputType.TYPE_CLASS_TEXT
+            setPadding(12, 12, 12, 12)
         }
         layout.addView(amountInput)
         layout.addView(accountInput)
@@ -542,7 +554,6 @@ class FinActivity : AppCompatActivity() {
                     }
                 }
                 // if account not found -> do not create new account here (user requested to add accounts via settings)
-                // alternative: you could create new account; but spec said adding accounts via FinSettingsActivity
             }
 
             // rebuild finman plaintext
