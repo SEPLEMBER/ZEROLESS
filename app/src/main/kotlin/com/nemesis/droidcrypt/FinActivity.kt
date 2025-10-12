@@ -6,7 +6,6 @@ import android.content.Intent
 import android.content.SharedPreferences
 import android.net.Uri
 import android.os.Bundle
-import android.provider.DocumentsContract
 import android.text.InputType
 import android.view.Gravity
 import android.view.View
@@ -40,6 +39,7 @@ class FinActivity : AppCompatActivity() {
 
         // wallet-specific keys
         private const val PREF_KEY_WALLET_PASSWORD_HASH = "walletPasswordHash"
+        private const val PREF_KEY_WALLET_PASSWORD_PLAIN = "walletPasswordPlain" // автозагрузка пароля
         private const val PREF_KEY_WALLET_INFLATION_ENABLED = "walletInflationEnabled"
         private const val PREF_KEY_WALLET_INFLATION_PERCENT = "walletInflationPercent"
         private const val PREF_KEY_WALLET_INITIALIZED = "walletInitialized"
@@ -116,14 +116,22 @@ class FinActivity : AppCompatActivity() {
             showAddTransactionDialog()
         }
 
-        // if wallet password not set -> inform user, else prompt for password to decrypt
+        // if wallet password not set -> inform user, else try auto-load plain password, otherwise prompt for password
         val hashed = prefs.getString(PREF_KEY_WALLET_PASSWORD_HASH, null)
         if (hashed.isNullOrEmpty()) {
             showMessage("Пароль не установлен. Данные недоступны.")
             renderEmptyState()
         } else {
-            // prompt for password
-            showPasswordDialogAndLoadData()
+            // try to autoload plain password if available
+            val savedPlain = prefs.getString(PREF_KEY_WALLET_PASSWORD_PLAIN, null)
+            if (!savedPlain.isNullOrEmpty()) {
+                currentPassword = savedPlain.toCharArray()
+                // attempt to load and decrypt; if decrypt fails we'll prompt the user interactively
+                loadFinMan()
+            } else {
+                // no saved plain -> prompt user
+                showPasswordDialogAndLoadData()
+            }
         }
     }
 
@@ -167,12 +175,12 @@ class FinActivity : AppCompatActivity() {
                 val hashedStored = prefs.getString(PREF_KEY_WALLET_PASSWORD_HASH, "") ?: ""
                 val hashedInput = sha256Hex(pwdChars)
                 if (hashedInput.equals(hashedStored, ignoreCase = true)) {
-                    // accepted
+                    // accepted: keep in memory and persist plain for auto-load (note: plain storage is insecure)
                     currentPassword = pwdChars
+                    prefs.edit().putString(PREF_KEY_WALLET_PASSWORD_PLAIN, pwd).apply()
                     hideMessage()
                     loadFinMan()
                 } else {
-                    // clear pwdChars
                     for (i in pwdChars.indices) pwdChars[i] = '\u0000'
                     Toast.makeText(this, "Неверный пароль", Toast.LENGTH_SHORT).show()
                     renderEmptyState()
@@ -242,7 +250,7 @@ class FinActivity : AppCompatActivity() {
                 val finmanFile = wallet.findFile(FILE_FINMAN)
 
                 if (finmanFile == null || !finmanFile.exists()) {
-                    // nothing to read
+                    // nothing to read (file absent)
                     withContext(Dispatchers.Main) {
                         renderEmptyState()
                     }
@@ -252,26 +260,35 @@ class FinActivity : AppCompatActivity() {
                 // read file content
                 val finmanUri = finmanFile.uri
                 val rawEncrypted = readTextFromUri(finmanUri)
-                val pwd = currentPassword ?: run {
-                    withContext(Dispatchers.Main) {
-                        Toast.makeText(this@FinActivity, "Пароль отсутствует в памяти", Toast.LENGTH_SHORT).show()
-                        renderEmptyState()
+
+                // If file content is blank, treat as empty (do not call Secure.decrypt on blank)
+                val decrypted = if (rawEncrypted.isBlank()) {
+                    ""
+                } else {
+                    val pwd = currentPassword ?: run {
+                        withContext(Dispatchers.Main) {
+                            Toast.makeText(this@FinActivity, "Пароль отсутствует в памяти", Toast.LENGTH_SHORT).show()
+                            renderEmptyState()
+                        }
+                        return@launch
                     }
-                    return@launch
+                    try {
+                        // pass a copy to Secure.decrypt to avoid it zeroing our kept password
+                        Secure.decrypt(pwd.copyOf(), rawEncrypted)
+                    } catch (e: Exception) {
+                        // если автоматическая загрузка пароля (из prefs) была неверной, очистим и запросим ввод
+                        withContext(Dispatchers.Main) {
+                            // clear saved plain password to avoid repeated failures
+                            prefs.edit().remove(PREF_KEY_WALLET_PASSWORD_PLAIN).apply()
+                            currentPassword?.let { for (i in it.indices) it[i] = '\u0000' }
+                            currentPassword = null
+                            showPasswordDialogAndLoadData()
+                        }
+                        return@launch
+                    }
                 }
 
-                val decrypted = try {
-                    // pass a copy to Secure.decrypt to avoid it zeroing our kept password
-                    Secure.decrypt(pwd.copyOf(), rawEncrypted)
-                } catch (e: Exception) {
-                    withContext(Dispatchers.Main) {
-                        showMessage("Ошибка дешифровки: проверьте пароль.")
-                        renderEmptyState()
-                    }
-                    return@launch
-                }
-
-                // parse decrypted
+                // parse decrypted (may be empty string)
                 parseFinManAndRender(decrypted)
 
             } catch (e: Exception) {
@@ -502,15 +519,19 @@ class FinActivity : AppCompatActivity() {
                 return@withContext
             }
 
-            // read and decrypt finman
+            // read and decrypt finman (if blank -> treat as empty)
             val rawEncrypted = readTextFromUri(finmanDoc.uri)
-            val plainFinman = try {
-                Secure.decrypt(currentPassword!!.copyOf(), rawEncrypted)
-            } catch (e: Exception) {
-                withContext(Dispatchers.Main) {
-                    Toast.makeText(this@FinActivity, "Ошибка дешифровки finman: ${e.message}", Toast.LENGTH_SHORT).show()
+            val plainFinman = if (rawEncrypted.isBlank()) {
+                ""
+            } else {
+                try {
+                    Secure.decrypt(currentPassword!!.copyOf(), rawEncrypted)
+                } catch (e: Exception) {
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(this@FinActivity, "Ошибка дешифровки finman: ${e.message}", Toast.LENGTH_SHORT).show()
+                    }
+                    return@withContext
                 }
-                return@withContext
             }
 
             // update model
@@ -545,15 +566,12 @@ class FinActivity : AppCompatActivity() {
             // apply transaction: update total and account if provided
             total += amount
             if (accountName.isNotEmpty()) {
-                var updated = false
                 for (idx in accounts.indices) {
                     if (accounts[idx].first.equals(accountName, ignoreCase = true)) {
                         accounts[idx] = Pair(accounts[idx].first, accounts[idx].second + amount)
-                        updated = true
                         break
                     }
                 }
-                // if account not found -> do not create new account here (user requested to add accounts via settings)
             }
 
             // rebuild finman plaintext
