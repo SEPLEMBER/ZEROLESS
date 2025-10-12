@@ -1,0 +1,175 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#0A0A0A"
+    android:padding="12dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical">
+
+        <TextView
+            android:id="@+id/titleText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Настройки кошелька"
+            android:textColor="#00FFFF"
+            android:textSize="20sp"
+            android:gravity="center"
+            android:paddingTop="8dp"
+            android:paddingBottom="8dp"/>
+
+        <TextView
+            android:id="@+id/infoText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Добавьте счета, установите пароль и настройте инфляцию."
+            android:textColor="#00FFFF"
+            android:textSize="12sp"
+            android:paddingBottom="8dp"/>
+
+        <!-- Add account -->
+        <EditText
+            android:id="@+id/addAccountNameInput"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="Название счёта"
+            android:textColor="#00FFFF"
+            android:hintTextColor="#555555"
+            android:backgroundTint="#222222"
+            android:padding="8dp"/>
+
+        <EditText
+            android:id="@+id/addAccountBalanceInput"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="Начальный баланс (например 1000)"
+            android:inputType="numberDecimal"
+            android:textColor="#00FFFF"
+            android:hintTextColor="#555555"
+            android:backgroundTint="#222222"
+            android:padding="8dp"
+            android:layout_marginTop="6dp"/>
+
+        <TextView
+            android:id="@+id/addAccountButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Добавить счёт"
+            android:textColor="#00FFFF"
+            android:textSize="14sp"
+            android:padding="10dp"
+            android:layout_marginTop="6dp"/>
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="#222222"
+            android:layout_marginTop="8dp"/>
+
+        <!-- Accounts list -->
+        <LinearLayout
+            android:id="@+id/accountsContainer"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingTop="8dp"/>
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="#222222"
+            android:layout_marginTop="8dp"/>
+
+        <!-- Inflation -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:paddingTop="8dp">
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:text="Включить инфляцию"
+                android:textColor="#00FFFF"
+                android:layout_weight="1"/>
+
+            <com.google.android.material.switchmaterial.SwitchMaterial
+                android:id="@+id/inflationSwitch"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"/>
+        </LinearLayout>
+
+        <EditText
+            android:id="@+id/inflationPercentInput"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="Процент инфляции в год (например 5.0)"
+            android:inputType="numberDecimal"
+            android:textColor="#00FFFF"
+            android:hintTextColor="#555555"
+            android:backgroundTint="#222222"
+            android:padding="8dp"
+            android:layout_marginTop="6dp"/>
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="#222222"
+            android:layout_marginTop="8dp"/>
+
+        <!-- Password -->
+        <EditText
+            android:id="@+id/passwordNewInput"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="Новый пароль (оставьте пустым, если не менять)"
+            android:inputType="textPassword"
+            android:textColor="#00FFFF"
+            android:hintTextColor="#555555"
+            android:padding="8dp"
+            android:backgroundTint="#222222"
+            android:layout_marginTop="8dp"/>
+
+        <EditText
+            android:id="@+id/passwordConfirmInput"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="Повторите пароль"
+            android:inputType="textPassword"
+            android:textColor="#00FFFF"
+            android:hintTextColor="#555555"
+            android:padding="8dp"
+            android:backgroundTint="#222222"
+            android:layout_marginTop="6dp"/>
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="#222222"
+            android:layout_marginTop="8dp"/>
+
+        <TextView
+            android:id="@+id/saveButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Сохранить"
+            android:textColor="#00FFFF"
+            android:gravity="center"
+            android:padding="12dp"
+            android:layout_marginTop="10dp"/>
+
+        <TextView
+            android:id="@+id/messageText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text=""
+            android:textColor="#FF8888"
+            android:paddingTop="12dp"/>
+    </LinearLayout>
+</ScrollView>
