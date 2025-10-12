@@ -90,6 +90,27 @@
             android:configChanges="orientation|screenSize" />
 
                 <activity
+            android:name=".FinSettingsActivity"
+            android:exported="false"
+            android:parentActivityName=".FinActivity"
+            android:theme="@style/VprTheme"
+            android:configChanges="orientation|screenSize" />
+
+                <activity
+            android:name=".FinHistoyActivity"
+            android:exported="false"
+            android:parentActivityName=".FinActivity"
+            android:theme="@style/VprTheme"
+            android:configChanges="orientation|screenSize" />
+
+                <activity
+            android:name=".FinActivity"
+            android:exported="false"
+            android:parentActivityName=".MainActivity"
+            android:theme="@style/VprTheme"
+            android:configChanges="orientation|screenSize" />
+
+                <activity
             android:name=".EggActivity"
             android:exported="false"
             android:parentActivityName=".MainActivity"
