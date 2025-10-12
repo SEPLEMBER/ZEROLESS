@@ -394,8 +394,8 @@ class FinSettingsActivity : AppCompatActivity() {
                     val encryptedFinman = Secure.encrypt(currentPasswordChars!!.copyOf(), finmanPlain)
                     writeTextToDocument(finmanDoc, encryptedFinman)
 
-                    // create empty history
-                    val encryptedHist = Secure.encrypt(currentPasswordChars!!.copyOf(), "")
+                    // create empty history -> encrypt a single space instead of empty string
+                    val encryptedHist = Secure.encrypt(currentPasswordChars!!.copyOf(), " ")
                     writeTextToDocument(finhystDoc, encryptedHist)
 
                     prefs.edit().putBoolean(PREF_KEY_WALLET_INITIALIZED, true).apply()
