@@ -12,7 +12,6 @@ import android.view.View
 import android.view.WindowManager
 import android.widget.EditText
 import android.widget.LinearLayout
-import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
@@ -108,7 +107,7 @@ class FinHistoryActivity : AppCompatActivity() {
         val input = EditText(this).apply {
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
             hint = "Введите пароль"
-            setPadding(24)
+            setPadding(24, 24, 24, 24)
         }
         AlertDialog.Builder(this)
             .setTitle("Введите пароль кошелька")
@@ -158,7 +157,9 @@ class FinHistoryActivity : AppCompatActivity() {
                     }
                     return@launch
                 }
-                val walletDir = tree.findFile(WALLET_DIR_NAME)
+                val treeNonNull = tree
+
+                val walletDir = treeNonNull.findFile(WALLET_DIR_NAME)
                 if (walletDir == null || !walletDir.exists()) {
                     withContext(Dispatchers.Main) {
                         messageText.text = "Каталог wallet не найден."
@@ -166,8 +167,10 @@ class FinHistoryActivity : AppCompatActivity() {
                     }
                     return@launch
                 }
-                val finmanFile = walletDir.findFile(FILE_FINMAN)
-                val finhystFile = walletDir.findFile(FILE_FINHYST)
+                val wallet = walletDir
+
+                val finmanFile = wallet.findFile(FILE_FINMAN)
+                val finhystFile = wallet.findFile(FILE_FINHYST)
                 if (finmanFile == null || finhystFile == null) {
                     withContext(Dispatchers.Main) {
                         messageText.text = "Файлы кошелька не найдены."
@@ -251,7 +254,7 @@ class FinHistoryActivity : AppCompatActivity() {
                 setTextColor(0xFF00FF00.toInt())
                 textSize = 14f
                 gravity = Gravity.CENTER
-                setPadding(24)
+                setPadding(24, 24, 24, 24)
             }
             historyContainer.addView(tv)
         } else {
@@ -267,7 +270,7 @@ class FinHistoryActivity : AppCompatActivity() {
                     text = "$datePart — $amountPart$accDisplay"
                     setTextColor(0xFF00FF00.toInt())
                     textSize = 14f
-                    setPadding(8)
+                    setPadding(8, 8, 8, 8)
                 }
                 historyContainer.addView(tv)
                 val sep = View(this).apply {
@@ -298,8 +301,19 @@ class FinHistoryActivity : AppCompatActivity() {
     private suspend fun clearHistoryFile() {
         withContext(Dispatchers.IO) {
             try {
-                val tree = folderUri?.let { DocumentFile.fromTreeUri(this@FinHistoryActivity, it) }
-                val walletDir = tree?.findFile(WALLET_DIR_NAME)
+                val fUri = folderUri ?: run {
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(this@FinHistoryActivity, "SAF папка не выбрана.", Toast.LENGTH_SHORT).show()
+                    }
+                    return@withContext
+                }
+                val tree = DocumentFile.fromTreeUri(this@FinHistoryActivity, fUri) ?: run {
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(this@FinHistoryActivity, "Невалидная SAF папка.", Toast.LENGTH_SHORT).show()
+                    }
+                    return@withContext
+                }
+                val walletDir = tree.findFile(WALLET_DIR_NAME)
                 if (walletDir == null) {
                     withContext(Dispatchers.Main) {
                         Toast.makeText(this@FinHistoryActivity, "Каталог wallet не найден.", Toast.LENGTH_SHORT).show()
