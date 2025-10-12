@@ -35,6 +35,7 @@ class FinSettingsActivity : AppCompatActivity() {
         private const val PREF_KEY_DISABLE_SCREENSHOTS = "disableScreenshots"
 
         private const val PREF_KEY_WALLET_PASSWORD_HASH = "walletPasswordHash"
+        private const val PREF_KEY_WALLET_PASSWORD_PLAIN = "walletPasswordPlain" // <-- новый ключ (plain)
         private const val PREF_KEY_WALLET_INFLATION_ENABLED = "walletInflationEnabled"
         private const val PREF_KEY_WALLET_INFLATION_PERCENT = "walletInflationPercent"
         private const val PREF_KEY_WALLET_INITIALIZED = "walletInitialized"
@@ -128,9 +129,17 @@ class FinSettingsActivity : AppCompatActivity() {
             onSaveClicked()
         }
 
-        // If wallet initialized, require current password to load existing accounts
+        // If wallet initialized, try to auto-load plain password from prefs first,
+        // otherwise require current password from the user.
         if (walletInitialized) {
-            promptForPasswordAndLoad()
+            val savedPlain = prefs.getString(PREF_KEY_WALLET_PASSWORD_PLAIN, null)
+            if (!savedPlain.isNullOrEmpty()) {
+                currentPasswordChars = savedPlain.toCharArray()
+                // try to load with stored plain; if fails, prompt will be shown by loadFinManForSettings
+                loadFinManForSettings()
+            } else {
+                promptForPasswordAndLoad()
+            }
         } else {
             // fresh state
             renderAccountsList()
@@ -158,7 +167,7 @@ class FinSettingsActivity : AppCompatActivity() {
             .setView(input)
             .setCancelable(false)
             .setPositiveButton("OK") { dialog, _ ->
-                val pwd = input.text?.toString()?.trim() ?: ""
+                val pwd = input.text?.toString() ?: ""
                 if (pwd.isEmpty()) {
                     Toast.makeText(this, "Пароль пустой", Toast.LENGTH_SHORT).show()
                     dialog.dismiss()
@@ -223,18 +232,23 @@ class FinSettingsActivity : AppCompatActivity() {
                     return@launch
                 }
                 val raw = readTextFromUri(finmanFile.uri)
+
                 val pwd = currentPasswordChars ?: run {
                     withContext(Dispatchers.Main) {
                         Toast.makeText(this@FinSettingsActivity, "Пароль отсутствует в памяти", Toast.LENGTH_SHORT).show()
                     }
                     return@launch
                 }
+
                 val plain = try {
                     Secure.decrypt(pwd.copyOf(), raw)
                 } catch (e: Exception) {
+                    // если автоматическая загрузка пароля (из prefs) была неверной, попросим ввести пароль вручную
                     withContext(Dispatchers.Main) {
-                        messageText.text = "Ошибка дешифровки finman."
-                        messageText.visibility = View.VISIBLE
+                        // clear the auto-loaded password chars
+                        currentPasswordChars?.let { for (i in it.indices) it[i] = '\u0000' }
+                        currentPasswordChars = null
+                        promptForPasswordAndLoad()
                     }
                     return@launch
                 }
@@ -364,8 +378,10 @@ class FinSettingsActivity : AppCompatActivity() {
 
                     val newChars = newPwd.toCharArray()
                     val newHash = sha256Hex(newChars)
-                    // Сохраняем хеш пароля сразу — чтобы приложение знало, что пароль задан даже если запись файлов не прошла.
+                    // Сохраняем хеш пароля
                     prefs.edit().putString(PREF_KEY_WALLET_PASSWORD_HASH, newHash).apply()
+                    // Сохраняем plain пароль для автозагрузки (ВАЖНО: небезопасно хранить plaintext).
+                    prefs.edit().putString(PREF_KEY_WALLET_PASSWORD_PLAIN, newPwd).apply()
 
                     // keep in memory for immediate encryption
                     currentPasswordChars?.let {
@@ -394,7 +410,7 @@ class FinSettingsActivity : AppCompatActivity() {
                     val encryptedFinman = Secure.encrypt(currentPasswordChars!!.copyOf(), finmanPlain)
                     writeTextToDocument(finmanDoc, encryptedFinman)
 
-                    // create empty history -> encrypt a single space instead of empty string
+                    // create empty history -> encrypt a single space (не пустая строка)
                     val encryptedHist = Secure.encrypt(currentPasswordChars!!.copyOf(), " ")
                     writeTextToDocument(finhystDoc, encryptedHist)
 
