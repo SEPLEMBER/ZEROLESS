@@ -34,6 +34,7 @@ class FinHistoryActivity : AppCompatActivity() {
         private const val PREF_KEY_DISABLE_SCREENSHOTS = "disableScreenshots"
 
         private const val PREF_KEY_WALLET_PASSWORD_HASH = "walletPasswordHash"
+        private const val PREF_KEY_WALLET_PASSWORD_PLAIN = "walletPasswordPlain" // <-- используем плейн если есть
         private const val PREF_KEY_WALLET_INFLATION_ENABLED = "walletInflationEnabled"
         private const val PREF_KEY_WALLET_INFLATION_PERCENT = "walletInflationPercent"
         private const val PREF_KEY_WALLET_INITIALIZED = "walletInitialized"
@@ -80,7 +81,7 @@ class FinHistoryActivity : AppCompatActivity() {
             }
         }
 
-        // If no password set -> show message
+        // If no password hash set -> show message and stop
         val storedHash = prefs.getString(PREF_KEY_WALLET_PASSWORD_HASH, null)
         if (storedHash.isNullOrEmpty()) {
             messageText.text = "Пароль не установлен. Данные недоступны."
@@ -88,7 +89,16 @@ class FinHistoryActivity : AppCompatActivity() {
             return
         }
 
-        promptForPasswordAndLoad()
+        // Try to auto-load plain password from prefs if present
+        val savedPlain = prefs.getString(PREF_KEY_WALLET_PASSWORD_PLAIN, null)
+        if (!savedPlain.isNullOrEmpty()) {
+            currentPasswordChars = savedPlain.toCharArray()
+            // attempt load; if decrypt fails — promptForPasswordAndLoad will be called by loadHistoryAndRender
+            loadHistoryAndRender()
+        } else {
+            // no plain saved — ask user
+            promptForPasswordAndLoad()
+        }
 
         clearHistoryButton.setOnClickListener {
             confirmAndClearHistory()
@@ -125,6 +135,8 @@ class FinHistoryActivity : AppCompatActivity() {
                 val hashedInput = sha256Hex(chars)
                 if (hashedInput.equals(hashedStored, ignoreCase = true)) {
                     currentPasswordChars = chars
+                    // also save plain for future automatic use (ВАЖНО: небезопасно хранить plain)
+                    prefs.edit().putString(PREF_KEY_WALLET_PASSWORD_PLAIN, pwd).apply()
                     dialog.dismiss()
                     loadHistoryAndRender()
                 } else {
@@ -185,6 +197,7 @@ class FinHistoryActivity : AppCompatActivity() {
                 val pwd = currentPasswordChars ?: run {
                     withContext(Dispatchers.Main) {
                         Toast.makeText(this@FinHistoryActivity, "Пароль отсутствует.", Toast.LENGTH_SHORT).show()
+                        promptForPasswordAndLoad()
                     }
                     return@launch
                 }
@@ -192,15 +205,24 @@ class FinHistoryActivity : AppCompatActivity() {
                 val finmanPlain = try {
                     Secure.decrypt(pwd.copyOf(), finmanRaw)
                 } catch (e: Exception) {
+                    // automatic password failed — ask user interactively
                     withContext(Dispatchers.Main) {
-                        messageText.text = "Ошибка дешифровки finman."
-                        messageText.visibility = View.VISIBLE
+                        // clear auto-loaded password
+                        currentPasswordChars?.let { for (i in it.indices) it[i] = '\u0000' }
+                        currentPasswordChars = null
+                        promptForPasswordAndLoad()
                     }
                     return@launch
                 }
+
                 val finhystPlain = try {
-                    if (finhystRaw.isBlank()) "" else Secure.decrypt(pwd.copyOf(), finhystRaw)
+                    // if file is blank or contains only the "space marker", treat as empty
+                    if (finhystRaw.isBlank()) "" else {
+                        val dec = Secure.decrypt(pwd.copyOf(), finhystRaw)
+                        if (dec.trim().isEmpty()) "" else dec
+                    }
                 } catch (e: Exception) {
+                    // if history decryption fails, continue with empty history
                     ""
                 }
 
@@ -327,14 +349,15 @@ class FinHistoryActivity : AppCompatActivity() {
                     }
                     return@withContext
                 }
-                // overwrite with empty encrypted string
+                // overwrite with non-empty encrypted marker (single space)
                 val pwd = currentPasswordChars ?: run {
                     withContext(Dispatchers.Main) {
                         Toast.makeText(this@FinHistoryActivity, "Пароль не в памяти.", Toast.LENGTH_SHORT).show()
+                        promptForPasswordAndLoad()
                     }
                     return@withContext
                 }
-                val encrypted = Secure.encrypt(pwd.copyOf(), "")
+                val encrypted = Secure.encrypt(pwd.copyOf(), " ")
                 writeTextToDocument(finhystFile, encrypted)
                 withContext(Dispatchers.Main) {
                     Toast.makeText(this@FinHistoryActivity, "История очищена.", Toast.LENGTH_SHORT).show()
