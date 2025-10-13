@@ -90,13 +90,6 @@
             android:configChanges="orientation|screenSize" />
 
                 <activity
-            android:name=".FinSettingsActivity"
-            android:exported="false"
-            android:parentActivityName=".FinActivity"
-            android:theme="@style/VprTheme"
-            android:configChanges="orientation|screenSize" />
-
-                <activity
             android:name=".StreetFoodActivity"
             android:exported="false"
             android:parentActivityName=".EggActivity"
