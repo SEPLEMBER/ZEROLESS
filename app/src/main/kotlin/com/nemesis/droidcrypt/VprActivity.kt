@@ -1329,9 +1329,11 @@ class VprActivity : AppCompatActivity() {
  *
  * Замечание: модуль ориентирован на удобство тестирования и независимость от UI.
  */
+
 private object FinanceV2 {
 
-    // --------- Public entrypoint ----------
+    // Low-priority finance v2 — расширенная версия. Если throws — вызывающий код должен продолжить работу.
+    // Public entrypoint
     /**
      * Попробовать распознать и обработать новую команду.
      * Если команда не распознана — вернуть пустой список.
@@ -1343,17 +1345,18 @@ private object FinanceV2 {
 
         // Используем "корни слов" для распознавания (проглатывание вариантов)
         return when {
-            lower.contains("xirr") || lower.contains("ирр") && lower.contains("x") -> handleXirr(cmd)
+            (lower.contains("xirr") || (lower.contains("ирр") && lower.contains("x"))) -> handleXirr(cmd)
             lower.contains("xirr") -> handleXirr(cmd)
             lower.contains("npv") || lower.contains("нпв") -> handleNpv(cmd)
-            rootIn(lower, "pmt", "пмт", "платеж", "платежь", "платёж", "платежи") -> handlePmt(cmd)
+            rootIn(lower, "pmt", "пмт", "платеж", "платёж", "платежи") -> handlePmt(cmd)
             rootIn(lower, "накоп", "накопить", "сбереж") || lower.contains("savingsgoal") -> handleSavingsGoal(cmd)
             rootIn(lower, "debtplan", "должн", "долг", "погаш") -> handleDebtPlan(cmd)
             else -> emptyList()
         }
     }
 
-    // --------- Handlers for commands ----------
+    // ---------- Handlers ----------
+
     private fun handleXirr(cmd: String): List<String> {
         val cf = parseCashflowsWithDates(cmd)
         if (cf == null) {
@@ -1361,21 +1364,41 @@ private object FinanceV2 {
         }
         if (cf.size < 2) return listOf("XIRR: нужно как минимум 2 движения (инвестиция и доход).")
 
+        val totalIn = cf.filter { it.second < 0.0 }.sumOf { it.second }
+        val totalOut = cf.filter { it.second > 0.0 }.sumOf { it.second }
+        val spanDays = kotlin.math.max(1.0, ChronoUnit.DAYS.between(cf.first().first, cf.last().first).toDouble())
+        val spanYears = spanDays / 365.0
+
         val result = try {
             xirr(cf)
         } catch (e: Exception) {
             null
         }
-        return if (result == null) {
-            listOf("XIRR: не удалось найти решение (не сходится). Попробуйте разные входные данные или явно укажите даты.")
+
+        if (result == null) {
+            return listOf("XIRR: не удалось найти решение (не сходится). Попробуйте разные входные данные или явно укажите даты.")
         } else {
-            val pct = result * 100.0
-            listOf("XIRR (годовая): ${"%.6f".format(pct)}%")
+            val annualPct = result * 100.0
+            val monthlyRate = Math.pow(1.0 + result, 1.0 / 12.0) - 1.0
+            val dailyRate = Math.pow(1.0 + result, 1.0 / 365.0) - 1.0
+            val hourlyRate = Math.pow(1.0 + result, 1.0 / (365.0 * 24.0)) - 1.0
+
+            // Check NPV at found rate (should be ~0)
+            val npvAt = npvWithDates(result, cf)
+
+            return listOf(
+                "XIRR (годовая действительная): ${formatPercent(annualPct)}%",
+                "Эквивалент: месяц ${formatPercent(monthlyRate * 100)}%  — в день ${formatPercent(dailyRate * 100)}%  — в час ${formatPercent(hourlyRate * 100)}%",
+                "Период: ${"%.1f".format(spanDays)} дней (~${"%.3f".format(spanYears)} лет)",
+                "Сумма входящих (инвестиций): ${formatMoney(totalIn)} (отрицательные = вложено)",
+                "Сумма исходящих (возвратов): ${formatMoney(totalOut)}",
+                "NPV при найденной ставке (контроль): ${formatMoney(npvAt)} (≈0 — допустимая погрешность)",
+                "Примечание: XIRR учитывает точные даты; при необычных потоках решение может быть не уникальным."
+            )
         }
     }
 
     private fun handleNpv(cmd: String): List<String> {
-        // Попробуем извлечь ставку и потоки
         val rate = extractPercentFromCommand(cmd)
         val flowsWithDates = parseCashflowsWithDates(cmd) // если есть даты — используем дисконт по дням
         val amounts = parseAmountsSimple(cmd)
@@ -1384,61 +1407,103 @@ private object FinanceV2 {
             return listOf("NPV: укажите ставку и/или потоки. Пример: 'npv 10% -100000 50000 60000' или 'npv 10% -100000@2024-01-01 60000@2025-01-01'")
         }
 
+        val out = mutableListOf<String>()
+
         if (flowsWithDates != null && rate != null) {
             val npvVal = npvWithDates(rate, flowsWithDates)
-            return listOf("NPV (ставка ${"%.6f".format(rate * 100)}%): ${formatMoney(npvVal)}")
+            val totalCash = flowsWithDates.sumOf { it.second }
+            val durationYears = ChronoUnit.DAYS.between(flowsWithDates.first().first, flowsWithDates.last().first).toDouble() / 365.0
+            out.add("NPV (даты): ставка ${formatPercent(rate * 100)}% → ${formatMoney(npvVal)}")
+            out.add("Сумма всех потоков: ${formatMoney(totalCash)}; период ~ ${"%.3f".format(durationYears)} лет")
+            // IRR estimate if possible
+            val irr = try { xirr(flowsWithDates) } catch (_: Exception) { null }
+            if (irr != null) {
+                out.add("Найденный IRR для тех же потоков: ${formatPercent(irr * 100)}% (годовой).")
+            }
+            out.add("Дисконтирование выполняется по точным дням относительно первого потока.")
+            return out
         }
 
         if (rate != null && amounts.isNotEmpty()) {
-            // равные периоды (год)
             val npvVal = npvEqualPeriods(rate, amounts)
-            return listOf("NPV (ставка ${"%.6f".format(rate * 100)}%): ${formatMoney(npvVal)}")
+            val total = amounts.sum()
+            out.add("NPV (равные периоды): ставка ${formatPercent(rate * 100)}% → ${formatMoney(npvVal)}")
+            out.add("Потоки: ${amounts.size} шт, сумма ${formatMoney(total)}")
+            // additional breakdown: PV of positive parts and PV of negative parts
+            val pvPos = amounts.mapIndexed { i, a -> if (a > 0) a / Math.pow(1.0 + rate, i.toDouble()) else 0.0 }.sum()
+            val pvNeg = amounts.mapIndexed { i, a -> if (a < 0) a / Math.pow(1.0 + rate, i.toDouble()) else 0.0 }.sum()
+            out.add("PV положительных потоков: ${formatMoney(pvPos)}, PV отрицательных: ${formatMoney(pvNeg)}")
+            return out
         }
 
         return listOf("NPV: недостаточно данных. Пример: 'npv 10% -100000 50000 60000' или с датами 'amount@YYYY-MM-DD'.")
     }
 
     private fun handlePmt(cmd: String): List<String> {
-        // искать principal, percent, term
         val nums = Regex("""(-?\d+(?:[.,]\d+)?)""").findAll(cmd).map { it.groupValues[1].replace(',', '.') }.toList()
         if (nums.isEmpty()) return listOf("PMT: укажите сумму кредита. Пример: 'pmt 150000 9% 15 лет annuity'")
-        // principal = first numeric that is plausibly a money (we'll take the first)
         val principal = nums[0].toDoubleOrNull() ?: return listOf("PMT: не удалось распознать сумму.")
         val percent = extractPercentFromCommand(cmd) ?: 0.0
-        val years = parseTimeYearsFromText(cmd) // fallback 1.0
+        val years = parseTimeYearsFromText(cmd)
         val months = Math.max(1, (years * 12.0).toInt())
-        val mode = if (cmd.lowercase().contains("diff") || cmd.lowercase().contains("дифф")) "diff" else "annuity"
+        val lower = cmd.lowercase()
+        val mode = if (lower.contains("diff") || lower.contains("дифф")) "diff" else "annuity"
 
-        return if (mode == "annuity") {
+        if (mode == "annuity") {
             val pmt = pmtAnnuity(principal, percent, months)
             val total = pmt * months
             val overpay = total - principal
+            val effectiveMonthly = if (percent != 0.0) percent / 12.0 else 0.0
+            val ear = Math.pow(1.0 + effectiveMonthly, 12.0) - 1.0
+            val perDay = pmt / 30.0
+            val perHour = perDay / 24.0
             val lines = mutableListOf<String>()
-            lines.add("Аннуитетный платёж: ${formatMoney(pmt)} ₽/мес")
-            lines.add("Срок: $months мес (~${"%.2f".format(years)} лет)")
+            lines.add("Аннуитетный платёж: ${formatMoney(pmt)} ₽/мес (всего $months мес)")
+            lines.add("Эффективная годовая (EAR): ${formatPercent(ear * 100)}% (номинал ${formatPercent(percent * 100)}%)")
+            lines.add("В день: ${formatMoney(perDay)} ₽; в час: ${formatMoney(perHour)} ₽")
             lines.add("Общая выплата: ${formatMoney(total)} ₽ (переплата ${formatMoney(overpay)} ₽)")
-            // показываем первые 12 строк амортизации (по желанию — можно изменить)
             lines.add("Первые 12 месяцев амортизации (платёж, проценты, погашение тела, остаток):")
             val amort = amortizationAnnuity(principal, percent, months, 12)
             lines.addAll(amort)
-            lines
+            // add yearly summary (approx)
+            val yearsToShow = Math.min(10, months / 12)
+            if (yearsToShow >= 1) {
+                lines.add("Годовые итоги (приблизительно):")
+                var rem = principal
+                val rMonth = percent / 12.0
+                for (y in 1..yearsToShow) {
+                    var paidYear = 0.0
+                    var interestYear = 0.0
+                    for (m in 1..12) {
+                        val interest = rem * rMonth
+                        val principalPaid = (pmt - interest).coerceAtMost(rem)
+                        rem -= principalPaid
+                        interestYear += interest
+                        paidYear += (principalPaid + interest)
+                        if (rem <= 0.0) break
+                    }
+                    lines.add("Год $y: выплачено ${formatMoney(paidYear)}, проценты ${formatMoney(interestYear)}, остаток ${formatMoney(rem)}")
+                    if (rem <= 0.0) break
+                }
+            }
+            return lines
         } else {
             val (firstPayment, avgPayment, total) = pmtDifferentialSummary(principal, percent, months)
             val overpay = total - principal
-            mutableListOf(
-                "Дифференцированный платёж (линейное гашение):",
-                "Первый платёж: ${formatMoney(firstPayment)} ₽",
-                "Средний платёж (≈): ${formatMoney(avgPayment)} ₽",
-                "Общая выплата: ${formatMoney(total)} ₽ (переплата ${formatMoney(overpay)} ₽)"
-            ).apply {
-                add("Первые 12 месяцев (платёж, проценты, погашение тела, остаток):")
-                addAll(amortizationDifferential(principal, percent, months, 12))
-            }
+            val perDayAvg = avgPayment / 30.0
+            val perHourAvg = perDayAvg / 24.0
+            val out = mutableListOf<String>()
+            out.add("Дифференцированный платёж (линейное гашение):")
+            out.add("Первый платёж: ${formatMoney(firstPayment)} ₽, средний платёж: ${formatMoney(avgPayment)} ₽")
+            out.add("В день ≈ ${formatMoney(perDayAvg)} ₽, в час ≈ ${formatMoney(perHourAvg)} ₽")
+            out.add("Общая выплата: ${formatMoney(total)} ₽ (переплата ${formatMoney(overpay)} ₽)")
+            out.add("Первые 12 месяцев (платёж, проценты, погашение тела, остаток):")
+            out.addAll(amortizationDifferential(principal, percent, months, 12))
+            return out
         }
     }
 
     private fun handleSavingsGoal(cmd: String): List<String> {
-        // Распознать сумму, целевую дату или период, и % (если есть)
         val nums = Regex("""(\d+(?:[.,]\d+)?)""").findAll(cmd).map { it.groupValues[1].replace(',', '.') }.toList()
         if (nums.isEmpty()) return listOf("Накопить: укажите сумму. Пример: 'накопить 300000 к 01.06.2026 под 7%'")
         val amount = nums[0].toDoubleOrNull() ?: return listOf("Накопить: не удалось распознать сумму.")
@@ -1448,6 +1513,7 @@ private object FinanceV2 {
         val daysToUse = targetDays ?: (parseTimeYearsFromText(cmd) * 365.0).toInt().coerceAtLeast(30)
         if (daysToUse < 1) return listOf("Накопить: некорректный период.")
         val months = Math.max(1, Math.round(daysToUse / 30.0).toInt())
+
         if (annualRate == 0.0) {
             val perDay = amount / daysToUse
             val perWeek = perDay * 7.0
@@ -1455,25 +1521,28 @@ private object FinanceV2 {
             return listOf(
                 "Цель: ${formatMoney(amount)} ₽",
                 "Период: $daysToUse дней (~${"%.2f".format(months / 12.0)} лет)",
-                "Если без процентов — нужно откладывать: в день ${formatMoney(perDay)} ₽, в неделю ${formatMoney(perWeek)} ₽, в месяц ≈ ${formatMoney(perMonth)} ₽"
+                "Если без процентов — нужно откладывать: в день ${formatMoney(perDay)} ₽, в неделю ${formatMoney(perWeek)} ₽, в месяц ≈ ${formatMoney(perMonth)} ₽",
+                "Совет: при возможности учитывайте налог/комиссии и округляйте платежи в большую сторону."
             )
         } else {
-            // рассчитать ежемесячный платёж, который накопит будущую стоимость amount с ежемесячной капитализацией
             val pm = pmtForFutureValue(amount, annualRate, months)
+            val totalPaid = pm * months
+            val interestEarned = totalPaid - amount
             val perDay = pm / 30.0
             val perWeek = perDay * 7.0
+            val effMonthly = annualRate / 12.0
+            val ear = Math.pow(1.0 + effMonthly, 12.0) - 1.0
             return listOf(
                 "Цель: ${formatMoney(amount)} ₽",
                 "Период: $daysToUse дней (~$months мес)",
-                "Учитывая ${"%.4f".format(annualRate * 100)}% годовых (помесячная капитализация):",
-                "Нужно ежемесячно: ${formatMoney(pm)} ₽ (≈ в день ${formatMoney(perDay)} ₽, в неделю ${formatMoney(perWeek)} ₽)"
+                "Ставка: ${formatPercent(annualRate * 100)}% годовых (помесячная капитализация). EAR: ${formatPercent(ear * 100)}%",
+                "Нужно ежемесячно: ${formatMoney(pm)} ₽ (≈ в день ${formatMoney(perDay)} ₽, в неделю ${formatMoney(perWeek)} ₽)",
+                "Итого уплачено: ${formatMoney(totalPaid)} ₽ (в т.ч. процентов/дохода ${formatMoney(interestEarned)} ₽)"
             )
         }
     }
 
     private fun handleDebtPlan(cmd: String): List<String> {
-        // Очень простая реализация: парсинг долгов формата name:amount@% или amount@%
-        // Пример: "debtplan a:100000@12% b:50000@8% payment 15000 strategy avalanche"
         val debtTokens = Regex("""([A-Za-zА-Яа-я0-9_+-]+)[:=]?\s*([0-9]+(?:[.,][0-9]+)?)\s*@\s*([0-9]+(?:[.,][0-9]+)?)%""").findAll(cmd)
             .mapNotNull {
                 val name = it.groupValues[1]
@@ -1492,28 +1561,32 @@ private object FinanceV2 {
         val strategy = if (cmd.lowercase().contains("avalanche") || cmd.lowercase().contains("ставк")) Strategy.AVALANCHE else Strategy.SNOWBALL
 
         val plan = simulateDebtPlan(debtTokens, monthlyPayment, strategy)
+
+        val initialTotal = debtTokens.sumOf { it.balance }
         val out = mutableListOf<String>()
         out.add("Debt plan (${if (strategy == Strategy.AVALANCHE) "avalanche (по ставке)" else "snowball (по балансу)"}):")
-        out.add("Общий месячный платёж: ${formatMoney(monthlyPayment)} ₽")
+        out.add("Исходная сумма долгов: ${formatMoney(initialTotal)} ₽; общий месячный платёж: ${formatMoney(monthlyPayment)} ₽")
         out.add("Ожидаемое время до полного погашения: ${plan.months} мес (~${"%.2f".format(plan.months / 12.0)} лет)")
         out.add("Сумма выплаченных процентов: ${formatMoney(plan.totalInterest)} ₽")
-        out.add("Порядок погашения (по шагам):")
+        out.add("Средний платёж в месяц: ${formatMoney(plan.steps.map { it.paid }.average())} ₽ (за период моделирования)")
+        out.add("Первые месяцы (показаны максимум 20):")
         plan.steps.take(20).forEachIndexed { idx, s ->
-            out.add("Мес ${idx + 1}: выплачено ${formatMoney(s.paid)}, проценты ${formatMoney(s.interest)}, к остатку ${formatMoney(s.remaining)}")
+            out.add("Мес ${idx + 1}: выплачено ${formatMoney(s.paid)}, проценты ${formatMoney(s.interest)}, остаток ${formatMoney(s.remaining)}")
         }
         if (plan.months > plan.steps.size) {
             out.add("(Показаны первые ${plan.steps.size} месяцев)")
         }
+        out.add("Примечание: модель простая — предполагает что весь ежемесячный платёж распределяется по приоритетному порядку, минимальные платежи не фиксируются.")
         return out
     }
 
-    // --------- Data structures ----------
+    // ---------- Data structures ----------
     private data class Debt(val name: String, var balance: Double, val annualRate: Double)
     private enum class Strategy { SNOWBALL, AVALANCHE }
     private data class DebtPlanStep(val paid: Double, val interest: Double, val remaining: Double)
     private data class DebtPlanResult(val months: Int, val totalInterest: Double, val steps: List<DebtPlanStep>)
 
-    // --------- Core algorithms & helpers ----------
+    // ---------- Utilities & helpers ----------
 
     /** Проверяет принадлежность любого из "корней" слова (root) в тексте */
     private fun rootIn(textLower: String, vararg roots: String): Boolean {
@@ -1531,7 +1604,6 @@ private object FinanceV2 {
      */
     private fun parseCashflowsWithDates(cmd: String): List<Pair<LocalDate, Double>>? {
         val list = mutableListOf<Pair<LocalDate, Double>>()
-        // паттерн amount@date (несколько форматов даты)
         val pattern = Regex("""(-?\d+(?:[.,]\d+)?)\s*@\s*([0-9]{4}-[0-9]{2}-[0-9]{2}|[0-9]{1,2}\.[0-9]{1,2}\.[0-9]{4}|[0-9]{1,2}-[0-9]{1,2}-[0-9]{4})""")
         val matches = pattern.findAll(cmd).toList()
         if (matches.isEmpty()) return null
@@ -1547,7 +1619,7 @@ private object FinanceV2 {
     private fun tryParseDate(s: String): LocalDate? {
         return try {
             when {
-                s.contains('-') && s.length >= 10 -> LocalDate.parse(s) // yyyy-MM-dd
+                s.contains('-') && s.length >= 10 && s[4] == '-' -> LocalDate.parse(s) // yyyy-MM-dd
                 s.contains('.') -> {
                     val parts = s.split('.')
                     if (parts.size == 3) {
@@ -1586,35 +1658,27 @@ private object FinanceV2 {
     }
 
     private fun parseTimeYearsFromText(cmd: String): Double {
-        // ищем "N лет" или "N мес" или просто число — считаем как годы
         val yearMatch = Regex("""(\d+(?:[.,]\d+)?)\s*(лет|год|года)""", RegexOption.IGNORE_CASE).find(cmd)
         if (yearMatch != null) return yearMatch.groupValues[1].replace(',', '.').toDoubleOrNull() ?: 1.0
         val monthMatch = Regex("""(\d+(?:[.,]\d+)?)\s*(мес|месяц|месяцев)""", RegexOption.IGNORE_CASE).find(cmd)
         if (monthMatch != null) return (monthMatch.groupValues[1].replace(',', '.').toDoubleOrNull() ?: 1.0) / 12.0
-        // bare number fallback
         val numOnly = Regex("""\b(\d+(?:[.,]\d+)?)\b""").find(cmd)
         if (numOnly != null) {
             val v = numOnly.groupValues[1].replace(',', '.').toDoubleOrNull() ?: return 1.0
-            // Heuristic: если v > 30 -> возможно месяцы? но мы вернём как годы
             return v
         }
         return 1.0
     }
 
-    // --- Math / Finance helpers ---
+    // --- Math / Finance helpers (improved) ---
 
-    /**
-     * XIRR solver (Newton-Raphson with fallback to secant).
-     * cashflows: List of Pair(date, amount) — amounts can be negative (investment) / positive (returns)
-     * Returns annual rate as double (e.g. 0.1234) or null if no convergence.
-     */
+    // XIRR solver (Newton + bisection fallback) — оставлен как раньше
     private fun xirr(cashflows: List<Pair<LocalDate, Double>>): Double? {
         if (cashflows.size < 2) return null
         val baseDate = cashflows.first().first
         val days = cashflows.map { ChronoUnit.DAYS.between(baseDate, it.first).toDouble() }
         val amounts = cashflows.map { it.second }
 
-        // function f(r) = sum_i amount_i / (1 + r)^{days_i/365}
         fun f(r: Double): Double {
             return amounts.indices.sumOf { i ->
                 val denom = Math.pow(1.0 + r, days[i] / 365.0)
@@ -1623,7 +1687,6 @@ private object FinanceV2 {
         }
 
         fun fprime(r: Double): Double {
-            // derivative with respect to r
             return amounts.indices.sumOf { i ->
                 val t = days[i] / 365.0
                 val denom = Math.pow(1.0 + r, t + 1.0)
@@ -1631,37 +1694,30 @@ private object FinanceV2 {
             }
         }
 
-        // initial guess:
-        var r = 0.1
-        // If all cashflows are positive or all negative — no solution
         val allPos = amounts.all { it >= 0.0 }
         val allNeg = amounts.all { it <= 0.0 }
         if (allPos || allNeg) return null
 
-        // Newton iterations
+        var r = 0.1
         val maxIter = 200
         val tol = 1e-9
         for (i in 0 until maxIter) {
             val y = f(r)
             val dy = fprime(r)
             if (Math.abs(y) < tol) return r
-            // avoid dividing by zero
             if (dy == 0.0) break
             val rNext = r - y / dy
-            // keep r in reasonable bounds to avoid complex roots
             if (!rNext.isFinite() || rNext <= -0.999999999) break
             if (Math.abs(rNext - r) < 1e-12) return rNext
             r = rNext
         }
 
-        // Fallback: secant / bisection between -0.9999 and 10
         var a = -0.9999999
         var b = 10.0
         var fa = f(a)
         var fb = f(b)
         if (fa.isNaN() || fb.isNaN()) return null
         if (fa * fb > 0) {
-            // try expanding b
             var bb = b
             var fbb = fb
             var attempts = 0
@@ -1696,7 +1752,6 @@ private object FinanceV2 {
         return null
     }
 
-    /** NPV — если даны даты, дисконтируем по точным дням относительно базовой даты (первый поток) */
     private fun npvWithDates(rate: Double, flows: List<Pair<LocalDate, Double>>): Double {
         val base = flows.first().first
         return flows.fold(0.0) { acc, p ->
@@ -1705,14 +1760,12 @@ private object FinanceV2 {
         }
     }
 
-    /** NPV для равных периодов (потоки в порядке) */
     private fun npvEqualPeriods(rate: Double, amounts: List<Double>): Double {
         return amounts.foldIndexed(0.0) { i, acc, amt ->
             acc + amt / Math.pow(1.0 + rate, i.toDouble())
         }
     }
 
-    /** Аннуитетный PMT (ежемесячный платёж). Возвращает платёж в тех же единицах, что и principal. */
     private fun pmtAnnuity(principal: Double, annualRate: Double, months: Int): Double {
         if (months <= 0) return principal
         val rMonth = annualRate / 12.0
@@ -1721,7 +1774,6 @@ private object FinanceV2 {
         return principal * rMonth * factor / (factor - 1.0)
     }
 
-    /** Амортизация для аннуитета — возвращает первые showFirst строк в читаемом формате */
     private fun amortizationAnnuity(principal: Double, annualRate: Double, months: Int, showFirst: Int): List<String> {
         val out = mutableListOf<String>()
         var remaining = principal
@@ -1746,7 +1798,6 @@ private object FinanceV2 {
         return out
     }
 
-    /** Дифференцированный платёж (линейная амортизация) — возвращает (first, avg, total) */
     private fun pmtDifferentialSummary(principal: Double, annualRate: Double, months: Int): Triple<Double, Double, Double> {
         if (months <= 0) return Triple(principal, principal, principal)
         val bodyPay = principal / months
@@ -1788,10 +1839,6 @@ private object FinanceV2 {
         return out
     }
 
-    /** Для накопительной цели: вычислить ежемесячный взнос чтобы по истечении nMonths получить futureValue.
-     * Формула for ordinary annuity: FV = PMT * [ ( (1+r)^n - 1 ) / r ]
-     * r = monthly rate
-     */
     private fun pmtForFutureValue(futureValue: Double, annualRate: Double, months: Int): Double {
         if (months <= 0) return futureValue
         val r = annualRate / 12.0
@@ -1800,18 +1847,16 @@ private object FinanceV2 {
         return futureValue * r / factor
     }
 
-    // --- Debt plan simulator (very simple model) ---
+    // Debt plan simulator (simple model)
     private fun simulateDebtPlan(debtsInput: List<Debt>, monthlyPayment: Double, strategy: Strategy): DebtPlanResult {
-        // Deep copy balances
         val debts = debtsInput.map { Debt(it.name, it.balance, it.annualRate) }.toMutableList()
         val steps = mutableListOf<DebtPlanStep>()
         var months = 0
         var totalInterest = 0.0
-        val maxIter = 60 * 12 // limit 60 years
+        val maxIter = 60 * 12
         while (debts.any { it.balance > 0.01 } && months < maxIter) {
             months++
             var remainingPayment = monthlyPayment
-            // choose order
             val ordered = when (strategy) {
                 Strategy.AVALANCHE -> debts.filter { it.balance > 0.01 }.sortedByDescending { it.annualRate }
                 Strategy.SNOWBALL -> debts.filter { it.balance > 0.01 }.sortedBy { it.balance }
@@ -1823,10 +1868,8 @@ private object FinanceV2 {
                 val monthlyRate = d.annualRate / 12.0
                 val interest = d.balance * monthlyRate
                 monthInterest += interest
-                val avail = remainingPayment
-                // минимальный платёж — только проценты (если payment too small, просто pay interest pro rata)
-                val pay = Math.min(avail, d.balance + interest)
-                // дифференцируемая логика: сначала платим проценты, затем тело
+                val needed = d.balance + interest
+                val pay = Math.min(remainingPayment, needed)
                 val towardsPrincipal = (pay - interest).coerceAtLeast(0.0)
                 d.balance = (d.balance - towardsPrincipal).coerceAtLeast(0.0)
                 remainingPayment -= pay
@@ -1835,22 +1878,29 @@ private object FinanceV2 {
             totalInterest += monthInterest
             val remainingTotal = debts.sumOf { it.balance }
             steps.add(DebtPlanStep(paidThisMonth, monthInterest, remainingTotal))
-            if (paidThisMonth <= 0.0) break // защита от зацикливания
+            if (paidThisMonth <= 0.0) break
         }
         return DebtPlanResult(months, totalInterest, steps)
     }
 
     // --- Formatting helpers ---
     private fun formatMoney(v: Double): String {
-        // формируем с двумя десятичными
         return try {
-            String.format("%.2f", v)
+            String.format(Locale.getDefault(), "%.2f", v)
         } catch (_: Exception) {
             v.toString()
         }
     }
 
-    // Reuse parseDaysFromText from the activity if desired — duplicate lightweight version here:
+    private fun formatPercent(v: Double): String {
+        return try {
+            String.format(Locale.getDefault(), "%.4f", v)
+        } catch (_: Exception) {
+            v.toString()
+        }
+    }
+
+    // lightweight parseDaysFromText (used by savings)
     private fun parseDaysFromText(textRaw: String): Int? {
         val text = textRaw.lowercase()
         val explicitDays = Regex("""\b(?:на|за)?\s*(\d{1,4})(?:-(\d{1,4}))?\s*(дн|дня|дней|дн\.)\b""", RegexOption.IGNORE_CASE).find(text)
@@ -1861,11 +1911,6 @@ private object FinanceV2 {
             val num = if (maybeNum.isBlank()) 1 else maybeNum.toIntOrNull() ?: 1
             return (num * 7).coerceAtLeast(1)
         }
-        // date like "к 7 ноября" or "7 ноября" — simple ISO not supported here (we rely on activity-level parser)
         return null
     }
 }
-
-// --------------------
-// Конец FinanceV2
-// --------------------
