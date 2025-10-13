@@ -22,15 +22,21 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.math.BigDecimal
+import java.math.MathContext
 import java.math.RoundingMode
 import java.security.SecureRandom
 import java.time.LocalDate
 import java.time.Month
 import java.time.temporal.ChronoUnit
+import java.util.Locale
 import kotlin.math.ln
 import kotlin.math.pow
 
 class VprActivity : AppCompatActivity() {
+
+    companion object {
+        private const val TAG = "VprActivity"
+    }
 
     // UI references
     private lateinit var messagesContainer: LinearLayout
@@ -108,13 +114,14 @@ class VprActivity : AppCompatActivity() {
                     addAssistantLine("= ${getString(R.string.err_processing_command)}: ${t.message ?: t::class.java.simpleName}")
                     scrollView.post { scrollView.fullScroll(ScrollView.FOCUS_DOWN) }
                 }
+                Log.e(TAG, "Error while processing command", t)
             }
         }
     }
 
     private suspend fun parseCommand(commandRaw: String): List<String> {
         val cmd = commandRaw.trim()
-        val lower = cmd.lowercase()
+        val lower = cmd.lowercase(Locale.getDefault())
         val colonIndex = cmd.indexOf(':')
 
         // --------------------
@@ -184,7 +191,8 @@ class VprActivity : AppCompatActivity() {
                                 launchedPkg = ri.activityInfo.packageName
                                 break
                             }
-                        } catch (_: Exception) {
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Attempt to launch candidate package failed: $pkg", e)
                         }
                     }
                 }
@@ -195,6 +203,7 @@ class VprActivity : AppCompatActivity() {
                     listOf("Не нашёл установленного терминала среди кандидатов ($candidatesStr). Укажите корректный пакет, например: 'терминал com.termux', или откройте страницу приложения в настройках.")
                 }
             } catch (t: Throwable) {
+                Log.e(TAG, "Failed to start terminal", t)
                 listOf("Не удалось запустить терминал: ${t.message ?: t::class.java.simpleName}")
             }
         }
@@ -217,6 +226,7 @@ class VprActivity : AppCompatActivity() {
                 }
                 listOf("Открываю системные настройки...")
             } catch (t: Throwable) {
+                Log.w(TAG, "Cannot open system settings", t)
                 listOf("Не удалось открыть системные настройки: ${t.message ?: t::class.java.simpleName}")
             }
         }
@@ -230,6 +240,7 @@ class VprActivity : AppCompatActivity() {
                 }
                 listOf("Открываю настройки приложения...")
             } catch (t: Throwable) {
+                Log.w(TAG, "Cannot open app settings", t)
                 listOf("Не удалось открыть настройки приложения: ${t.message ?: t::class.java.simpleName}")
             }
         }
@@ -251,9 +262,10 @@ class VprActivity : AppCompatActivity() {
                 val prevEnd = if (i == 0) rootEnd else matches[i - 1].range.last + 1
                 val effectivePrevEnd = if (colonIndex >= 0 && colonIndex < start && colonIndex >= prevEnd) colonIndex + 1 else prevEnd
                 val labelRaw = try { cmd.substring(effectivePrevEnd, start).trim() } catch (e: Exception) { "" }
-                val stopWords = setOf("сравн", "сравнить", "сравнц", "цен", "цена", "цены", "цену", "эти", "пожалуйста", "пожалуйстa")
-                val tokens = labelRaw.split(Regex("\\s+")).map { it.trim().trim(',', ';', ':', '.', '\"', '\'') }
-                    .filter { it.isNotEmpty() && it.lowercase() !in stopWords }
+                val stopWords = setOf("сравн", "сравнить", "сравнц", "цен", "цена", "цены", "цену", "эти", "пожалуйста")
+                val tokens = labelRaw.split(Regex("\\s+"))
+                    .map { it.trim().trim(',', ';', ':', '.', '\"', '\'') }
+                    .filter { it.isNotEmpty() && it.lowercase(Locale.getDefault()) !in stopWords && !it.matches(Regex("""^\d+$""")) }
                 val name = if (tokens.isEmpty()) "item${i + 1}" else tokens.takeLast(3).joinToString(" ")
                 val priceStr = m.groupValues[1].replace(',', '.')
                 val price = try { BigDecimal(priceStr) } catch (e: Exception) { BigDecimal.ZERO }
@@ -303,11 +315,11 @@ class VprActivity : AppCompatActivity() {
             val strengthLabel = entropyStrengthLabel(totalBitsBytes)
 
             return listOf(
-                getString(R.string.entropy_per_symbol_bytes, "%.4f".format(byteEntropyPerSymbol)),
-                getString(R.string.entropy_total_bits_bytes, "%.2f".format(totalBitsBytes), bytes.size),
-                getString(R.string.entropy_per_symbol_codepoints, "%.4f".format(codepointEntropyPerSymbol)),
-                getString(R.string.entropy_total_bits_codepoints, "%.2f".format(totalBitsCodepoints), codepoints),
-                "Средняя фон. непредсказуемость (по таблице частот): ${"%.4f".format(bgSurprisal)} бит/симв",
+                getString(R.string.entropy_per_symbol_bytes, "%.4f".format(Locale.getDefault(), byteEntropyPerSymbol)),
+                getString(R.string.entropy_total_bits_bytes, "%.2f".format(Locale.getDefault(), totalBitsBytes), bytes.size),
+                getString(R.string.entropy_per_symbol_codepoints, "%.4f".format(Locale.getDefault(), codepointEntropyPerSymbol)),
+                getString(R.string.entropy_total_bits_codepoints, "%.2f".format(Locale.getDefault(), totalBitsCodepoints), codepoints),
+                "Средняя фон. непредсказуемость (по таблице частот): ${"%.4f".format(Locale.getDefault(), bgSurprisal)} бит/симв",
                 getString(R.string.entropy_strength, strengthLabel)
             )
         }
@@ -349,7 +361,7 @@ class VprActivity : AppCompatActivity() {
 
             val outputs = mutableListOf<String>()
             outputs.add("Цель: ${amount.setScale(2, RoundingMode.HALF_UP)}")
-            outputs.add("Период: ${"%.1f".format(daysToUse)} дней (~${"%.2f".format(daysToUse / 30.0)} мес)")
+            outputs.add("Период: ${"%.1f".format(Locale.getDefault(), daysToUse)} дней (~${"%.2f".format(Locale.getDefault(), daysToUse / 30.0)} мес)")
             if (annualRate == BigDecimal.ZERO) {
                 outputs.add("Нужно откладывать: в день ${perDay.setScale(2, RoundingMode.HALF_UP)} ₽, в неделю ${perWeek.setScale(2, RoundingMode.HALF_UP)} ₽, в месяц ≈ ${perMonth.setScale(2, RoundingMode.HALF_UP)} ₽")
             } else {
@@ -360,13 +372,27 @@ class VprActivity : AppCompatActivity() {
                 val pm: BigDecimal = if (rMonth.compareTo(BigDecimal.ZERO) == 0) {
                     amount.divide(BigDecimal.valueOf(n.toLong()), 10, RoundingMode.HALF_UP)
                 } else {
-                    // PMT = FV * (r) / ((1+r)^n - 1)
-                    val rDouble = rMonth.toDouble()
-                    val factor = (1.0 + rDouble).pow(n.toDouble())
-                    val numerator = amount.toDouble() * rDouble
-                    val denom = factor - 1.0
-                    val pmt = if (denom == 0.0) amount.toDouble() / n.toDouble() else numerator / denom
-                    BigDecimal.valueOf(pmt).setScale(10, RoundingMode.HALF_UP)
+                    // PMT = FV * r / ((1+r)^n - 1)  (approximation using BigDecimal)
+                    try {
+                        val mc = MathContext(34)
+                        val onePlus = BigDecimal.ONE.add(rMonth, mc)
+                        val factor = onePlus.pow(n, mc)
+                        val numerator = amount.multiply(rMonth, mc).multiply(factor, mc)
+                        val denominator = factor.subtract(BigDecimal.ONE, mc)
+                        if (denominator.compareTo(BigDecimal.ZERO) == 0) {
+                            amount.divide(BigDecimal.valueOf(n.toLong()), 10, RoundingMode.HALF_UP)
+                        } else {
+                            numerator.divide(denominator, 10, RoundingMode.HALF_UP)
+                        }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Failed to calculate monthly pmt precisely, fallback to double", e)
+                        val rDouble = rMonth.toDouble()
+                        val factor = (1.0 + rDouble).pow(n.toDouble())
+                        val numerator = amount.toDouble() * rDouble
+                        val denom = factor - 1.0
+                        val pmt = if (denom == 0.0) amount.toDouble() / n.toDouble() else numerator / denom
+                        BigDecimal.valueOf(pmt).setScale(10, RoundingMode.HALF_UP)
+                    }
                 }
                 val perMonthWithInterest = pm.setScale(2, RoundingMode.HALF_UP)
                 val perDayApprox = pm.divide(BigDecimal(30), 10, RoundingMode.HALF_UP)
@@ -421,7 +447,7 @@ class VprActivity : AppCompatActivity() {
             val outputs = mutableListOf<String>()
             outputs.add("Кредит/Ипотека: сумма ${principal.setScale(2, RoundingMode.HALF_UP)}")
             outputs.add("Ставка (годовая): $ratePercentStr%")
-            outputs.add("Срок: ${"%.4f".format(years)} лет (${months} мес)")
+            outputs.add("Срок: ${"%.4f".format(Locale.getDefault(), years)} лет (${months} мес)")
             outputs.add("Ежемесячный платёж (аннуитет): ${monthlyPaymentBD.setScale(2, RoundingMode.HALF_UP)}")
             outputs.add("Общая выплата: ${totalPayment.setScale(2, RoundingMode.HALF_UP)} (переплата ${totalInterest.setScale(2, RoundingMode.HALF_UP)})")
             outputs.add("Средняя переплата: в год ${paymentPerYear.setScale(2, RoundingMode.HALF_UP)}, в месяц ${perMonthAvg.setScale(2, RoundingMode.HALF_UP)}, в день ${perDayAvg.setScale(4, RoundingMode.HALF_UP)}, в час ${perHourAvg.setScale(6, RoundingMode.HALF_UP)}")
@@ -464,12 +490,12 @@ class VprActivity : AppCompatActivity() {
             val perHourRate = (1.0 + annualDouble).pow(1.0 / (365.0 * 24.0)) - 1.0
 
             val ratePercentStr = (annualRate.multiply(BigDecimal(100))).setScale(4, RoundingMode.HALF_UP).toPlainString()
-            val perDayPercent = String.format("%.6f", perDayRate * 100.0)
-            val perHourPercent = String.format("%.8f", perHourRate * 100.0)
+            val perDayPercent = String.format(Locale.getDefault(), "%.6f", perDayRate * 100.0)
+            val perHourPercent = String.format(Locale.getDefault(), "%.8f", perHourRate * 100.0)
             val amountStr = if (amount > BigDecimal.ZERO) amount.setScale(2, RoundingMode.HALF_UP).toPlainString() else "—"
 
             val results = mutableListOf<String>()
-            results.add("Инфляция — ставка: $ratePercentStr% годовых, период: ${"%.4f".format(years)} лет")
+            results.add("Инфляция — ставка: $ratePercentStr% годовых, период: ${"%.4f".format(Locale.getDefault(), years)} лет")
             if (amount > BigDecimal.ZERO) {
                 results.add("Сейчас: $amountStr → Через период (номинал): ${futureValue.toPlainString()}")
                 results.add("Эквивалент в сегодняшних деньгах: ${presentEquivalent.toPlainString()}")
@@ -540,7 +566,7 @@ class VprActivity : AppCompatActivity() {
             val usefulYears = if (years <= 0.0) 1.0 else years
             val annual = (cost.subtract(salvage)).divide(BigDecimal.valueOf(usefulYears.toLong()), 10, RoundingMode.HALF_UP)
             val monthly = annual.divide(BigDecimal(12), 10, RoundingMode.HALF_UP)
-            return listOf("Амортизация (линейная): стоимость ${cost.setScale(2, RoundingMode.HALF_UP)}", "Срок (лет): ${"%.4f".format(usefulYears)}", "Ежегодно: ${annual.setScale(2, RoundingMode.HALF_UP)}", "Ежемесячно: ${monthly.setScale(2, RoundingMode.HALF_UP)}")
+            return listOf("Амортизация (линейная): стоимость ${cost.setScale(2, RoundingMode.HALF_UP)}", "Срок (лет): ${"%.4f".format(Locale.getDefault(), usefulYears)}", "Ежегодно: ${annual.setScale(2, RoundingMode.HALF_UP)}", "Ежемесячно: ${monthly.setScale(2, RoundingMode.HALF_UP)}")
         }
 
         // --------------------
@@ -682,18 +708,37 @@ class VprActivity : AppCompatActivity() {
     // Helpers: mortgage amortization generator
     // --------------------
     private fun calculateMonthlyAnnuity(principal: BigDecimal, annualRate: BigDecimal, months: Int): BigDecimal {
-        if (months <= 0) return principal
+        if (months <= 0) return principal.setScale(10, RoundingMode.HALF_UP)
         val r = annualRate
-        if (r == BigDecimal.ZERO) {
+        if (r.compareTo(BigDecimal.ZERO) == 0) {
             return principal.divide(BigDecimal.valueOf(months.toLong()), 10, RoundingMode.HALF_UP)
         }
-        val rMonth = r.divide(BigDecimal(12), 20, RoundingMode.HALF_UP)
-        val rMonthDouble = rMonth.toDouble()
-        val factor = (1.0 + rMonthDouble).pow(months.toDouble())
-        val numerator = principal.toDouble() * (rMonthDouble * factor)
-        val denominator = (factor - 1.0)
-        val payment = if (denominator == 0.0) principal.toDouble() / months.toDouble() else numerator / denominator
-        return BigDecimal.valueOf(payment).setScale(10, RoundingMode.HALF_UP)
+
+        // Use BigDecimal arithmetic to compute:
+        // rMonth = r / 12
+        // payment = principal * (rMonth * (1 + rMonth)^n) / ((1 + rMonth)^n - 1)
+        return try {
+            val mc = MathContext(34)
+            val rMonth = r.divide(BigDecimal(12), 34, RoundingMode.HALF_UP)
+            val onePlus = BigDecimal.ONE.add(rMonth, mc)
+            val factor = onePlus.pow(months, mc) // (1 + rMonth)^n
+            val numerator = principal.multiply(rMonth, mc).multiply(factor, mc)
+            val denominator = factor.subtract(BigDecimal.ONE, mc)
+            if (denominator.compareTo(BigDecimal.ZERO) == 0) {
+                principal.divide(BigDecimal.valueOf(months.toLong()), 10, RoundingMode.HALF_UP)
+            } else {
+                numerator.divide(denominator, 10, RoundingMode.HALF_UP)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "BigDecimal annuity calculation failed, falling back to double", e)
+            // Fallback to double (should be rare)
+            val rMonthDouble = r.divide(BigDecimal(12), 20, RoundingMode.HALF_UP).toDouble()
+            val factor = (1.0 + rMonthDouble).pow(months.toDouble())
+            val numerator = principal.toDouble() * (rMonthDouble * factor)
+            val denominator = (factor - 1.0)
+            val payment = if (denominator == 0.0) principal.toDouble() / months.toDouble() else numerator / denominator
+            BigDecimal.valueOf(payment).setScale(10, RoundingMode.HALF_UP)
+        }
     }
 
     private fun generateAmortizationRows(
@@ -714,7 +759,7 @@ class VprActivity : AppCompatActivity() {
                 principalPaid = remaining
             }
             remaining = remaining.subtract(principalPaid).setScale(10, RoundingMode.HALF_UP)
-            rows.add(String.format("Мес %d: платёж %s, проценты %s, погашение %s, остаток %s",
+            rows.add(String.format(Locale.getDefault(), "Мес %d: платёж %s, проценты %s, погашение %s, остаток %s",
                 i,
                 monthlyPayment.setScale(2, RoundingMode.HALF_UP).toPlainString(),
                 interest.setScale(2, RoundingMode.HALF_UP).toPlainString(),
@@ -827,7 +872,7 @@ class VprActivity : AppCompatActivity() {
     // --- Traffic helpers
     // --------------------
     private fun parseBytes(amount: Double, unitRaw: String?): Long {
-        val unit = unitRaw?.lowercase() ?: ""
+        val unit = unitRaw?.lowercase(Locale.getDefault()) ?: ""
         return when (unit) {
             "gb", "гб" -> (amount * 1000.0 * 1000.0 * 1000.0).toLong()
             "mb", "мб" -> (amount * 1000.0 * 1000.0).toLong()
@@ -843,9 +888,9 @@ class VprActivity : AppCompatActivity() {
         val mb = kb * 1000.0
         val gb = mb * 1000.0
         return when {
-            bytes >= gb -> String.format("%.1f GB", bytes / gb)
-            bytes >= mb -> String.format("%.1f MB", bytes / mb)
-            bytes >= kb -> String.format("%.1f kB", bytes / kb)
+            bytes >= gb -> String.format(Locale.getDefault(), "%.1f GB", bytes / gb)
+            bytes >= mb -> String.format(Locale.getDefault(), "%.1f MB", bytes / mb)
+            bytes >= kb -> String.format(Locale.getDefault(), "%.1f kB", bytes / kb)
             else -> "$bytes B"
         }
     }
@@ -855,11 +900,11 @@ class VprActivity : AppCompatActivity() {
         val mb = kb * 1000.0
         val gb = mb * 1000.0
         return when {
-            bytesDouble >= gb -> String.format("%.1f GB", bytesDouble / gb)
-            bytesDouble >= mb -> String.format("%.1f MB", bytesDouble / mb)
-            bytesDouble >= kb -> String.format("%.1f kB", bytesDouble / kb)
-            bytesDouble >= 1.0 -> String.format("%.1f B", bytesDouble)
-            else -> String.format("%.3f B", bytesDouble)
+            bytesDouble >= gb -> String.format(Locale.getDefault(), "%.1f GB", bytesDouble / gb)
+            bytesDouble >= mb -> String.format(Locale.getDefault(), "%.1f MB", bytesDouble / mb)
+            bytesDouble >= kb -> String.format(Locale.getDefault(), "%.1f kB", bytesDouble / kb)
+            bytesDouble >= 1.0 -> String.format(Locale.getDefault(), "%.1f B", bytesDouble)
+            else -> String.format(Locale.getDefault(), "%.3f B", bytesDouble)
         }
     }
 
@@ -868,9 +913,9 @@ class VprActivity : AppCompatActivity() {
         val kbps = 1000.0
         val mbps = kbps * 1000.0
         return when {
-            bitsPerSecond >= mbps -> String.format("%.2f Mb/s", bitsPerSecond / mbps)
-            bitsPerSecond >= kbps -> String.format("%.2f kb/s", bitsPerSecond / kbps)
-            else -> String.format("%.2f bit/s", bitsPerSecond)
+            bitsPerSecond >= mbps -> String.format(Locale.getDefault(), "%.2f Mb/s", bitsPerSecond / mbps)
+            bitsPerSecond >= kbps -> String.format(Locale.getDefault(), "%.2f kb/s", bitsPerSecond / kbps)
+            else -> String.format(Locale.getDefault(), "%.2f bit/s", bitsPerSecond)
         }
     }
 
@@ -977,7 +1022,7 @@ class VprActivity : AppCompatActivity() {
      * - учитывает "к 7 ноября", "2 числа", "7 ноября" через parseDaysUntilTargetDate
      */
     private fun parseDaysFromText(textRaw: String): Int? {
-        val text = textRaw.lowercase()
+        val text = textRaw.lowercase(Locale.getDefault())
 
         // explicit "на 7 дней" / "за 7 дней" / "7 дней"
         val explicitDays = Regex("""\b(?:на|за)?\s*(\d{1,4})(?:-(\d{1,4}))?\s*(дн|дня|дней|дн\.)\b""", RegexOption.IGNORE_CASE).find(text)
@@ -1014,7 +1059,7 @@ class VprActivity : AppCompatActivity() {
      */
     private fun parseTimeToYears(tail: String): Double {
         if (tail.isBlank()) return 1.0
-        val lower = tail.lowercase()
+        val lower = tail.lowercase(Locale.getDefault())
 
         if (Regex("""\b(через\s+)?год\b""").containsMatchIn(lower)) return 1.0
 
@@ -1051,15 +1096,59 @@ class VprActivity : AppCompatActivity() {
      * - "2 числа" -> nearest 2nd of month (next if passed)
      *
      * IMPORTANT: allow absence of whitespace between day and month (e.g. "7ноября").
+     * Also supports ISO date YYYY-MM-DD and DD.MM.YYYY
      */
     private fun parseDaysUntilTargetDate(lowerInput: String): Double? {
         val today = LocalDate.now()
 
+        val input = lowerInput.lowercase(Locale.getDefault())
+
+        // ISO date YYYY-MM-DD
+        val iso = Regex("""\b(\d{4})-(\d{2})-(\d{2})\b""").find(input)
+        if (iso != null) {
+            try {
+                val y = iso.groupValues[1].toInt()
+                val m = iso.groupValues[2].toInt()
+                val d = iso.groupValues[3].toInt()
+                val target = LocalDate.of(y, m, d)
+                val delta = ChronoUnit.DAYS.between(today, target).toDouble()
+                return if (delta >= 0) delta else null
+            } catch (e: Exception) {
+                // parse error — ignore and continue
+                Log.w(TAG, "Failed to parse ISO date", e)
+            }
+        }
+
+        // DD.MM.YYYY or DD.MM (assume next occurrence of day.month)
+        val dotPattern = Regex("""\b(\d{1,2})\.(\d{1,2})(?:\.(\d{2,4}))?\b""").find(input)
+        if (dotPattern != null) {
+            try {
+                val day = dotPattern.groupValues[1].toInt()
+                val month = dotPattern.groupValues[2].toInt()
+                val yearStr = dotPattern.groupValues.getOrNull(3)
+                val year = if (!yearStr.isNullOrBlank()) {
+                    val y = yearStr.toInt()
+                    if (yearStr.length == 2) 2000 + y else y
+                } else today.year
+                var target = LocalDate.of(year, month.coerceIn(1, 12), day.coerceIn(1, Month.of(month.coerceIn(1,12)).length(today.isLeapYear)))
+                if (!target.isAfter(today)) {
+                    // if year not specified, try next year
+                    if (dotPattern.groupValues.getOrNull(3).isNullOrBlank()) {
+                        target = target.plusYears(1)
+                    }
+                }
+                val delta = ChronoUnit.DAYS.between(today, target).toDouble()
+                return if (delta >= 0) delta else null
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to parse dot date", e)
+            }
+        }
+
         // pattern "к 7 ноября" or "7 ноября" or "7ноября" (allow optional whitespace)
-        val dayMonth = Regex("""\b(?:к\s*)?(\d{1,2})\s*(янв|фев|мар|апр|май|мая|июн|июл|авг|сен|окт|ноя|дек|января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)\b""", RegexOption.IGNORE_CASE).find(lowerInput)
+        val dayMonth = Regex("""\b(?:к\s*)?(\d{1,2})\s*(янв|фев|мар|апр|май|мая|июн|июл|авг|сен|окт|ноя|дек|января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)\b""", RegexOption.IGNORE_CASE).find(input)
         if (dayMonth != null) {
             val day = dayMonth.groupValues[1].toIntOrNull() ?: return null
-            val monthRaw = dayMonth.groupValues[2].lowercase()
+            val monthRaw = dayMonth.groupValues[2].lowercase(Locale.getDefault())
             val monthMap = mapOf(
                 "янв" to Month.JANUARY, "января" to Month.JANUARY,
                 "фев" to Month.FEBRUARY, "февраля" to Month.FEBRUARY,
@@ -1084,7 +1173,7 @@ class VprActivity : AppCompatActivity() {
         }
 
         // pattern "2 числа" or "числа 2" (supports optional whitespace)
-        val dayOnly = Regex("""\b(\d{1,2})\s*(числ|числа|число)\b""", RegexOption.IGNORE_CASE).find(lowerInput)
+        val dayOnly = Regex("""\b(\d{1,2})\s*(числ|числа|число)\b""", RegexOption.IGNORE_CASE).find(input)
         if (dayOnly != null) {
             val day = dayOnly.groupValues[1].toIntOrNull() ?: return null
             var target = LocalDate.of(today.year, today.month, day.coerceIn(1, today.month.length(today.isLeapYear)))
@@ -1110,7 +1199,7 @@ class VprActivity : AppCompatActivity() {
             append(getString(R.string.simple_percent_header)).append("\n")
             append(getString(R.string.simple_percent_principal, principalMC.setScale(2, RoundingMode.HALF_UP))).append("\n")
             append(getString(R.string.simple_percent_rate, (annualRate.multiply(BigDecimal(100))).setScale(4, RoundingMode.HALF_UP))).append("\n")
-            append(getString(R.string.simple_percent_period, "%.4f".format(years))).append("\n")
+            append(getString(R.string.simple_percent_period, "%.4f".format(Locale.getDefault(), years))).append("\n")
             append(getString(R.string.simple_percent_total, total.setScale(2, RoundingMode.HALF_UP), interest.setScale(2, RoundingMode.HALF_UP))).append("\n")
             append(getString(R.string.simple_percent_yearly, yearlyProfit.setScale(2, RoundingMode.HALF_UP))).append("\n")
             append(getString(R.string.simple_percent_month_day_hour,
@@ -1142,7 +1231,7 @@ class VprActivity : AppCompatActivity() {
             append(getString(R.string.compound_percent_header, capitalization)).append("\n")
             append(getString(R.string.compound_percent_principal, principal.setScale(2, RoundingMode.HALF_UP))).append("\n")
             append(getString(R.string.compound_percent_rate, (annualRate.multiply(BigDecimal(100))).setScale(4, RoundingMode.HALF_UP))).append("\n")
-            append(getString(R.string.compound_percent_period, "%.4f".format(years))).append("\n")
+            append(getString(R.string.compound_percent_period, "%.4f".format(Locale.getDefault(), years))).append("\n")
             append(getString(R.string.compound_percent_total, amount.setScale(2, RoundingMode.HALF_UP), totalGain.setScale(2, RoundingMode.HALF_UP))).append("\n")
             append(getString(R.string.compound_percent_avg_year, avgPerYear.setScale(2, RoundingMode.HALF_UP))).append("\n")
             append(getString(R.string.compound_percent_month_day_hour,
