@@ -1,4 +1,4 @@
-package your.package.name.here
+package com.nemesis.droidcrypt
 
 import android.content.Intent
 import android.graphics.Typeface
