@@ -96,5 +96,12 @@
             android:theme="@style/StreetFoodTheme"
             android:configChanges="orientation|screenSize" />
 
+                        <activity
+            android:name=".TemplateActivity"
+            android:exported="false"
+            android:parentActivityName=".TemplateActivity"
+            android:theme="@style/VprTheme"
+            android:configChanges="orientation|screenSize" />
+
     </application>
 </manifest>
