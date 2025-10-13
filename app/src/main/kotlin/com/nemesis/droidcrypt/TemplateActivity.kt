@@ -26,11 +26,7 @@ import java.time.LocalDate
 import java.time.Month
 import java.time.temporal.ChronoUnit
 import java.util.Locale
-import kotlin.math.ln
-import kotlin.math.pow
-import java.math.BigDecimal
-import java.math.MathContext
-import java.math.RoundingMode
+import kotlin.math.*
 
 class TemplateActivity : AppCompatActivity() {
 
@@ -83,7 +79,7 @@ class TemplateActivity : AppCompatActivity() {
             }
         }
 
-        addSystemLine("Шаблон: в модулей есть простые команды. Help обрабатывается в самом низком приоритете.")
+        addSystemLine("Шаблон: в модулях есть физические команды. Введите 'help' для краткой справки (внизу).")
     }
 
     private fun submitCommand(command: String) {
@@ -170,209 +166,450 @@ class TemplateActivity : AppCompatActivity() {
     }
 }
 
+// --------------------
+// CommandsMain: расчёт времени по расстоянию и скорости
+//  (команда 1: "время / time / сколько времени ...")
+// --------------------
 private object CommandsMain {
 
     fun handleCommand(cmdRaw: String): List<String> {
         val cmd = cmdRaw.trim()
         val lower = cmd.lowercase(Locale.getDefault())
-
-        if (lower.contains("налог") || lower.contains("ндфл") || lower.contains("tax")) {
-            return handleTax(cmd)
+        if (lower.contains("время") || lower.contains("сколько времени") || lower.contains("time")) {
+            return handleTimeForDistance(cmd)
         }
-        if (lower.contains("накоп") || lower.contains("накопить") || lower.contains("savings")) {
-            return handleSavings(cmd)
-        }
-        if (lower.contains("pmt") || lower.contains("плт") || lower.contains("платеж") || lower.contains("платёж")) {
-            return handlePmt(cmd)
-        }
-
         return emptyList()
     }
 
-    private fun handleTax(cmd: String): List<String> {
-        val nums = Regex("""(\d+(?:[.,]\d+)?)""").findAll(cmd).map { it.groupValues[1].replace(',', '.') }.toList()
-        val amount = nums.firstOrNull()?.toDoubleOrNull() ?: return listOf("Налог: укажите сумму. Пример: 'налог 100000 13%'")
-        val perc = Regex("""(\d+(?:[.,]\d+)?)\s*%""").find(cmd)?.groupValues?.get(1)?.replace(',', '.')?.toDoubleOrNull() ?: 13.0
-        val rate = perc / 100.0
-        val tax = amount * rate
-        val net = amount - tax
-        return listOf("Сумма: ${formatMoney(amount)}", "Ставка: ${"%.2f".format(perc)}%", "Налог: ${formatMoney(tax)}", "После налога: ${formatMoney(net)}")
-    }
-
-    private fun handleSavings(cmd: String): List<String> {
-        val nums = Regex("""(\d+(?:[.,]\d+)?)""").findAll(cmd).map { it.groupValues[1].replace(',', '.') }.toList()
-        val amount = nums.firstOrNull()?.toDoubleOrNull() ?: return listOf("Накопить: укажите сумму. Пример: 'накопить 300000 на 180 дней под 7%'")
-        val days = parseDaysFromText(cmd) ?: (parseTimeYearsFromText(cmd) * 365.0).toInt().coerceAtLeast(30)
-        val perc = Regex("""(\d+(?:[.,]\d+)?)\s*%""").find(cmd)?.groupValues?.get(1)?.replace(',', '.')?.toDoubleOrNull() ?: 0.0
-
-        val months = kotlin.math.max(1, Math.round(days / 30.0).toInt())
-
-        if (perc == 0.0) {
-            val perDay = amount / days
-            val perWeek = perDay * 7.0
-            val perMonth = amount / months.toDouble()
+    private fun handleTimeForDistance(cmd: String): List<String> {
+        val distMeters = parseDistanceMeters(cmd) ?: return listOf(
+            "Время: не нашёл расстояние. Пример: 'время 150 км при 80 км/ч' или 'time 120km at 60km/h'"
+        )
+        val speedMetersPerSec = parseSpeedToMPerS(cmd)
+        if (speedMetersPerSec == null) {
             return listOf(
-                "Цель: ${formatMoney(amount)}",
-                "Период: $days дней (~${"%.2f".format(months / 12.0)} лет)",
-                "Без процентов: в день ${formatMoney(perDay)} ₽, в неделю ${formatMoney(perWeek)} ₽, в месяц ≈ ${formatMoney(perMonth)} ₽"
-            )
-        } else {
-            val pm = pmtForFutureValue(amount, perc / 100.0, months)
-            val perDay = pm / 30.0
-            val perWeek = perDay * 7.0
-            return listOf(
-                "Цель: ${formatMoney(amount)}",
-                "Период: $days дней (~$months мес)",
-                "Учитывая ${"%.4f".format((perc))}% годовых (помесячная кап.):",
-                "Нужно ежемесячно: ${formatMoney(pm)} ₽ (≈ в день ${formatMoney(perDay)} ₽, в неделю ${formatMoney(perWeek)} ₽)"
+                "Время: не нашёл скорость. Пример: 'время 150 км при 80 км/ч' или 'time 10km at 5 m/s'"
             )
         }
-    }
 
-    private fun handlePmt(cmd: String): List<String> {
-        val nums = Regex("""(-?\d+(?:[.,]\d+)?)""").findAll(cmd).map { it.groupValues[1].replace(',', '.') }.toList()
-        if (nums.isEmpty()) return listOf("PMT: укажите сумму кредита. Пример: 'pmt 150000 9% 15 лет'")
-        val principal = nums[0].toDoubleOrNull() ?: return listOf("PMT: не удалось распознать сумму.")
-        val perc = Regex("""(\d+(?:[.,]\d+)?)\s*%""").find(cmd)?.groupValues?.get(1)?.replace(',', '.')?.toDoubleOrNull() ?: 0.0
-        val years = parseTimeYearsFromText(cmd)
-        val months = kotlin.math.max(1, (years * 12.0).toInt())
-        val pmt = pmtAnnuity(principal, perc / 100.0, months)
-        val total = pmt * months
-        val overpay = total - principal
-        val perYear = (total - principal) / years
-        val perMonthAvg = perYear / 12.0
-        val perDayAvg = perYear / 365.0
-        val perHourAvg = perDayAvg / 24.0
+        val seconds = distMeters / speedMetersPerSec
+        val roundedHalfMin = ( (seconds / 60.0) * 2.0 ).roundToInt() / 2.0 // minutes rounded to 0.5
+        val hours = (seconds / 3600.0)
+        val hh = floor(hours).toInt()
+        val remMinutes = (hours - hh) * 60.0
+        val mm = floor(remMinutes).toInt()
+        val ss = ((remMinutes - mm) * 60.0).roundToInt()
 
-        val out = mutableListOf<String>()
-        out.add("Аннуитетный платёж: ${formatMoney(pmt)} ₽/мес")
-        out.add("Срок: $months мес (~${"%.2f".format(years)} лет)")
-        out.add("Общая выплата: ${formatMoney(total)} ₽ (переплата ${formatMoney(overpay)} ₽)")
-        out.add("Переплата в среднем: в год ${formatMoney(perYear)} ₽, в месяц ${formatMoney(perMonthAvg)} ₽, в день ${String.format("%.4f", perDayAvg)} ₽, в час ${String.format("%.6f", perHourAvg)} ₽")
-        out.add("Первые 6 месяцев амортизации:")
-        out.addAll(amortizationAnnuity(principal, perc / 100.0, months, 6))
-        return out
-    }
-
-    private fun parseDaysFromText(textRaw: String): Int? {
-        val text = textRaw.lowercase()
-        val explicitDays = Regex("""\b(?:на|за)?\s*(\d{1,4})\s*(дн|дня|дней)\b""").find(text)
-        if (explicitDays != null) return explicitDays.groupValues[1].toIntOrNull()?.coerceAtLeast(1)
-        val weeks = Regex("""\b(?:на|за)?\s*(\d{1,3})?\s*(недел|нед)\b""").find(text)
-        if (weeks != null) {
-            val maybeNum = weeks.groupValues[1]
-            val num = if (maybeNum.isBlank()) 1 else maybeNum.toIntOrNull() ?: 1
-            return (num * 7).coerceAtLeast(1)
+        val sb = mutableListOf<String>()
+        sb.add("Расстояние: ${formatDistanceNice(distMeters)}")
+        sb.add("Скорость: ${formatSpeedNice(speedMetersPerSec)}")
+        sb.add("Время в секундах: ${"%.2f".format(seconds)} s")
+        sb.add("Время: ${hh} ч ${mm} мин ${ss} сек")
+        sb.add("Округлённо до половины минуты: ${roundedHalfMin} мин (≈ ${formatMinutesToHMS(roundedHalfMin)})")
+        // Доп. детальные разбивки
+        val totalMinutesExact = seconds / 60.0
+        val minutesFull = floor(totalMinutesExact).toInt()
+        val halfMinuteParts = ( (totalMinutesExact - minutesFull) * 60.0 ) // seconds leftover in last minute
+        sb.add("Точное время: ${"%.3f".format(totalMinutesExact)} мин (или ${"%.1f".format(totalMinutesExact/60.0)} ч)")
+        // полезная нотация: для путешествий
+        val per100kmSec = if (distMeters >= 1000.0) {
+            val timePer100km = (100000.0 / distMeters) * seconds // not exact; compute time to travel 100km at same speed directly
+            null
+        } else null
+        // добавим скорость в km/h и pace (мин/км)
+        val speedKmh = speedMetersPerSec * 3.6
+        if (speedMetersPerSec > 0.0) {
+            val paceSecPerKm = 1000.0 / speedMetersPerSec
+            sb.add("Пэйс: ${formatPace(paceSecPerKm)} (мин/км)")
+            sb.add("Скорость: ${"%.2f".format(speedKmh)} км/ч")
         }
+        return sb
+    }
+
+    // Парсит расстояние: число + (km|км|m|м)
+    private fun parseDistanceMeters(s: String): Double? {
+        val lower = s.lowercase(Locale.getDefault())
+        // ищем "число + unit" ближайшую пару
+        val pattern = Regex("""(-?\d+(?:[.,]\d+)?)\s*(km|км|m\b|м\b|meters|метр|метров)?""", RegexOption.IGNORE_CASE)
+        val matches = pattern.findAll(lower).toList()
+        if (matches.isEmpty()) return null
+        // prefer match where unit present and is km or m
+        for (m in matches) {
+            val num = m.groupValues[1].replace(',', '.').toDoubleOrNull() ?: continue
+            val unit = m.groupValues.getOrNull(2) ?: ""
+            if (unit.isNotBlank()) {
+                return when (unit) {
+                    "km", "км" -> num * 1000.0
+                    "m", "м", "метр", "метров", "meters" -> num
+                    else -> num
+                }
+            }
+        }
+        // fallback: first numeric as meters if no explicit unit
+        val first = matches.first()
+        val valNum = first.groupValues[1].replace(',', '.').toDoubleOrNull()
+        return valNum
+    }
+
+    // Парсит скорость в m/s поддерживая km/h и m/s
+    private fun parseSpeedToMPerS(s: String): Double? {
+        val lower = s.lowercase(Locale.getDefault())
+        // patterns: "80 км/ч", "80 km/h", "5 m/s", "5 м/с"
+        val re = Regex("""(-?\d+(?:[.,]\d+)?)\s*(km/h|км/ч|км/час|kmh|km/h|m/s|м/с|м/сек|mps)\b""", RegexOption.IGNORE_CASE)
+        val m = re.find(lower)
+        if (m != null) {
+            val num = m.groupValues[1].replace(',', '.').toDoubleOrNull() ?: return null
+            val unit = m.groupValues[2].lowercase(Locale.getDefault())
+            return when {
+                unit.contains("km") || unit.contains("км") -> num / 3.6
+                unit.contains("m/s") || unit.contains("м/с") || unit.contains("mps") -> num
+                else -> num
+            }
+        }
+        // support "at 80" style (assume km/h if integer likely)
+        val simple = Regex("""\bat\s+(-?\d+(?:[.,]\d+)?)\b""", RegexOption.IGNORE_CASE).find(lower)
+        if (simple != null) {
+            val num = simple.groupValues[1].replace(',', '.').toDoubleOrNull() ?: return null
+            // assume km/h
+            return num / 3.6
+        }
+        // support "при 80" (assume km/h)
+        val pri = Regex("""при\s+(-?\d+(?:[.,]\d+)?)\s*(?:км/ч|km/h|км|km)?""", RegexOption.IGNORE_CASE).find(lower)
+        if (pri != null) {
+            val num = pri.groupValues[1].replace(',', '.').toDoubleOrNull() ?: return null
+            return num / 3.6
+        }
+        // last resort: any standalone number followed by "км" nearby means maybe total distance only -> no speed
         return null
     }
 
-    private fun parseTimeYearsFromText(cmd: String): Double {
-        val yearMatch = Regex("""(\d+(?:[.,]\d+)?)\s*(лет|год|года)""", RegexOption.IGNORE_CASE).find(cmd)
-        if (yearMatch != null) return yearMatch.groupValues[1].replace(',', '.').toDoubleOrNull() ?: 1.0
-        val monthMatch = Regex("""(\d+(?:[.,]\d+)?)\s*(мес|месяц|месяцев)""", RegexOption.IGNORE_CASE).find(cmd)
-        if (monthMatch != null) return (monthMatch.groupValues[1].replace(',', '.').toDoubleOrNull() ?: 1.0) / 12.0
-        val numOnly = Regex("""\b(\d+(?:[.,]\d+)?)\b""").find(cmd)
-        if (numOnly != null) return numOnly.groupValues[1].replace(',', '.').toDoubleOrNull() ?: 1.0
-        return 1.0
-    }
-
-    private fun pmtAnnuity(principal: Double, annualRate: Double, months: Int): Double {
-        if (months <= 0) return principal
-        val rMonth = annualRate / 12.0
-        if (rMonth == 0.0) return principal / months
-        val factor = Math.pow(1.0 + rMonth, months.toDouble())
-        return principal * rMonth * factor / (factor - 1.0)
-    }
-
-    private fun amortizationAnnuity(principal: Double, annualRate: Double, months: Int, showFirst: Int): List<String> {
-        val out = mutableListOf<String>()
-        var remaining = principal
-        val pmt = pmtAnnuity(principal, annualRate, months)
-        val rMonth = annualRate / 12.0
-        val maxShow = showFirst.coerceAtMost(months)
-        for (i in 1..maxShow) {
-            val interest = remaining * rMonth
-            var principalPaid = pmt - interest
-            if (i == months) principalPaid = remaining
-            remaining -= principalPaid
-            if (remaining < 0) remaining = 0.0
-            out.add(String.format(Locale.getDefault(), "Мес %d: платёж %s, проценты %s, погашение %s, остаток %s",
-                i,
-                formatMoney(pmt),
-                formatMoney(interest),
-                formatMoney(principalPaid),
-                formatMoney(remaining)
-            ))
-            if (remaining <= 0.0) break
+    private fun formatDistanceNice(meters: Double): String {
+        return if (meters >= 1000.0) {
+            "${"%.3f".format(meters/1000.0)} km"
+        } else {
+            "${"%.1f".format(meters)} m"
         }
-        return out
     }
 
-    private fun pmtForFutureValue(futureValue: Double, annualRate: Double, months: Int): Double {
-        if (months <= 0) return futureValue
-        val r = annualRate / 12.0
-        if (r == 0.0) return futureValue / months
-        val factor = Math.pow(1.0 + r, months.toDouble()) - 1.0
-        return futureValue * r / factor
+    private fun formatSpeedNice(mps: Double): String {
+        val kmh = mps * 3.6
+        return "${"%.2f".format(kmh)} km/h (${String.format("%.2f", mps)} m/s)"
     }
 
-    private fun formatMoney(v: Double): String {
-        return String.format(Locale.getDefault(), "%.2f", v)
+    private fun formatMinutesToHMS(minutes: Double): String {
+        val totalSec = (minutes * 60.0).roundToInt()
+        val h = totalSec / 3600
+        val m = (totalSec % 3600) / 60
+        val s = totalSec % 60
+        return "${h}ч ${m}мин ${s}сек"
+    }
+
+    private fun formatPace(secPerKm: Double): String {
+        val m = floor(secPerKm / 60.0).toInt()
+        val s = (secPerKm - m * 60).roundToInt()
+        return "${m}:${if (s<10) "0$s" else "$s"} мин/км"
     }
 }
 
+// --------------------
+// CommandsV2: скорость, необходимая чтобы пройти/проехать расстояние за заданное время.
+//   Также различение "идти" и "ехать" (walk vs drive).
+//   (команда 2: "сколько ехать / сколько идти / скорость ...")
+// --------------------
 private object CommandsV2 {
 
     fun handleCommand(cmdRaw: String): List<String> {
         val cmd = cmdRaw.trim()
         val lower = cmd.lowercase(Locale.getDefault())
 
-        if (lower.contains("налог") || lower.contains("ндфл") || lower.contains("tax")) {
-            val out = CommandsMain.handleCommand(cmdRaw)
-            if (out.isNotEmpty()) return out.map { "[V2] $it" }
-        }
-        if (lower.contains("накоп") || lower.contains("накопить") || lower.contains("savings")) {
-            val out = CommandsMain.handleCommand(cmdRaw)
-            if (out.isNotEmpty()) return out.map { "[V2] $it" }
-        }
-        if (lower.contains("pmt") || lower.contains("плт") || lower.contains("платеж") || lower.contains("платёж")) {
-            val out = CommandsMain.handleCommand(cmdRaw)
-            if (out.isNotEmpty()) return out.map { "[V2] $it" }
+        val rootSpeed = listOf("скорост", "скорость", "сколько ех", "сколько ид", "сколько идти", "сколько ехать")
+        if (rootSpeed.any { lower.contains(it) } || lower.contains("сколько") && (lower.contains("идти") || lower.contains("ехать"))) {
+            return handleRequiredSpeed(cmd)
         }
 
         return emptyList()
     }
+
+    private fun handleRequiredSpeed(cmd: String): List<String> {
+        val distMeters = parseDistanceMeters(cmd) ?: return listOf("Speed: не нашёл расстояние. Пример: 'сколько ехать 10 км за 15 минут' или 'сколько идти 5km за 50min'")
+        val timeSec = parseTimeToSeconds(cmd) ?: return listOf("Speed: не нашёл целевого времени. Примеры: 'за 15 минут', 'в 1:30', 'за 90 мин', 'за 0.5 часа'")
+        val lower = cmd.lowercase(Locale.getDefault())
+        val walking = listOf("идт", "ход", "пеш", "шаг")
+        val driving = listOf("ех", "езд", "машин", "авто", "вел")
+        val mode = when {
+            walking.any { lower.contains(it) } -> "walk"
+            driving.any { lower.contains(it) } -> "drive"
+            else -> "either"
+        }
+
+        val neededMps = distMeters / timeSec
+        val neededKmh = neededMps * 3.6
+        val paceSecPerKm = if (neededMps > 0) 1000.0 / neededMps else Double.POSITIVE_INFINITY
+
+        val lines = mutableListOf<String>()
+        lines.add("Расстояние: ${formatDistanceNice(distMeters)}")
+        lines.add("Целевое время: ${formatSecondsNice(timeSec)}")
+        lines.add("Требуемая скорость: ${"%.2f".format(neededKmh)} км/ч (${String.format("%.2f", neededMps)} м/с)")
+
+        if (mode == "walk" || mode == "either") {
+            // walking-specific: pace (мин/км) and шаги (приблизительно)
+            lines.add("Пэйс для пешей: ${formatPace(paceSecPerKm)} мин/км")
+            // estimate steps: assume stride ~0.75m for walking average
+            val steps = (distMeters / 0.75).roundToInt()
+            lines.add("Оценка шагов (при шаге ≈0.75м): ≈ $steps шагов")
+            // comfortable walking speeds:
+            lines.add("Примечание по скоростям пешком: комфортная ~5 км/ч, быстрая ~6.5 км/ч")
+        }
+        if (mode == "drive" || mode == "either") {
+            // driving: provide mph too (if useful) and compare to limits
+            val mph = neededKmh / 1.609344
+            lines.add("Для езды: ${"%.2f".format(mph)} миль/ч (mph)")
+            lines.add("Примечание: соблюдайте дорожные ограничения и безопасность.")
+        }
+
+        // additional human-friendly tiers
+        lines.add("Детали:")
+        lines.add(" - Средняя скорость = ${"%.2f".format(neededKmh)} км/ч")
+        lines.add(" - Пэйс = ${formatPace(paceSecPerKm)} (мин/км)")
+        return lines
+    }
+
+    // parse distance reuse (supports km/m)
+    private fun parseDistanceMeters(s: String): Double? {
+        val lower = s.lowercase(Locale.getDefault())
+        val pattern = Regex("""(\d+(?:[.,]\d+)?)\s*(km|км|m\b|м\b|meters|метр|метров)""", RegexOption.IGNORE_CASE)
+        val m = pattern.find(lower)
+        if (m != null) {
+            val num = m.groupValues[1].replace(',', '.').toDoubleOrNull() ?: return null
+            val unit = m.groupValues[2]
+            return when (unit.lowercase(Locale.getDefault())) {
+                "km", "км" -> num * 1000.0
+                else -> num
+            }
+        }
+        // fallback: first number as km
+        val anyNum = Regex("""(\d+(?:[.,]\d+)?)""").find(lower)?.groupValues?.get(1)?.replace(',', '.')
+        return anyNum?.toDoubleOrNull()
+    }
+
+    // parse time to seconds: supports "15 минут", "1:30", "1.5 часа", "90 мин", "за 1 час 20 мин"
+    private fun parseTimeToSeconds(s: String): Double? {
+        val lower = s.lowercase(Locale.getDefault())
+
+        // hh:mm pattern
+        val hhmm = Regex("""\b(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?\b""").find(lower)
+        if (hhmm != null) {
+            val h = hhmm.groupValues[1].toIntOrNull() ?: 0
+            val m = hhmm.groupValues[2].toIntOrNull() ?: 0
+            val sec = hhmm.groupValues.getOrNull(3)?.toIntOrNull() ?: 0
+            return (h * 3600 + m * 60 + sec).toDouble()
+        }
+
+        // "X час(а/ов) Y мин" etc.
+        val hoursMatch = Regex("""(\d+(?:[.,]\d+)?)\s*(час|часа|часов|h)\b""").find(lower)
+        val minsMatch = Regex("""(\d+(?:[.,]\d+)?)\s*(мин|минут|m\b)\b""").find(lower)
+
+        if (hoursMatch != null || minsMatch != null) {
+            val hours = hoursMatch?.groupValues?.get(1)?.replace(',', '.')?.toDoubleOrNull() ?: 0.0
+            val mins = minsMatch?.groupValues?.get(1)?.replace(',', '.')?.toDoubleOrNull() ?: 0.0
+            return hours * 3600.0 + mins * 60.0
+        }
+
+        // decimal hours "1.5 часа"
+        val decHour = Regex("""(\d+(?:[.,]\d+)?)\s*ч(?:аса|ас)?\b""").find(lower)
+        if (decHour != null) {
+            val h = decHour.groupValues[1].replace(',', '.').toDoubleOrNull() ?: return null
+            return h * 3600.0
+        }
+
+        // minutes only
+        val onlyMin = Regex("""\b(\d+(?:[.,]\d+)?)\s*(мин|минут)\b""").find(lower)
+        if (onlyMin != null) {
+            val m = onlyMin.groupValues[1].replace(',', '.').toDoubleOrNull() ?: return null
+            return m * 60.0
+        }
+
+        // bare number with "за" -> treat as minutes
+        val za = Regex("""за\s*(\d+(?:[.,]\d+)?)\b""").find(lower)
+        if (za != null) {
+            val v = za.groupValues[1].replace(',', '.').toDoubleOrNull() ?: return null
+            // heuristic: if <=6 -> hours? no, assume minutes
+            return v * 60.0
+        }
+
+        return null
+    }
+
+    private fun formatDistanceNice(meters: Double): String {
+        return if (meters >= 1000.0) "${"%.3f".format(meters/1000.0)} km" else "${"%.1f".format(meters)} m"
+    }
+
+    private fun formatSecondsNice(secDouble: Double): String {
+        val s = secDouble.roundToInt()
+        val h = s / 3600
+        val m = (s % 3600) / 60
+        val sRem = s % 60
+        return "${h}ч ${m}м ${sRem}с"
+    }
+
+    private fun formatPace(secPerKm: Double): String {
+        if (!secPerKm.isFinite() || secPerKm.isNaN()) return "—"
+        val m = floor(secPerKm / 60.0).toInt()
+        val s = (secPerKm - m * 60).roundToInt()
+        return "${m}:${if (s<10) "0$s" else "$s"}"
+    }
 }
 
+// --------------------
+// CommandsV3: пара сложных физических формул + help (нижний приоритет)
+//   (команда 3: projectile + energies)
+// --------------------
 private object CommandsV3 {
 
     fun handleCommand(cmdRaw: String): List<String> {
         val cmd = cmdRaw.trim()
         val lower = cmd.lowercase(Locale.getDefault())
 
-        if (lower.contains("налог") || lower.contains("ндфл") || lower.contains("tax")) {
-            val out = CommandsMain.handleCommand(cmdRaw)
-            if (out.isNotEmpty()) return out.map { "[V3] $it" }
-        }
-        if (lower.contains("накоп") || lower.contains("накопить") || lower.contains("savings")) {
-            val out = CommandsMain.handleCommand(cmdRaw)
-            if (out.isNotEmpty()) return out.map { "[V3] $it" }
-        }
-        if (lower.contains("pmt") || lower.contains("плт") || lower.contains("платеж") || lower.contains("платёж")) {
-            val out = CommandsMain.handleCommand(cmdRaw)
-            if (out.isNotEmpty()) return out.map { "[V3] $it" }
+        // Projectile (параболическая траектория)
+        val projRoots = listOf("проек", "парабол", "пуля", "брос", "пуск", "projectile", "range", "trajectory")
+        if (projRoots.any { lower.contains(it) } || (lower.contains("угол") && lower.contains("м/с"))) {
+            return handleProjectile(cmd)
         }
 
+        // Energy calculations
+        val energyRoots = listOf("энерг", "кинет", "потенц", "потенциальн", "kinetic", "potential")
+        if (energyRoots.any { lower.contains(it) }) {
+            return handleEnergy(cmd)
+        }
+
+        // help (lowest priority)
         if (lower.contains("справк") || lower == "help" || lower.contains("помощ")) {
             return listOf(
-                "Справка-заглушка (CommandsV3):",
-                "- налог <сумма> [ставка%]  — расчёт налога (по умолчанию 13%)",
-                "- накопить <сумма> на N дней / к ДД.ММ.ГГГГ [под X%] — сколько откладывать",
-                "- pmt <сумма> <ставка%> <срок (лет)> — ежемесячный аннуитетный платёж"
+                "Справка (CommandsV3): физические команды (заглушки):",
+                "1) Время: 'время 150 км при 80 км/ч' — рассчитывает время в сек/мин/ч и округляет до 0.5 мин.",
+                "2) Скорость: 'сколько ехать 10 км за 15 минут' или 'сколько идти 5 км за 50 минут' — вычисляет требуемую скорость и пэйс.",
+                "3) Projectile: 'проект v=30 м/с угол 45' — рассчитывает время полёта, максимальную высоту, дальность.",
+                "4) Energy: 'энергия m=80 v=5' или 'кинет m 80 v 5' — кинетическая/потенциальная энергия."
             )
         }
 
         return emptyList()
     }
+
+    // --------------------
+    // Projectile motion (no air resistance)
+    // Parses v (m/s) and angle (deg). Optional initial height h0 in meters.
+    // --------------------
+    private fun handleProjectile(cmd: String): List<String> {
+        val lower = cmd.lowercase(Locale.getDefault())
+
+        // parse v
+        val vMatch = Regex("""(?:v=|v\s+|скорост(?:ь)?\s+|скорость=)?(-?\d+(?:[.,]\d+)?)\s*(m/s|м/с|mps|м/сек|м/с)?""").find(lower)
+        // Better: explicit patterns for v= and angle
+        val vExplicit = Regex("""v\s*=?\s*(-?\d+(?:[.,]\d+)?)""", RegexOption.IGNORE_CASE).find(lower)
+        val angleExplicit = Regex("""(?:угол|angle|a)\s*=?\s*(-?\d+(?:[.,]\d+)?)""", RegexOption.IGNORE_CASE).find(lower)
+        val genericV = vExplicit?.groupValues?.get(1) ?: vMatch?.groupValues?.get(1)
+        if (genericV == null) {
+            return listOf("Projectile: не нашёл скорость (v). Пример: 'проект v=30 угол 45' или 'projectile 20m/s 30°'")
+        }
+        val v = genericV.replace(',', '.').toDoubleOrNull() ?: return listOf("Projectile: не смог распознать число скорости.")
+        // angle: look for degrees: "45°" or "45 deg" or angleExplicit
+        var angleDeg: Double? = null
+        val degSym = Regex("""(-?\d+(?:[.,]\d+)?)\s*°""").find(lower)
+        if (degSym != null) angleDeg = degSym.groupValues[1].replace(',', '.').toDoubleOrNull()
+        if (angleDeg == null && angleExplicit != null) angleDeg = angleExplicit.groupValues[1].replace(',', '.').toDoubleOrNull()
+        // fallback: maybe two numbers present: first v, second angle
+        if (angleDeg == null) {
+            val nums = Regex("""(-?\d+(?:[.,]\d+)?)""").findAll(lower).map { it.groupValues[1].replace(',', '.') }.toList()
+            if (nums.size >= 2) {
+                // try second as angle if reasonable (<=90)
+                val cand = nums[1].toDoubleOrNull()
+                if (cand != null && cand.absoluteValue <= 89.0) angleDeg = cand
+            }
+        }
+        if (angleDeg == null) return listOf("Projectile: не нашёл угол (в градусах). Укажите, например, 'угол 45' или '45°'.")
+
+        // optionally parse initial height h0
+        var h0 = 0.0
+        val hMatch = Regex("""h0\s*=?\s*(-?\d+(?:[.,]\d+)?)""").find(lower)
+        if (hMatch != null) h0 = hMatch.groupValues[1].replace(',', '.').toDoubleOrNull() ?: 0.0
+        val g = 9.80665
+
+        val theta = Math.toRadians(angleDeg)
+        val vx = v * cos(theta)
+        val vy = v * sin(theta)
+        // time of flight solving y(t) = h0 + vy * t - 0.5 g t^2 = 0 -> quadratic: -0.5 g t^2 + vy t + h0 = 0
+        val a = -0.5 * g
+        val b = vy
+        val c = h0
+        val disc = b * b - 4.0 * a * c
+        if (disc < 0) {
+            return listOf("Projectile: дискриминант < 0 — нет реального пересечения с землёй при данных параметрах.")
+        }
+        val sqrtD = sqrt(disc)
+        // two roots, take positive largest
+        val t1 = (-b + sqrtD) / (2.0 * a)
+        val t2 = (-b - sqrtD) / (2.0 * a)
+        val tFlight = listOf(t1, t2).filter { it > 1e-9 }.maxOrNull() ?: 0.0
+        val maxHeight = h0 + (vy * vy) / (2.0 * g)
+        val range = vx * tFlight
+        val apexTime = vy / g
+
+        val out = mutableListOf<String>()
+        out.add("Projectile (без сопротивления воздуха):")
+        out.add("v0 = ${"%.3f".format(v)} m/s, угол = ${"%.3f".format(angleDeg)}°")
+        out.add("Горизонтальная скорость vx = ${"%.3f".format(vx)} m/s, вертикальная vy = ${"%.3f".format(vy)} m/s")
+        out.add("Время полёта (до земли): ${"%.3f".format(tFlight)} с")
+        out.add("Макс. высота: ${"%.3f".format(maxHeight)} м (время подъёма ≈ ${"%.3f".format(apexTime)} с)")
+        out.add("Дальность (гориз.): ${"%.3f".format(range)} м (~${"%.3f".format(range/1000.0)} км)")
+        out.add("Замечание: модель идеализирована (без воздуха).")
+        return out
+    }
+
+    // --------------------
+    // Energy: kinetic and potential + conversions
+    //    Examples: "энергия m=80 v=5"  or "кинет m 80 v 5" or "потенц m=2 h=10"
+    // --------------------
+    private fun handleEnergy(cmd: String): List<String> {
+        val lower = cmd.lowercase(Locale.getDefault())
+        // parse mass
+        val mMatch = Regex("""(?:m=|m\s+|масса\s*=?\s*)(\d+(?:[.,]\d+)?)""", RegexOption.IGNORE_CASE).find(lower)
+        val mass = mMatch?.groupValues?.get(1)?.replace(',', '.')?.toDoubleOrNull()
+
+        // parse velocity
+        val vMatch = Regex("""(?:v=|v\s+|скорост(?:ь)?\s*=?\s*)(-?\d+(?:[.,]\d+)?)""", RegexOption.IGNORE_CASE).find(lower)
+        val velocity = vMatch?.groupValues?.get(1)?.replace(',', '.')?.toDoubleOrNull()
+
+        // parse height
+        val hMatch = Regex("""(?:h=|h\s+|высот(?:а|ы)?\s*=?\s*)(-?\d+(?:[.,]\d+)?)""", RegexOption.IGNORE_CASE).find(lower)
+        val height = hMatch?.groupValues?.get(1)?.replace(',', '.')?.toDoubleOrNull()
+
+        val g = 9.80665
+        val out = mutableListOf<String>()
+
+        if (mass != null && velocity != null) {
+            val ke = 0.5 * mass * velocity * velocity
+            out.add("Кинетическая энергия: m=${"%.3f".format(mass)} кг, v=${"%.3f".format(velocity)} м/с")
+            out.add("KE = 0.5*m*v^2 = ${"%.3f".format(ke)} J")
+            out.add("Эквивалент: ${(ke/4184.0).formatWith(6)} kcal (≈ хлебных кусков и т.п.)")
+        }
+
+        if (mass != null && height != null) {
+            val pe = mass * g * height
+            out.add("Потенциальная энергия (потенц.): m=${"%.3f".format(mass)} кг, h=${"%.3f".format(height)} м")
+            out.add("PE = m*g*h = ${"%.3f".format(pe)} J")
+        }
+
+        if (out.isEmpty()) {
+            return listOf("Energy: укажите параметры. Примеры: 'энергия m=80 v=5' или 'потенц m=2 h=10'")
+        }
+        return out
+    }
+
+    // helper extension
+    private fun Double.formatWith(frac: Int): String = try { String.format(Locale.getDefault(), "%.${frac}f", this) } catch (_: Exception) { this.toString() }
 }
+
+// --------------------
+// Конец файла
+// --------------------
