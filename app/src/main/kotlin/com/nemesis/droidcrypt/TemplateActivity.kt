@@ -8,7 +8,6 @@ import android.provider.Settings
 import android.text.Editable
 import android.text.InputType
 import android.text.method.ScrollingMovementMethod
-import android.util.Log
 import android.view.KeyEvent
 import android.view.WindowManager
 import android.view.inputmethod.EditorInfo
@@ -33,31 +32,12 @@ import java.math.BigDecimal
 import java.math.MathContext
 import java.math.RoundingMode
 
-/**
- * TemplateActivity — копия UI/структуры VprActivity, но без реальных команд.
- * Служит как шаблон для новых activity с другими наборами команд.
- *
- * Правила работы парсера в шаблоне:
- *  - Поддерживается только help/справка (возвращает простую заглушку).
- *  - Если help не сработал, пытаем основную логику модулей по приоритету:
- *      1) CommandsMain (основной)
- *      2) CommandsV2 (низкий приоритет)
- *      3) CommandsV3 (ещё ниже)
- *  - Каждый объект/модуль — полностью автономен (в нём свои helpers).
- *  - При расширении — добавляйте новые функции только в нужный модуль.
- */
 class TemplateActivity : AppCompatActivity() {
 
-    companion object {
-        private const val TAG = "TemplateActivity"
-    }
-
-    // UI references
     private lateinit var messagesContainer: LinearLayout
     private lateinit var scrollView: ScrollView
     private lateinit var input: EditText
 
-    // Styling constants (копия из вашего VprActivity)
     private val bgColor = 0xFF0A0A0A.toInt()
     private val neonCyan = 0xFF00F5FF.toInt()
     private val userGray = 0xFFB0B0B0.toInt()
@@ -65,13 +45,11 @@ class TemplateActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // hide status bar (full screen)
         window.setFlags(
             WindowManager.LayoutParams.FLAG_FULLSCREEN,
             WindowManager.LayoutParams.FLAG_FULLSCREEN
         )
 
-        // Apply FLAG_SECURE if screenshots are disabled in prefs (key matches SettingsActivity)
         val prefs = getSharedPreferences("PawsTribePrefs", MODE_PRIVATE)
         if (prefs.getBoolean("disableScreenshots", false)) {
             window.setFlags(
@@ -80,7 +58,6 @@ class TemplateActivity : AppCompatActivity() {
             )
         }
 
-        // NOTE: реальный layout я оставил тот же — activity_vpr (вы можете сделать отдельный layout)
         setContentView(R.layout.activity_vpr)
 
         messagesContainer = findViewById(R.id.messagesContainer)
@@ -89,7 +66,6 @@ class TemplateActivity : AppCompatActivity() {
 
         window.decorView.setBackgroundColor(bgColor)
 
-        // Input behaviour: IME_ACTION_DONE submits command
         input.imeOptions = EditorInfo.IME_ACTION_DONE
         input.setRawInputType(InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS)
         input.setOnEditorActionListener { _, actionId, event ->
@@ -107,13 +83,9 @@ class TemplateActivity : AppCompatActivity() {
             }
         }
 
-        // seed welcome
-        addSystemLine("Шаблон: пока команд нет. Введите 'help' для заглушки.")
+        addSystemLine("Шаблон: в модулей есть простые команды. Help обрабатывается в самом низком приоритете.")
     }
 
-    // --------------------
-    // Command routing (только help + делегирование в модули)
-    // --------------------
     private fun submitCommand(command: String) {
         addUserLine("> $command")
         lifecycleScope.launch(Dispatchers.Default) {
@@ -128,60 +100,31 @@ class TemplateActivity : AppCompatActivity() {
                     addAssistantLine("= Ошибка при обработке команды: ${t.message ?: t::class.java.simpleName}")
                     scrollView.post { scrollView.fullScroll(ScrollView.FOCUS_DOWN) }
                 }
-                Log.e(TAG, "Error while processing command", t)
             }
         }
     }
 
-    /**
-     * В этом шаблоне: help возвращает заглушку. Иначе пробуем модули по приоритету:
-     * CommandsMain -> CommandsV2 -> CommandsV3
-     */
     private suspend fun parseCommand(commandRaw: String): List<String> {
         val cmd = commandRaw.trim()
-        val lower = cmd.lowercase(Locale.getDefault())
 
-        // help / справка — возврат простой заглушки
-        if (lower.contains("справк") || lower == "help" || lower.contains("помощ")) {
-            return listOf(
-                "Справка (заглушка):",
-                "Здесь пока нет реализованных команд.",
-                "Когда будете готовы — добавьте команды в соответствующий модуль: CommandsMain / CommandsV2 / CommandsV3."
-            )
-        }
-
-        // Попробуем основной модуль (CommandsMain) — он сейчас пустой и вернёт emptyList
         try {
             val mainRes = CommandsMain.handleCommand(cmd)
             if (mainRes.isNotEmpty()) return mainRes
-        } catch (e: Exception) {
-            Log.w(TAG, "CommandsMain failed", e)
-            // не фейлим — идём дальше
-        }
+        } catch (_: Exception) { }
 
-        // Затем V2 (низкий приоритет)
         try {
             val v2Res = CommandsV2.handleCommand(cmd)
             if (v2Res.isNotEmpty()) return v2Res
-        } catch (e: Exception) {
-            Log.w(TAG, "CommandsV2 failed", e)
-        }
+        } catch (_: Exception) { }
 
-        // Затем V3 (ещё ниже)
         try {
             val v3Res = CommandsV3.handleCommand(cmd)
             if (v3Res.isNotEmpty()) return v3Res
-        } catch (e: Exception) {
-            Log.w(TAG, "CommandsV3 failed", e)
-        }
+        } catch (_: Exception) { }
 
-        // fallback
-        return listOf("Неизвестная команда. Введите 'help' для справки (заглушка).")
+        return listOf("Неизвестная команда. Введите 'help' для справки.")
     }
 
-    // --------------------
-    // UI helpers (копия стиля)
-    // --------------------
     private fun addUserLine(text: String) {
         val tv = TextView(this).apply {
             this.text = text
@@ -219,7 +162,6 @@ class TemplateActivity : AppCompatActivity() {
         scrollView.post { scrollView.fullScroll(ScrollView.FOCUS_DOWN) }
     }
 
-    // Utility: generate random bytes (unused but left) — оставлено для совместимости с оригиналом
     private fun randomBytes(size: Int): ByteArray {
         val rnd = SecureRandom()
         val arr = ByteArray(size)
@@ -228,69 +170,209 @@ class TemplateActivity : AppCompatActivity() {
     }
 }
 
-// --------------------
-// Модули команд: заглушки / шаблоны
-// --------------------
-
-/**
- * CommandsMain — основной модуль для этого activity.
- * Сейчас: только help-заглушка. Расширяйте здесь реальные команды в будущем.
- *
- * Пример: fun handleCommand(cmdRaw: String): List<String> { ... }
- */
 private object CommandsMain {
 
     fun handleCommand(cmdRaw: String): List<String> {
-        val lower = cmdRaw.trim().lowercase(Locale.getDefault())
-        // Заглушка: main не реализован, кроме help (который обрабатывается в Activity)
-        // Возвращаем пустой список — чтобы парсер продолжил в V2/V3.
+        val cmd = cmdRaw.trim()
+        val lower = cmd.lowercase(Locale.getDefault())
+
+        if (lower.contains("налог") || lower.contains("ндфл") || lower.contains("tax")) {
+            return handleTax(cmd)
+        }
+        if (lower.contains("накоп") || lower.contains("накопить") || lower.contains("savings")) {
+            return handleSavings(cmd)
+        }
+        if (lower.contains("pmt") || lower.contains("плт") || lower.contains("платеж") || lower.contains("платёж")) {
+            return handlePmt(cmd)
+        }
+
         return emptyList()
     }
 
-    // Пример helper — добавляйте здесь реальные парсеры/модули.
-    // private fun parseSomething(payload: String): Something { ... }
+    private fun handleTax(cmd: String): List<String> {
+        val nums = Regex("""(\d+(?:[.,]\d+)?)""").findAll(cmd).map { it.groupValues[1].replace(',', '.') }.toList()
+        val amount = nums.firstOrNull()?.toDoubleOrNull() ?: return listOf("Налог: укажите сумму. Пример: 'налог 100000 13%'")
+        val perc = Regex("""(\d+(?:[.,]\d+)?)\s*%""").find(cmd)?.groupValues?.get(1)?.replace(',', '.')?.toDoubleOrNull() ?: 13.0
+        val rate = perc / 100.0
+        val tax = amount * rate
+        val net = amount - tax
+        return listOf("Сумма: ${formatMoney(amount)}", "Ставка: ${"%.2f".format(perc)}%", "Налог: ${formatMoney(tax)}", "После налога: ${formatMoney(net)}")
+    }
+
+    private fun handleSavings(cmd: String): List<String> {
+        val nums = Regex("""(\d+(?:[.,]\d+)?)""").findAll(cmd).map { it.groupValues[1].replace(',', '.') }.toList()
+        val amount = nums.firstOrNull()?.toDoubleOrNull() ?: return listOf("Накопить: укажите сумму. Пример: 'накопить 300000 на 180 дней под 7%'")
+        val days = parseDaysFromText(cmd) ?: (parseTimeYearsFromText(cmd) * 365.0).toInt().coerceAtLeast(30)
+        val perc = Regex("""(\d+(?:[.,]\d+)?)\s*%""").find(cmd)?.groupValues?.get(1)?.replace(',', '.')?.toDoubleOrNull() ?: 0.0
+
+        val months = kotlin.math.max(1, Math.round(days / 30.0).toInt())
+
+        if (perc == 0.0) {
+            val perDay = amount / days
+            val perWeek = perDay * 7.0
+            val perMonth = amount / months.toDouble()
+            return listOf(
+                "Цель: ${formatMoney(amount)}",
+                "Период: $days дней (~${"%.2f".format(months / 12.0)} лет)",
+                "Без процентов: в день ${formatMoney(perDay)} ₽, в неделю ${formatMoney(perWeek)} ₽, в месяц ≈ ${formatMoney(perMonth)} ₽"
+            )
+        } else {
+            val pm = pmtForFutureValue(amount, perc / 100.0, months)
+            val perDay = pm / 30.0
+            val perWeek = perDay * 7.0
+            return listOf(
+                "Цель: ${formatMoney(amount)}",
+                "Период: $days дней (~$months мес)",
+                "Учитывая ${"%.4f".format((perc))}% годовых (помесячная кап.):",
+                "Нужно ежемесячно: ${formatMoney(pm)} ₽ (≈ в день ${formatMoney(perDay)} ₽, в неделю ${formatMoney(perWeek)} ₽)"
+            )
+        }
+    }
+
+    private fun handlePmt(cmd: String): List<String> {
+        val nums = Regex("""(-?\d+(?:[.,]\d+)?)""").findAll(cmd).map { it.groupValues[1].replace(',', '.') }.toList()
+        if (nums.isEmpty()) return listOf("PMT: укажите сумму кредита. Пример: 'pmt 150000 9% 15 лет'")
+        val principal = nums[0].toDoubleOrNull() ?: return listOf("PMT: не удалось распознать сумму.")
+        val perc = Regex("""(\d+(?:[.,]\d+)?)\s*%""").find(cmd)?.groupValues?.get(1)?.replace(',', '.')?.toDoubleOrNull() ?: 0.0
+        val years = parseTimeYearsFromText(cmd)
+        val months = kotlin.math.max(1, (years * 12.0).toInt())
+        val pmt = pmtAnnuity(principal, perc / 100.0, months)
+        val total = pmt * months
+        val overpay = total - principal
+        val perYear = (total - principal) / years
+        val perMonthAvg = perYear / 12.0
+        val perDayAvg = perYear / 365.0
+        val perHourAvg = perDayAvg / 24.0
+
+        val out = mutableListOf<String>()
+        out.add("Аннуитетный платёж: ${formatMoney(pmt)} ₽/мес")
+        out.add("Срок: $months мес (~${"%.2f".format(years)} лет)")
+        out.add("Общая выплата: ${formatMoney(total)} ₽ (переплата ${formatMoney(overpay)} ₽)")
+        out.add("Переплата в среднем: в год ${formatMoney(perYear)} ₽, в месяц ${formatMoney(perMonthAvg)} ₽, в день ${String.format("%.4f", perDayAvg)} ₽, в час ${String.format("%.6f", perHourAvg)} ₽")
+        out.add("Первые 6 месяцев амортизации:")
+        out.addAll(amortizationAnnuity(principal, perc / 100.0, months, 6))
+        return out
+    }
+
+    private fun parseDaysFromText(textRaw: String): Int? {
+        val text = textRaw.lowercase()
+        val explicitDays = Regex("""\b(?:на|за)?\s*(\d{1,4})\s*(дн|дня|дней)\b""").find(text)
+        if (explicitDays != null) return explicitDays.groupValues[1].toIntOrNull()?.coerceAtLeast(1)
+        val weeks = Regex("""\b(?:на|за)?\s*(\d{1,3})?\s*(недел|нед)\b""").find(text)
+        if (weeks != null) {
+            val maybeNum = weeks.groupValues[1]
+            val num = if (maybeNum.isBlank()) 1 else maybeNum.toIntOrNull() ?: 1
+            return (num * 7).coerceAtLeast(1)
+        }
+        return null
+    }
+
+    private fun parseTimeYearsFromText(cmd: String): Double {
+        val yearMatch = Regex("""(\d+(?:[.,]\d+)?)\s*(лет|год|года)""", RegexOption.IGNORE_CASE).find(cmd)
+        if (yearMatch != null) return yearMatch.groupValues[1].replace(',', '.').toDoubleOrNull() ?: 1.0
+        val monthMatch = Regex("""(\d+(?:[.,]\d+)?)\s*(мес|месяц|месяцев)""", RegexOption.IGNORE_CASE).find(cmd)
+        if (monthMatch != null) return (monthMatch.groupValues[1].replace(',', '.').toDoubleOrNull() ?: 1.0) / 12.0
+        val numOnly = Regex("""\b(\d+(?:[.,]\d+)?)\b""").find(cmd)
+        if (numOnly != null) return numOnly.groupValues[1].replace(',', '.').toDoubleOrNull() ?: 1.0
+        return 1.0
+    }
+
+    private fun pmtAnnuity(principal: Double, annualRate: Double, months: Int): Double {
+        if (months <= 0) return principal
+        val rMonth = annualRate / 12.0
+        if (rMonth == 0.0) return principal / months
+        val factor = Math.pow(1.0 + rMonth, months.toDouble())
+        return principal * rMonth * factor / (factor - 1.0)
+    }
+
+    private fun amortizationAnnuity(principal: Double, annualRate: Double, months: Int, showFirst: Int): List<String> {
+        val out = mutableListOf<String>()
+        var remaining = principal
+        val pmt = pmtAnnuity(principal, annualRate, months)
+        val rMonth = annualRate / 12.0
+        val maxShow = showFirst.coerceAtMost(months)
+        for (i in 1..maxShow) {
+            val interest = remaining * rMonth
+            var principalPaid = pmt - interest
+            if (i == months) principalPaid = remaining
+            remaining -= principalPaid
+            if (remaining < 0) remaining = 0.0
+            out.add(String.format(Locale.getDefault(), "Мес %d: платёж %s, проценты %s, погашение %s, остаток %s",
+                i,
+                formatMoney(pmt),
+                formatMoney(interest),
+                formatMoney(principalPaid),
+                formatMoney(remaining)
+            ))
+            if (remaining <= 0.0) break
+        }
+        return out
+    }
+
+    private fun pmtForFutureValue(futureValue: Double, annualRate: Double, months: Int): Double {
+        if (months <= 0) return futureValue
+        val r = annualRate / 12.0
+        if (r == 0.0) return futureValue / months
+        val factor = Math.pow(1.0 + r, months.toDouble()) - 1.0
+        return futureValue * r / factor
+    }
+
+    private fun formatMoney(v: Double): String {
+        return String.format(Locale.getDefault(), "%.2f", v)
+    }
 }
 
-/**
- * CommandsV2 — второй модуль (низкий приоритет).
- * Пока заглушка: возвращает пустой список.
- * Предназначен для размещения дополнительных команд (в дальнейшем можно перенести сюда FinanceV2 и т.п.).
- */
 private object CommandsV2 {
 
     fun handleCommand(cmdRaw: String): List<String> {
-        val lower = cmdRaw.trim().lowercase(Locale.getDefault())
-        // Заглушка: ничего не делает (ниже по приоритету).
-        // Если захотите, можно реализовать help здесь или отдельные тестовые команды.
+        val cmd = cmdRaw.trim()
+        val lower = cmd.lowercase(Locale.getDefault())
+
+        if (lower.contains("налог") || lower.contains("ндфл") || lower.contains("tax")) {
+            val out = CommandsMain.handleCommand(cmdRaw)
+            if (out.isNotEmpty()) return out.map { "[V2] $it" }
+        }
+        if (lower.contains("накоп") || lower.contains("накопить") || lower.contains("savings")) {
+            val out = CommandsMain.handleCommand(cmdRaw)
+            if (out.isNotEmpty()) return out.map { "[V2] $it" }
+        }
+        if (lower.contains("pmt") || lower.contains("плт") || lower.contains("платеж") || lower.contains("платёж")) {
+            val out = CommandsMain.handleCommand(cmdRaw)
+            if (out.isNotEmpty()) return out.map { "[V2] $it" }
+        }
+
         return emptyList()
     }
-
-    // Место для helpers V2
-    // private fun helperV2(...) { ... }
 }
 
-/**
- * CommandsV3 — третий модуль (ещё ниже приоритет).
- * Заглушка — используется как резервный модуль.
- */
 private object CommandsV3 {
 
     fun handleCommand(cmdRaw: String): List<String> {
-        // Простейшая заглушка
+        val cmd = cmdRaw.trim()
+        val lower = cmd.lowercase(Locale.getDefault())
+
+        if (lower.contains("налог") || lower.contains("ндфл") || lower.contains("tax")) {
+            val out = CommandsMain.handleCommand(cmdRaw)
+            if (out.isNotEmpty()) return out.map { "[V3] $it" }
+        }
+        if (lower.contains("накоп") || lower.contains("накопить") || lower.contains("savings")) {
+            val out = CommandsMain.handleCommand(cmdRaw)
+            if (out.isNotEmpty()) return out.map { "[V3] $it" }
+        }
+        if (lower.contains("pmt") || lower.contains("плт") || lower.contains("платеж") || lower.contains("платёж")) {
+            val out = CommandsMain.handleCommand(cmdRaw)
+            if (out.isNotEmpty()) return out.map { "[V3] $it" }
+        }
+
+        if (lower.contains("справк") || lower == "help" || lower.contains("помощ")) {
+            return listOf(
+                "Справка-заглушка (CommandsV3):",
+                "- налог <сумма> [ставка%]  — расчёт налога (по умолчанию 13%)",
+                "- накопить <сумма> на N дней / к ДД.ММ.ГГГГ [под X%] — сколько откладывать",
+                "- pmt <сумма> <ставка%> <срок (лет)> — ежемесячный аннуитетный платёж"
+            )
+        }
+
         return emptyList()
     }
-
-    // Место для helpers V3
 }
-
-/*
-  Инструкции по использованию/расширению:
-  - Чтобы перенести команду из вашего VprActivity в этот шаблон, поместите парсер/хелперы в один из объектов:
-      CommandsMain (первый), CommandsV2 (второй), CommandsV3 (третий).
-  - Каждый объект должен возвращать List<String> (пустой список = не распознано).
-  - Парсер Activity вызывает модули в порядке приоритета — main -> v2 -> v3.
-  - Важно: не кидать unchecked исключения из модулей — Activity ловит и логирует их (чтобы модуль низкого приоритета не ломал обработку).
-  - Команды, зависящие от Android (Intent и т.п.), нужно выполнять через withContext(Dispatchers.Main) в Activity
-    или прокидывать контекст/интерфейс в модуль (если делаете тесную интеграцию).
-*/
-
