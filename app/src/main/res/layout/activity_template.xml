@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/rootContainer"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="8dp"
+    android:background="#0A0A0A">
+
+    <!-- Header / Status -->
+    <TextView
+        android:id="@+id/headerText"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Offline Assistant — Оффлайн"
+        android:textColor="#00F5FF"
+        android:textSize="16sp"
+        android:padding="8dp"
+        android:fontFamily="sans-serif-medium" />
+
+    <!-- Scrollable messages (no RecyclerView) -->
+    <ScrollView
+        android:id="@+id/scrollView"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:overScrollMode="ifContentScrolls"
+        android:paddingTop="6dp">
+
+        <LinearLayout
+            android:id="@+id/messagesContainer"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical" />
+    </ScrollView>
+
+    <!-- Input single-line (Enter/Done = submit) -->
+    <EditText
+        android:id="@+id/inputEditText"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:hint="Введите команду (Enter = отправить)"
+        android:imeOptions="actionDone"
+        android:maxLines="1"
+        android:inputType="text"
+        android:textColor="#00F5FF"
+        android:textColorHint="#5588AA"
+        android:backgroundTint="#222222"
+        android:padding="12dp"
+        android:layout_marginTop="6dp"
+        android:fontFamily="monospace" />
+
+</LinearLayout>
