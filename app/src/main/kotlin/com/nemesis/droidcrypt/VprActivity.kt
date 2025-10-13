@@ -1,4 +1,4 @@
-package com.nemesis.droidcrypt
+package your.package.name.here
 
 import android.content.Intent
 import android.graphics.Typeface
@@ -8,6 +8,7 @@ import android.provider.Settings
 import android.text.Editable
 import android.text.InputType
 import android.text.method.ScrollingMovementMethod
+import android.util.Log
 import android.view.KeyEvent
 import android.view.WindowManager
 import android.view.inputmethod.EditorInfo
@@ -21,7 +22,6 @@ import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import android.util.Log
 import java.math.BigDecimal
 import java.math.MathContext
 import java.math.RoundingMode
@@ -699,6 +699,20 @@ class VprActivity : AppCompatActivity() {
 
             // fallback: monthly conversion semantics assume this is income if "месяч" phrase present, else present budgets as monthly->rates
             return listOfNotNull(monthlyIncomeReport(amount, workHours))
+        }
+
+        // --------------------
+        // Try FinanceV2 (low priority): let main parser handle everything first.
+        // If it returns non-empty results, we use them. Otherwise continue to fallback.
+        // --------------------
+        try {
+            val v2Outputs = FinanceV2.handleCommand(cmd)
+            if (!v2Outputs.isNullOrEmpty()) {
+                return v2Outputs
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "FinanceV2 handling failed", e)
+            // don't fail parsing — FinanceV2 is low priority and must not break main parser
         }
 
         // fallback
