@@ -180,26 +180,7 @@ private object CommandsMain {
     fun handleCommand(cmdRaw: String): List<String> {
         val cmd = cmdRaw.trim()
         val lower = cmd.lowercase(Locale.getDefault())
-
-        // Prioritize help
-        if (lower == "help" || lower.contains("справк") || lower.contains("помощ")) {
-            return listOf(
-                "Справка (CommandsMain): удобные команды:",
-                " - stop <скорость> [состояние(сухо/мокро/лед)] — торможение с учётом реакции.",
-                " - gap <скорость> — рекомендованный безопасный интервал (секунды/метры).",
-                " - bike-stop <скорость> [disc/drum] [сухо/мокро] [down/up <%>] — тормозной путь для велосипеда.",
-                " - fall <высота> — время падения и скорость при ударе.",
-                " - boil <объём> from <T0> power <Вт> [kettle/stove] — время до кипения.",
-                " - charge <ёмкость> [V] power <Вт> [from X% to Y%] — оценка времени зарядки.",
-                " - stairs <этажи|высота> [weight <kg>] — калории/энергия при подъёме.",
-                " - incline <dist> slope <%> speed <km/h> weight <kg> — время и калории при подъёме.",
-                " - lift <mass> height <m> time <s> — сила/мощность/советы по подъёму.",
-                " - sound <Ldb> at <r1> to <r2> — уровень звука на другом расстоянии.",
-                " - windchill <T> wind <speed> — ощущаемая температура.",
-                " - heatloss <area> height <m> insulation <good/avg/poor> dT <°C> — прибл. теплопотери."
-            )
-        }
-
+        
         // time/distance existing handler
         if (lower.contains("время") || lower.contains("сколько времени") || lower.contains("time")) {
             return handleTimeForDistance(cmd)
@@ -862,7 +843,7 @@ private object CommandsV3 {
             return listOf(
                 "Справка (CommandsV3 + расширение): список доступных физических и прикладных команд.",
                 "",
-                "Существующиеь команды:",
+                "Существующие команды:",
                 "1) Время: 'время 150 км при 80 км/ч' — рассчитывает точное время в секундах, минутах и часах, разбивку и округление до 0.5 мин. Также показывает примерное время прибытия (ETA).",
                 "2) Скорость: 'сколько ехать 10 км за 15 минут' или 'сколько идти 5 км за 50 минут' — вычисляет требуемую среднюю скорость и пэйс (время на километр).",
                 "",
