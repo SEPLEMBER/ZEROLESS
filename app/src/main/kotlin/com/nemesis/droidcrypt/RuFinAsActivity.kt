@@ -1,3 +1,5 @@
+package com.nemesis.droidcrypt
+
 import android.content.Intent
 import android.graphics.Typeface
 import android.net.Uri
