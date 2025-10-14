@@ -83,9 +83,9 @@
 
         <!-- VprActivity -->
         <activity
-            android:name=".VprActivity"
+            android:name=".RuFinAsActivity"
             android:exported="false"
-            android:parentActivityName=".MainActivity"
+            android:parentActivityName=".ArrivalActivity"
             android:theme="@style/VprTheme"
             android:configChanges="orientation|screenSize" />
 
@@ -97,9 +97,9 @@
             android:configChanges="orientation|screenSize" />
 
                         <activity
-            android:name=".TemplateActivity"
+            android:name=".RuPhysAsActivity"
             android:exported="false"
-            android:parentActivityName=".TemplateActivity"
+            android:parentActivityName=".ArrivalActivity"
             android:theme="@style/VprTheme"
             android:configChanges="orientation|screenSize" />
 
