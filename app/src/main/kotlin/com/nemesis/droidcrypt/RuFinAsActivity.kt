@@ -67,7 +67,7 @@ class RuFinAsActivity : AppCompatActivity() {
             )
         }
 
-        setContentView(R.layout.activity_vpr)
+        setContentView(R.layout.activity_ru_fin_as)
 
         messagesContainer = findViewById(R.id.messagesContainer)
         scrollView = findViewById(R.id.scrollView)
