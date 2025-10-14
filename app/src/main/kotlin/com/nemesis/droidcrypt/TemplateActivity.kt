@@ -169,20 +169,109 @@ class TemplateActivity : AppCompatActivity() {
 }
 
 // --------------------
-// CommandsMain: расчёт времени по расстоянию и скорости
-//  (команда 1: "время / time / сколько времени ...")
+// CommandsMain: расширенный набор практичных "человеческих" команд
+//  Поддерживает: время (существующий), stop, gap, bike-stop, fall, boil, charge,
+//  stairs, incline, lift, sound, windchill, heatloss
 // --------------------
 private object CommandsMain {
+
+    private const val G = 9.80665
 
     fun handleCommand(cmdRaw: String): List<String> {
         val cmd = cmdRaw.trim()
         val lower = cmd.lowercase(Locale.getDefault())
+
+        // Prioritize help
+        if (lower == "help" || lower.contains("справк") || lower.contains("помощ")) {
+            return listOf(
+                "Справка (CommandsMain): удобные команды:",
+                " - stop <скорость> [состояние(сухо/мокро/лед)] — торможение с учётом реакции.",
+                " - gap <скорость> — рекомендованный безопасный интервал (секунды/метры).",
+                " - bike-stop <скорость> [disc/drum] [сухо/мокро] [down/up <%>] — тормозной путь для велосипеда.",
+                " - fall <высота> — время падения и скорость при ударе.",
+                " - boil <объём> from <T0> power <Вт> [kettle/stove] — время до кипения.",
+                " - charge <ёмкость> [V] power <Вт> [from X% to Y%] — оценка времени зарядки.",
+                " - stairs <этажи|высота> [weight <kg>] — калории/энергия при подъёме.",
+                " - incline <dist> slope <%> speed <km/h> weight <kg> — время и калории при подъёме.",
+                " - lift <mass> height <m> time <s> — сила/мощность/советы по подъёму.",
+                " - sound <Ldb> at <r1> to <r2> — уровень звука на другом расстоянии.",
+                " - windchill <T> wind <speed> — ощущаемая температура.",
+                " - heatloss <area> height <m> insulation <good/avg/poor> dT <°C> — прибл. теплопотери."
+            )
+        }
+
+        // time/distance existing handler
         if (lower.contains("время") || lower.contains("сколько времени") || lower.contains("time")) {
             return handleTimeForDistance(cmd)
         }
+
+        // stop / тормозной путь
+        val stopRoots = listOf("stop", "стоп", "тормоз", "тормозной")
+        if (stopRoots.any { lower.contains(it) }) {
+            return handleStop(cmd)
+        }
+
+        val gapRoots = listOf("gap", "интервал", "безопасный интервал", "безопасно держать")
+        if (gapRoots.any { lower.contains(it) }) {
+            return handleGap(cmd)
+        }
+
+        val bikeRoots = listOf("bike-stop", "вело", "велосипед", "байк тормоз", "bike stop")
+        if (bikeRoots.any { lower.contains(it) }) {
+            return handleBikeStop(cmd)
+        }
+
+        val fallRoots = listOf("fall", "паден", "падение", "упадет", "скорость при ударе")
+        if (fallRoots.any { lower.contains(it) }) {
+            return handleFall(cmd)
+        }
+
+        val boilRoots = listOf("boil", "кипят", "кипение", "чайник", "вскип")
+        if (boilRoots.any { lower.contains(it) }) {
+            return handleBoil(cmd)
+        }
+
+        val chargeRoots = listOf("charge", "заряд", "зарядка")
+        if (chargeRoots.any { lower.contains(it) }) {
+            return handleCharge(cmd)
+        }
+
+        val stairsRoots = listOf("stairs", "лестн", "этаж", "поднять на")
+        if (stairsRoots.any { lower.contains(it) }) {
+            return handleStairs(cmd)
+        }
+
+        val inclineRoots = listOf("incline", "вверх", "уклон", "подъём", "slope")
+        if (inclineRoots.any { lower.contains(it) }) {
+            return handleIncline(cmd)
+        }
+
+        val liftRoots = listOf("lift", "поднять", "подъём груза", "поднять на")
+        if (liftRoots.any { lower.contains(it) }) {
+            return handleLift(cmd)
+        }
+
+        val soundRoots = listOf("sound", "дб", "дбс", "звук", "дб")
+        if (soundRoots.any { lower.contains(it) }) {
+            return handleSound(cmd)
+        }
+
+        val windRoots = listOf("windchill", "ощущ", "ощущаем", "ветр", "ветер")
+        if (windRoots.any { lower.contains(it) }) {
+            return handleWindchill(cmd)
+        }
+
+        val heatlossRoots = listOf("heatloss", "теплопот", "утечка тепла", "теплопотери")
+        if (heatlossRoots.any { lower.contains(it) }) {
+            return handleHeatLoss(cmd)
+        }
+
         return emptyList()
     }
 
+    // --------------------
+    // Существующий: время по расстоянию и скорости (оставлен без изменений логики)
+    // --------------------
     private fun handleTimeForDistance(cmd: String): List<String> {
         val distMeters = PhysUtils.parseDistanceMeters(cmd)
             ?: return listOf(
@@ -226,6 +315,453 @@ private object CommandsMain {
 
         sb.add("Заметка: модель проста — без учёта рельефа, пробок или остановок.")
         return sb
+    }
+
+    // --------------------
+    // STOP — тормозной путь с учётом реакции и состояния дороги
+    // --------------------
+    private fun handleStop(cmd: String): List<String> {
+        val lower = cmd.lowercase(Locale.getDefault())
+
+        // speed parsing: try speed parser then bare number (assume km/h)
+        var v = PhysUtils.parseSpeedToMPerS(lower)
+        if (v == null) {
+            val possible = PhysUtils.extractBareNumber(lower, "v") ?: PhysUtils.extractBareNumber(lower, "")
+            if (possible != null) {
+                // if number > 10 assume km/h, else assume m/s
+                v = if (possible > 10) possible / 3.6 else possible
+            }
+        }
+        if (v == null) return listOf("Stop: не удалось распознать скорость. Пример: 'stop 80 km/h' или 'стоп 50км/ч'")
+
+        // reaction time
+        val reactionDefault = 1.0 // s
+        val reactionMatch = Regex("""(реакц|reaction)\s*[:=]?\s*(-?\d+(?:[.,]\d+)?)""").find(lower)
+        val reaction = reactionMatch?.groupValues?.get(2)?.replace(',', '.')?.toDoubleOrNull() ?: reactionDefault
+
+        // road condition
+        val mu = when {
+            lower.contains("мокр") || lower.contains("wet") -> 0.4
+            lower.contains("лед") || lower.contains("ice") -> 0.12
+            else -> 0.8 // сухая по умолчанию
+        }
+
+        val a = mu * G
+        val brakingDistance = if (a > 0) v * v / (2.0 * a) else Double.POSITIVE_INFINITY
+        val reactionDist = v * reaction
+        val timeBraking = if (a > 0) v / a else Double.POSITIVE_INFINITY
+        val totalDist = reactionDist + brakingDistance
+        val totalTime = reaction + timeBraking
+
+        val sb = mutableListOf<String>()
+        sb.add("Торможение от ${"%.0f".format(v*3.6)} км/ч (скорость):")
+        sb.add(" - Время реакции: ${"%.2f".format(reaction)} с → пройдено ≈ ${"%.1f".format(reactionDist)} м")
+        sb.add(" - Коэффициент сцепления (оценка): μ ≈ ${"%.2f".format(mu)} (${if (mu==0.8) "сухо" else if (mu==0.4) "мокро" else "скользко"})")
+        sb.add(" - Тормозной путь (после реакции): ≈ ${"%.1f".format(brakingDistance)} м")
+        sb.add("Итого до полной остановки: ≈ ${"%.1f".format(totalDist)} м (≈ ${"%.2f".format(totalTime)} с)")
+        sb.add("Примечание: приближение — не учитывает ABS, рельеф, уклон и состояние шин.")
+        return sb
+    }
+
+    // --------------------
+    // GAP — безопасный интервал
+    // --------------------
+    private fun handleGap(cmd: String): List<String> {
+        val lower = cmd.lowercase(Locale.getDefault())
+        var v = PhysUtils.parseSpeedToMPerS(lower)
+        if (v == null) {
+            val num = PhysUtils.extractBareNumber(lower, "")
+            if (num != null) v = if (num > 10) num / 3.6 else num
+        }
+        if (v == null) return listOf("Gap: не найдено скорости. Пример: 'gap 100 km/h'")
+
+        val secondsNormal = 2.5
+        val secondsWet = 4.0
+        val seconds = if (lower.contains("мокр") || lower.contains("wet")) secondsWet else secondsNormal
+        val dist = v * seconds
+
+        val sb = mutableListOf<String>()
+        sb.add("Рекомендованный безопасный интервал при ${"%.0f".format(v*3.6)} км/ч:")
+        sb.add(" - Временной интервал: ≈ ${"%.1f".format(seconds)} с")
+        sb.add(" - Это соответствует ≈ ${"%.1f".format(dist)} м")
+        sb.add("Совет: увеличивайте интервал при плохой видимости или скользкой дороге.")
+        return sb
+    }
+
+    // --------------------
+    // BIKE-STOP — тормозной путь для велосипеда
+    // --------------------
+    private fun handleBikeStop(cmd: String): List<String> {
+        val lower = cmd.lowercase(Locale.getDefault())
+        // speed
+        var v = PhysUtils.parseSpeedToMPerS(lower)
+        if (v == null) {
+            val num = PhysUtils.extractBareNumber(lower, "")
+            if (num != null) v = if (num > 10) num / 3.6 else num
+        }
+        if (v == null) return listOf("Bike-stop: укажите скорость. Пример: 'bike-stop 30 km/h disc dry'")
+
+        // brake type
+        val muBrake = when {
+            lower.contains("disc") || lower.contains("диск") -> 0.7
+            lower.contains("drum") || lower.contains("бараб") -> 0.5
+            else -> 0.6
+        }
+
+        // road
+        val muRoad = when {
+            lower.contains("мокр") || lower.contains("wet") -> 0.4
+            lower.contains("лед") || lower.contains("ice") -> 0.12
+            else -> 0.8
+        }
+
+        // slope percent if present "down 5%" or "уклон 5%"
+        val slopeMatch = Regex("""(-?\d+(?:[.,]\d+)?)\s*%""").find(lower)
+        val slopePercent = slopeMatch?.groupValues?.get(1)?.replace(',', '.')?.toDoubleOrNull() ?: 0.0
+        val slopeAccel = (slopePercent / 100.0) * G // positive for downhill increases stopping distance
+
+        val muEffective = min(muBrake, muRoad)
+        val a = muEffective * G - slopeAccel
+        val brakingDistance = if (a > 0) v * v / (2.0 * a) else Double.POSITIVE_INFINITY
+        val reaction = 1.0
+        val reactionDist = v * reaction
+        val total = reactionDist + brakingDistance
+
+        val sb = mutableListOf<String>()
+        sb.add("Велосипед ${"%.0f".format(v*3.6)} км/ч, тормоза: ${if (muBrake>=0.7) "дисковые" else "барабан/обычные"}")
+        sb.add(" - Уклон: ${"%.2f".format(slopePercent)}% → дополнительное влияние на торможение")
+        sb.add(" - Тормозной путь ≈ ${if (brakingDistance.isFinite()) "%.1f".format(brakingDistance) + " м" else "бесконечность (слишком маленькое сцепление)"}")
+        sb.add(" - Добавьте ≈ ${"%.1f".format(reactionDist)} м на реакцию (≈1 с). Итого ≈ ${"%.1f".format(total)} м")
+        sb.add("Совет: на спусках снижайте скорость заранее и используйте оба тормоза.")
+        return sb
+    }
+
+    // --------------------
+    // FALL — время падения и скорость при ударе
+    // --------------------
+    private fun handleFall(cmd: String): List<String> {
+        val lower = cmd.lowercase(Locale.getDefault())
+        // parse height in meters
+        val h = PhysUtils.extractNumberIfPresent(lower, listOf("m", "м", "height", "высота"))
+            ?: PhysUtils.parseDistanceMeters(lower) ?: PhysUtils.extractBareNumber(lower, "") ?: return listOf("Fall: укажите высоту в метрах. Пример: 'fall 10 m'")
+
+        val hMeters = h
+        if (hMeters < 0.0) return listOf("Fall: высота должна быть положительной.")
+        val t = sqrt(2.0 * hMeters / G)
+        val v = G * t
+        val sb = mutableListOf<String>()
+        sb.add("Падение с ${"%.2f".format(hMeters)} м:")
+        sb.add(" - Время падения ≈ ${"%.2f".format(t)} с")
+        sb.add(" - Скорость при ударе ≈ ${"%.2f".format(v)} м/с (≈ ${"%.1f".format(v*3.6)} км/ч)")
+        sb.add("Внимание: удар на такой скорости может быть опасен — это ориентировочные значения (без сопротивления воздуха).")
+        return sb
+    }
+
+    // --------------------
+    // BOIL — время вскипания воды
+    // --------------------
+    private fun handleBoil(cmd: String): List<String> {
+        val lower = cmd.lowercase(Locale.getDefault())
+
+        // volume parse (l, liters)
+        val volParsed = PhysUtils.extractNumberWithUnit(lower, listOf("l", "л", "liter", "litre"))
+        val volumeL = volParsed?.value ?: PhysUtils.extractNumberIfPresent(lower, listOf("v", "объем", "volume")) ?: PhysUtils.extractBareNumber(lower, "") ?: return listOf("Boil: укажите объём воды. Пример: 'boil 1.5L from 20C power 2000W'")
+
+        val volumeM3 = volumeL / 1000.0
+        val massKg = 1000.0 * volumeM3 // density ~1000 kg/m3
+
+        // temperatures
+        val tFromMatch = Regex("""from\s*(-?\d+(?:[.,]\d+)?)\s*°?c""").find(lower)
+        val tFrom = tFromMatch?.groupValues?.get(1)?.replace(',', '.')?.toDoubleOrNull()
+            ?: PhysUtils.extractNumberIfPresent(lower, listOf("t0", "start", "from")) ?: 20.0
+        val tTo = 100.0
+
+        // power parse (W or kW)
+        val power = parsePowerWatts(lower) ?: return listOf("Boil: не найден параметр мощности. Укажите 'power 2000W' или 'power 1.5kW'")
+
+        // efficiency
+        val eff = if (lower.contains("stove") || lower.contains("плита")) 0.6 else 0.9
+
+        val deltaT = tTo - tFrom
+        if (deltaT <= 0.0) return listOf("Boil: конечная температура должна быть выше начальной.")
+
+        val Q = massKg * 4184.0 * deltaT // J
+        val tSec = Q / (power * eff)
+        val sb = mutableListOf<String>()
+        sb.add("Нагреть ${"%.2f".format(volumeL)} л воды с ${"%.1f".format(tFrom)}°C до 100°C при P=${formatWatts(power)} (эффективность ≈ ${"%.0f".format(eff*100)}%):")
+        sb.add(" - Необходимая энергия: ≈ ${"%.0f".format(Q)} J (${String.format("%.3f", Q/3_600_000.0)} kWh)")
+        sb.add(" - Приблизительное время: ${PhysUtils.formatSecondsNice(tSec)} (≈ ${"%.1f".format(tSec/60.0)} мин)")
+        sb.add("Примечание: реальное время зависит от формы ёмкости и потерь на нагрев воздуха/посуды.")
+        return sb
+    }
+
+    // --------------------
+    // CHARGE — время зарядки аккумулятора
+    // --------------------
+    private fun handleCharge(cmd: String): List<String> {
+        val lower = cmd.lowercase(Locale.getDefault())
+
+        // try Wh first
+        val whParsed = PhysUtils.extractNumberWithUnit(lower, listOf("wh", "w h", "ваттчас", "втч"))
+        var energyWh: Double? = null
+        if (whParsed != null) energyWh = whParsed.value
+
+        // try mAh and voltage
+        val mahMatch = Regex("""(\d+(?:[.,]\d+)?)\s*m?a?h\b""").find(lower)
+        val vMatch = Regex("""(\d+(?:[.,]\d+)?)\s*v\b""").find(lower)
+        if (energyWh == null && mahMatch != null) {
+            val mah = mahMatch.groupValues[1].replace(',', '.').toDoubleOrNull()
+            val volt = vMatch?.groupValues?.get(1)?.replace(',', '.')?.toDoubleOrNull() ?: 3.7
+            if (mah != null) energyWh = mah / 1000.0 * volt
+        }
+
+        // fallback: try capacity without unit (assume mAh)
+        if (energyWh == null) {
+            val bare = PhysUtils.extractBareNumber(lower, "")
+            if (bare != null && bare > 1000) {
+                // guess mAh
+                val volt = vMatch?.groupValues?.get(1)?.replace(',', '.')?.toDoubleOrNull() ?: 3.7
+                energyWh = bare / 1000.0 * volt
+            } else if (bare != null && bare <= 100) {
+                // maybe Wh
+                energyWh = bare
+            }
+        }
+
+        if (energyWh == null) return listOf("Charge: не удалось распознать ёмкость (mAh или Wh). Пример: 'charge 5000mAh 3.7V power 5W'")
+
+        val power = parsePowerWatts(lower) ?: return listOf("Charge: не найдена мощность зарядки. Укажите 'power 5W' или 'power 20W'")
+
+        // percent range optional
+        val percMatch = Regex("""(\d{1,3})\s*%\s*->\s*(\d{1,3})\s*%""").find(lower)
+        val (fromP, toP) = if (percMatch != null) {
+            val a = percMatch.groupValues[1].toIntOrNull() ?: 0
+            val b = percMatch.groupValues[2].toIntOrNull() ?: 100
+            Pair(a.coerceIn(0,100), b.coerceIn(0,100))
+        } else {
+            // find tokens like 50% or "from 50% to 100%"
+            val fromMatch = Regex("""from\s*(\d{1,3})\s*%""").find(lower)
+            val toMatch = Regex("""to\s*(\d{1,3})\s*%""").find(lower)
+            val a = fromMatch?.groupValues?.get(1)?.toIntOrNull() ?: 0
+            val b = toMatch?.groupValues?.get(1)?.toIntOrNull() ?: 100
+            Pair(a.coerceIn(0,100), b.coerceIn(0,100))
+        }
+
+        val eff = 0.9
+        val needWh = energyWh * (toP - fromP) / 100.0
+        val timeSec = needWh / (power * eff) * 3600.0
+        val sb = mutableListOf<String>()
+        sb.add("Зарядка: ёмкость ≈ ${"%.2f".format(energyWh)} Wh, зарядка от ${fromP}% до ${toP}% при P=${formatWatts(power)} (эффективность ≈ ${"%.0f".format(eff*100)}%):")
+        sb.add(" - Необходимая энергия: ≈ ${"%.2f".format(needWh)} Wh")
+        sb.add(" - Примерное время: ${PhysUtils.formatSecondsNice(timeSec)} (≈ ${"%.1f".format(timeSec/3600.0)} ч)")
+        sb.add("Примечание: быстрые циклы, специфика батареи и зарядного могут влиять на реальное время.")
+        return sb
+    }
+
+    // --------------------
+    // STAIRS — энергия и калории подъёма
+    // --------------------
+    private fun handleStairs(cmd: String): List<String> {
+        val lower = cmd.lowercase(Locale.getDefault())
+        // floors or height
+        val floorsMatch = Regex("""(\d+)\s*этаж""").find(lower)
+        val heightProvided = PhysUtils.extractNumberIfPresent(lower, listOf("h", "height", "высота"))
+        val floors = floorsMatch?.groupValues?.get(1)?.toIntOrNull()
+        val floorHeight = 3.0
+        val height = when {
+            floors != null -> floors * floorHeight
+            heightProvided != null -> heightProvided
+            else -> PhysUtils.extractBareNumber(lower, "") ?: return listOf("Stairs: укажите этажи или высоту. Пример: 'stairs 3 floors' или 'stairs height 9'")
+        }
+
+        val mass = (PhysUtils.extractNumberWithUnit(lower, listOf("kg", "кг"))?.let { PhysUtils.normalizeMassToKg(it.value, it.unit) }
+            ?: PhysUtils.extractBareNumber(lower, "weight") ?: PhysUtils.extractBareNumber(lower, "") ?: 70.0)
+
+        val deltaPE = mass * G * height // J
+        val kcalPure = deltaPE / 4184.0
+        val muscleEff = 0.25 // muscles efficiency ~25%
+        val kcalEstimated = kcalPure / muscleEff
+
+        val sb = mutableListOf<String>()
+        sb.add("Подняться на ${"%.2f".format(height)} м (масса ${"%.1f".format(mass)} кг):")
+        sb.add(" - Чистая потенциальная энергия: ≈ ${"%.0f".format(deltaPE)} J (${String.format("%.2f", kcalPure)} kcal)")
+        sb.add(" - С учётом эффективности мышц (~25%): ≈ ${String.format("%.1f", kcalEstimated)} kcal (ориентир)")
+        sb.add("Примечание: реальная тратта энергии выше из-за шагов, эксцентрика и темпа.")
+        return sb
+    }
+
+    // --------------------
+    // INCLINE — ходьба по уклону (время и калории)
+    // --------------------
+    private fun handleIncline(cmd: String): List<String> {
+        val lower = cmd.lowercase(Locale.getDefault())
+
+        val distMeters = PhysUtils.parseDistanceMeters(lower) ?: run {
+            val bare = PhysUtils.extractBareNumber(lower, "") ?: return listOf("Incline: укажите расстояние (например, 2km).")
+            // assume km if > 3 else meters
+            if (bare > 3) bare * 1000.0 else bare
+        }
+
+        val slopePercent = PhysUtils.extractNumberIfPresent(lower, listOf("slope", "уклон", "%")) ?: 0.0
+        val speedMps = PhysUtils.parseSpeedToMPerS(lower) ?: ( (PhysUtils.extractBareNumber(lower, "") ?: 5.0) / 3.6 )
+        val mass = (PhysUtils.extractNumberWithUnit(lower, listOf("kg", "кг"))?.let { PhysUtils.normalizeMassToKg(it.value, it.unit) }
+            ?: 75.0)
+
+        val height = distMeters * (slopePercent / 100.0)
+        val workJ = mass * G * height
+        val timeSec = if (speedMps > 0) distMeters / speedMps else Double.POSITIVE_INFINITY
+
+        // base walking energy roughly ~0.9 kcal/kg/km (very rough) + climbing work
+        val baseKcal = 0.9 * mass * (distMeters / 1000.0)
+        val climbKcal = workJ / 4184.0
+        val totalKcal = baseKcal + (climbKcal / 0.25) // adjust climb by muscle eff
+
+        val sb = mutableListOf<String>()
+        sb.add("Маршрут ${"%.2f".format(distMeters/1000.0)} км при уклоне ${"%.2f".format(slopePercent)}%, скорость ${"%.1f".format(speedMps*3.6)} км/ч:")
+        sb.add(" - Высота подъёма: ≈ ${"%.2f".format(height)} м")
+        sb.add(" - Время: ≈ ${PhysUtils.formatSecondsNice(timeSec)}")
+        sb.add(" - Ориентировочные калории: ≈ ${"%.0f".format(totalKcal)} kcal (включая базовую трату и подъём)")
+        sb.add("Примечание: оценки приблизительны и зависят от темпа и рельефа.")
+        return sb
+    }
+
+    // --------------------
+    // LIFT — усилие и мощность для подъёма груза
+    // --------------------
+    private fun handleLift(cmd: String): List<String> {
+        val lower = cmd.lowercase(Locale.getDefault())
+
+        val mass = PhysUtils.extractNumberWithUnit(lower, listOf("kg", "кг"))?.let { PhysUtils.normalizeMassToKg(it.value, it.unit) }
+            ?: PhysUtils.extractBareNumber(lower, "m") ?: PhysUtils.extractBareNumber(lower, "") ?: return listOf("Lift: укажите массу. Пример: 'lift 200kg 2m 5s'")
+
+        val height = PhysUtils.extractNumberIfPresent(lower, listOf("h", "height", "m", "метр")) ?: PhysUtils.extractBareNumber(lower, "") ?: 1.0
+        val time = PhysUtils.extractNumberIfPresent(lower, listOf("t", "time", "s")) ?: PhysUtils.extractBareNumber(lower, "") ?: 1.0
+
+        val force = mass * G
+        val power = if (time > 0) mass * G * height / time else Double.POSITIVE_INFINITY
+
+        val sb = mutableListOf<String>()
+        sb.add("Поднять ${"%.1f".format(mass)} кг на ${"%.2f".format(height)} м за ${"%.1f".format(time)} с:")
+        sb.add(" - Средняя сила (вертикальная): ≈ ${"%.0f".format(force)} N")
+        sb.add(" - Мощность: ≈ ${"%.0f".format(power)} W (${String.format("%.2f", power/1000.0)} kW)")
+        sb.add("Совет: для ручного подъёма оценивайте нагрузку на человека ≈100-200 W устойчиво; рассмотрите лебёдку/блоки при больших массах.")
+        return sb
+    }
+
+    // --------------------
+    // SOUND — ослабление звука с расстоянием и суммирование уровней
+    // --------------------
+    private fun handleSound(cmd: String): List<String> {
+        val lower = cmd.lowercase(Locale.getDefault())
+        // L1 parse
+        val dbMatch = Regex("""(-?\d+(?:[.,]\d+)?)\s*d\s?b\b""").find(lower)
+        val L1 = dbMatch?.groupValues?.get(1)?.replace(',', '.')?.toDoubleOrNull() ?: PhysUtils.extractBareNumber(lower, "")?.let { if (it > 10) it else null }
+        if (L1 == null) return listOf("Sound: укажите уровень в dB. Пример: 'sound 95dB at 1m to 10m'")
+
+        // r1 and r2
+        val atMatch = Regex("""at\s*(\d+(?:[.,]\d+)?)\s*(m|м)?""").find(lower)
+        val toMatch = Regex("""to\s*(\d+(?:[.,]\d+)?)\s*(m|м)?""").find(lower)
+        val r1 = atMatch?.groupValues?.get(1)?.replace(',', '.')?.toDoubleOrNull() ?: 1.0
+        val r2 = toMatch?.groupValues?.get(1)?.replace(',', '.')?.toDoubleOrNull() ?: null
+
+        val sb = mutableListOf<String>()
+        if (r2 != null) {
+            val L2 = L1 - 20.0 * log10(r2 / r1)
+            sb.add("${"%.1f".format(L1)} dB at ${"%.1f".format(r1)} m -> at ${"%.1f".format(r2)} m ≈ ${"%.1f".format(L2)} dB")
+            sb.add("Ориентир по безопасности: длительное воздействие >85 dB вредно. 100 dB ограничивает допустимое время.")
+        } else {
+            sb.add("Уровень: ${"%.1f".format(L1)} dB (укажите 'at <r1> to <r2>' для расчёта на другом расстоянии).")
+            sb.add("Пример: 'sound 95dB at 1m to 10m' даст ослабление на расстоянии.")
+        }
+        return sb
+    }
+
+    // --------------------
+    // WINDCHILL — ощущаемая температура
+    // --------------------
+    private fun handleWindchill(cmd: String): List<String> {
+        val lower = cmd.lowercase(Locale.getDefault())
+        val tMatch = Regex("""(-?\d+(?:[.,]\d+)?)\s*°?c\b""").find(lower)
+        val T = tMatch?.groupValues?.get(1)?.replace(',', '.')?.toDoubleOrNull()
+            ?: PhysUtils.extractNumberIfPresent(lower, listOf("t", "temp", "темп", "температура")) ?: return listOf("Windchill: укажите температуру в °C. Пример: 'windchill 0C wind 10m/s'")
+
+        // wind speed in km/h or m/s
+        var v = PhysUtils.parseSpeedToMPerS(lower)
+        if (v == null) {
+            val num = PhysUtils.extractBareNumber(lower, "wind") ?: PhysUtils.extractBareNumber(lower, "")
+            if (num != null) {
+                v = if (num <= 60) num / 3.6 else num // if <=60 assume km/h
+            }
+        }
+        if (v == null) return listOf("Windchill: укажите скорость ветра. Пример: 'windchill -5C wind 20km/h'")
+
+        val vKmh = v * 3.6
+        // NOAA formula: valid for T <= 10°C and v_kmh >= 4.8 km/h
+        val wc = if (T <= 10.0 && vKmh >= 4.8) {
+            13.12 + 0.6215 * T - 11.37 * vKmh.pow(0.16) + 0.3965 * T * vKmh.pow(0.16)
+        } else {
+            T
+        }
+        val sb = mutableListOf<String>()
+        sb.add("Температура: ${"%.1f".format(T)}°C, ветер ${"%.1f".format(vKmh)} км/ч → ощущаемо как ${"%.1f".format(wc)}°C")
+        if (wc <= -27) sb.add("Внимание: риск обморожения при длительном воздействии.")
+        return sb
+    }
+
+    // --------------------
+    // HEATLOSS — прибл. теплопотери комнаты
+    // --------------------
+    private fun handleHeatLoss(cmd: String): List<String> {
+        val lower = cmd.lowercase(Locale.getDefault())
+        val area = PhysUtils.extractNumberIfPresent(lower, listOf("area", "площадь")) ?: PhysUtils.extractNumberIfPresent(lower, listOf("m2", "м2")) ?: PhysUtils.extractBareNumber(lower, "") ?: return listOf("Heatloss: укажите площадь комнаты в м². Пример: 'heatloss 20m2 height 2.5 good-insulation dT 20'")
+
+        val height = PhysUtils.extractNumberIfPresent(lower, listOf("height", "h", "высота")) ?: 2.5
+        val deltaT = PhysUtils.extractNumberIfPresent(lower, listOf("dT", "dt", "delta")) ?: PhysUtils.extractNumberIfPresent(lower, listOf("dt", "разница")) ?: 20.0
+        val insulation = when {
+            lower.contains("poor") || lower.contains("плохо") || lower.contains("bad") -> "poor"
+            lower.contains("good") || lower.contains("хорош") || lower.contains("good-insulation") -> "good"
+            else -> "avg"
+        }
+
+        val coef = when (insulation) {
+            "poor" -> 1.0 // W/(m2*K) approximate multiplier
+            "good" -> 0.3
+            else -> 0.6
+        }
+
+        val Q = area * coef * deltaT // W
+        val sb = mutableListOf<String>()
+        sb.add("Комната: площадь ${"%.1f".format(area)} м², высота ${"%.1f".format(height)} м, ΔT=${"%.1f".format(deltaT)}°C, изоляция: $insulation")
+        sb.add(" - Приблизительная мощность потерь: ≈ ${"%.0f".format(Q)} W")
+        sb.add(" - Рекомендация: для поддержания температуры потребуется отопление ~${"%.0f".format(Q)} W (ориентир)")
+        sb.add("Примечание: это грубая оценка; для точных расчётов используйте U-value/конструктивные данные.")
+        return sb
+    }
+
+    // --------------------
+    // Вспомогательные парсеры
+    // --------------------
+    private fun parsePowerWatts(lower: String): Double? {
+        // accept W, kW, Вт, kw
+        val reW = Regex("""(-?\d+(?:[.,]\d+)?)\s*(kw|kW|кВт|квт)\b""")
+        val mkw = reW.find(lower)
+        if (mkw != null) {
+            val num = mkw.groupValues[1].replace(',', '.').toDoubleOrNull() ?: return null
+            return num * 1000.0
+        }
+        val re = Regex("""(-?\d+(?:[.,]\d+)?)\s*(w|W|вт)\b""")
+        val mw = re.find(lower)
+        if (mw != null) {
+            return mw.groupValues[1].replace(',', '.').toDoubleOrNull()
+        }
+        // try plain number with "power" nearby
+        val near = Regex("""power\s*[:=]?\s*(-?\d+(?:[.,]\d+)?)""").find(lower)
+        if (near != null) return near.groupValues[1].replace(',', '.').toDoubleOrNull()
+        return null
+    }
+
+    private fun formatWatts(w: Double): String {
+        return if (w >= 1000.0) "${"%.2f".format(w/1000.0)} kW" else "${"%.0f".format(w)} W"
     }
 }
 
@@ -300,7 +836,7 @@ private object CommandsV2 {
 }
 
 // --------------------
-// CommandsV3: пара сложных физических формул + help (нижний приоритет)
+// CommandsV3: пара физических формул + help (нижний приоритет)
 //   (команда 3: projectile + energies)
 // --------------------
 private object CommandsV3 {
@@ -321,15 +857,79 @@ private object CommandsV3 {
             return handleEnergy(cmd)
         }
 
-        // help (lowest priority)
-        if (lower.contains("справк") || lower == "help" || lower.contains("помощ")) {
+        // help (низкий приоритет — справка)
+        if (lower.contains("справк") || lower == "help" || lower.contains("помощь")) {
             return listOf(
-                "Справка (CommandsV3): физические команды:",
-                "1) Время: 'время 150 км при 80 км/ч' — рассчитывает время в сек/мин/ч и округляет до 0.5 мин.",
-                "2) Скорость: 'сколько ехать 10 км за 15 минут' или 'сколько идти 5 км за 50 минут' — вычисляет требуемую скорость и пэйс.",
-                "3) Projectile: 'проект v=30 м/с угол 45' — рассчитывает время полёта, макс. высоту, дальность. Если задана дальность и h0=0 — попытается найти углы.",
-                "   Пример: 'проект v=50 range=200' или 'projectile v=30 angle=45 h0=1.5'",
-                "4) Energy: 'энергия m=80 v=5' или 'кинет m 80 v 5' — кинетическая/потенциальная энергия (J/kJ/kWh/kcal)."
+                "Справка (CommandsV3 + расширение): список доступных физических и прикладных команд.",
+                "",
+                "Существующиеь команды:",
+                "1) Время: 'время 150 км при 80 км/ч' — рассчитывает точное время в секундах, минутах и часах, разбивку и округление до 0.5 мин. Также показывает примерное время прибытия (ETA).",
+                "2) Скорость: 'сколько ехать 10 км за 15 минут' или 'сколько идти 5 км за 50 минут' — вычисляет требуемую среднюю скорость и пэйс (время на километр).",
+                "",
+                "Новые практичные команды:",
+                " • как долго придётся тормозить <скорость> [сухо/мокро/лед] — расчёт торможения: реакция, тормозной путь, общее расстояние и время остановки.",
+                "   Пример: 'торможение при 80 км/ч' → 'время реакции ≈1.0 с (≈22 м), тормозной путь ≈45 м, всего ≈67 м (≈2.8 с)'.",
+                "",
+                " • дистанция <скорость> — рекомендуемая безопасная дистанция между машинами при данной скорости (в метрах и секундах).",
+                "   Пример: 'какая дистанция корректна при 100 км/ч' → '2.5–3.0 с ≈70–84 м; на мокрой дороге — до 110 м'.",
+                "",
+                " • вело-стоп <скорость> [диск/барабан] [сухо/мокро] [спуск/подъём <%>] — расчёт тормозного пути для велосипеда с учётом уклона и условий.",
+                "   Пример: 'вело-стоп 30 км/ч диск сухо спуск 5%' → покажет время, тормозной путь и общий путь с реакцией.",
+                "",
+                " • падение <высота> — расчёт времени свободного падения и скорости удара.",
+                "   Пример: 'падение 10 м' → '≈1.43 с, ≈50 км/ч'.",
+                "",
+                " • кипяток <объём> из <темп> мощность <Вт> [чайник/плита] — время и энергия, нужные для нагрева воды до кипения.",
+                "   Пример: 'сколько времени нужно чтобы нагреть чан с 1.5 литрами из 20° мощность 2000 Вт'.",
+                "",
+                " • заряд <ёмкость> [В] мощность <Вт> [от X% до Y%] — примерное время зарядки аккумулятора.",
+                "   Пример: 'заряд 5000 мАч 3.7В мощность 5Вт' или 'заряд 50Вт·ч мощность 20Вт от 20% до 100%'.",
+                "",
+                " • лестница <этажи/высота> [вес <кг>] — сколько энергии и калорий нужно, чтобы подняться.",
+                "   Пример: 'лестница 3 этажа вес 70 кг' → выдаст оценку затраченной энергии.",
+                "",
+                " • подъём <расстояние> уклон <%> скорость <км/ч> вес <кг> — время и энергозатраты при ходьбе или подъёме в гору.",
+                "   Пример: 'подъём 2 км уклон 6% скорость 5 км/ч вес 75 кг'.",
+                "",
+                " • подъёмник <масса> высота <м> время <с> — средняя сила и мощность для поднятия груза.",
+                "   Пример: 'подъёмник 200 кг высота 2 м время 5 с' → мощность ≈800 Вт.",
+                "",
+                " • звук <уровень дБ> на <r1> до <r2> — как изменится громкость звука на другом расстоянии.",
+                "   Пример: 'звук 95 дБ на 1 м до 10 м' → покажет ослабление громкости.",
+                "",
+                " • холод <темп °C> ветер <скорость> — ощущаемая температура (эффект ветра).",
+                "   Пример: 'холод -5° ветер 20 км/ч' → покажет, как будет ощущаться на улице.",
+                "",
+                " • тепло <площадь м²> высота <м> изоляция <хорошая/средняя/плохая> разница <°C> — примерная теплопотеря и нужная мощность отопления.",
+                "   Пример: 'тепло 20 м² высота 2.5 хорошая разница 20' → оценка в Вт.",
+                "",
+                "Пояснения терминов:",
+                " • «Пэйс» — это время, за которое преодолевается 1 км. Например, пэйс 5:00 означает 5 минут на километр. Полезно для пеших и беговых расчётов.",
+                "   Пример: 'сколько идти 5 км за 50 минут' → пэйс 10:00 мин/км.",
+                "",
+                " • «Проектиль» (или «снаряд») — задача о движении тела, брошенного под углом к горизонту без сопротивления воздуха. По скорости и углу рассчитываются: время полёта, высота, дальность.",
+                "   Пример: 'проектиль v=30 угол=45' → выдаст время, высоту и дальность.",
+                "",
+                "Как вводить команды:",
+                " • Частично поддерживается естественный ввод. Но эффективнее работает конкретный ввод",
+                " • Если не указаны единицы — по умолчанию: скорость в км/ч, расстояние в км (если больше 3), высота в м.",
+                " • Дополнительные параметры: 'мокро', 'сухо', 'диск', 'спуск 5%' и т.д.",
+                "",
+                "Примеры для теста:",
+                " • стоп 50 км/ч",
+                " • дистанция 90 км/ч мокро",
+                " • вело-стоп 25 км/ч диск спуск 7%",
+                " • падение 5 м",
+                " • кипяток 0.5 л из 20° мощность 1500 Вт",
+                " • заряд 3000 мАч 3.7В мощность 10 Вт от 20% до 100%",
+                " • лестница 4 этажа вес 75 кг",
+                " • подъём 3 км уклон 5% скорость 6 км/ч вес 70 кг",
+                " • подъёмник 80 кг высота 1.5 м время 2 с",
+                " • звук 100 дБ на 1 м до 10 м",
+                " • холод -10° ветер 30 км/ч",
+                " • тепло 25 м² высота 2.5 средняя разница 20",
+                "",
+                "Если команда не распознана — появится пример правильного ввода."
             )
         }
 
@@ -337,9 +937,10 @@ private object CommandsV3 {
     }
 
     // --------------------
-    // Projectile motion (no air resistance)
-    // Parses v (m/s) and angle (deg). Optional initial height h0 in meters. Optional range parameter to invert.
+    // Движение снаряда (без сопротивления воздуха)
+    // Распознаёт скорость (м/с), угол (в градусах), начальную высоту (м), либо заданную дальность для обратного расчёта.
     // --------------------
+
     private fun handleProjectile(cmd: String): List<String> {
         val lower = cmd.lowercase(Locale.getDefault())
 
