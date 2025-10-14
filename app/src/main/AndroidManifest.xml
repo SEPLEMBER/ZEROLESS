@@ -103,5 +103,12 @@
             android:theme="@style/VprTheme"
             android:configChanges="orientation|screenSize" />
 
+                                <activity
+            android:name=".ArrivalActivity"
+            android:exported="false"
+            android:parentActivityName=".MainActivity"
+            android:theme="@style/VprTheme"
+            android:configChanges="orientation|screenSize" />
+
     </application>
 </manifest>
