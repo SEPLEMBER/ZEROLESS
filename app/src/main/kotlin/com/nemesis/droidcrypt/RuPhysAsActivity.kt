@@ -30,7 +30,7 @@ import java.time.temporal.ChronoUnit
 import java.util.Locale
 import kotlin.math.*
 
-class TemplateActivity : AppCompatActivity() {
+class RuPhysAsActivity : AppCompatActivity() {
 
     private lateinit var messagesContainer: LinearLayout
     private lateinit var scrollView: ScrollView
@@ -106,17 +106,17 @@ class TemplateActivity : AppCompatActivity() {
         val cmd = commandRaw.trim()
 
         try {
-            val mainRes = CommandsMain.handleCommand(cmd)
+            val mainRes = RusPhysCommandsMain.handleCommand(cmd)
             if (mainRes.isNotEmpty()) return mainRes
         } catch (_: Exception) { }
 
         try {
-            val v2Res = CommandsV2.handleCommand(cmd)
+            val v2Res = RusPhysCommandsV2.handleCommand(cmd)
             if (v2Res.isNotEmpty()) return v2Res
         } catch (_: Exception) { }
 
         try {
-            val v3Res = CommandsV3.handleCommand(cmd)
+            val v3Res = RusPhysCommandsV3.handleCommand(cmd)
             if (v3Res.isNotEmpty()) return v3Res
         } catch (_: Exception) { }
 
@@ -169,11 +169,11 @@ class TemplateActivity : AppCompatActivity() {
 }
 
 // --------------------
-// CommandsMain: расширенный набор практичных "человеческих" команд
+// RusPhysCommandsMain: расширенный набор практичных "человеческих" команд
 //  Поддерживает: время (существующий), стоп, дистанция, вело-стоп, падение, кипяток, заряд,
 //  лестница, уклон, подъём/подъёмник, звук, ощущ (ветер), теплопотери
 // --------------------
-private object CommandsMain {
+private object RusPhysCommandsMain {
 
     private const val G = 9.80665
 
@@ -758,10 +758,10 @@ private object CommandsMain {
 }
 
 // --------------------
-// CommandsV2: скорость, необходимая чтобы пройти/проехать расстояние за заданное время.
+// RusPhysCommandsV2: скорость, необходимая чтобы пройти/проехать расстояние за заданное время.
 //   Также различение "идти" и "ехать" (walk vs drive).
 // --------------------
-private object CommandsV2 {
+private object RusPhysCommandsV2 {
 
     fun handleCommand(cmdRaw: String): List<String> {
         val cmd = cmdRaw.trim()
@@ -827,9 +827,9 @@ private object CommandsV2 {
 }
 
 // --------------------
-// CommandsV3: projectile + energy + help (нижний приоритет)
+// RusPhysCommandsV3: projectile + energy + help (нижний приоритет)
 // --------------------
-private object CommandsV3 {
+private object RusPhysCommandsV3 {
 
     fun handleCommand(cmdRaw: String): List<String> {
         val cmd = cmdRaw.trim()
@@ -850,7 +850,7 @@ private object CommandsV3 {
         // help (низкий приоритет — справка)
         if (lower.contains("справк") || lower == "help" || lower.contains("помощь")) {
             return listOf(
-                "Справка (CommandsV3 + расширение): список доступных физических и прикладных команд.",
+                "Справка (RusPhysCommandsV3 + расширение): список доступных физических и прикладных команд.",
                 "",
                 "Существующие команды:",
                 "1) время — 'время 150 км при 80 км/ч' — точное время в сек/мин/ч, разбивка и округление до 0.5 мин; показывает ETA.",
