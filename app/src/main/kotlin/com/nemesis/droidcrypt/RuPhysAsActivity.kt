@@ -56,7 +56,7 @@ class RuPhysAsActivity : AppCompatActivity() {
             )
         }
 
-        setContentView(R.layout.activity_vpr)
+        setContentView(R.layout.activity_ru_phys_as)
 
         messagesContainer = findViewById(R.id.messagesContainer)
         scrollView = findViewById(R.id.scrollView)
