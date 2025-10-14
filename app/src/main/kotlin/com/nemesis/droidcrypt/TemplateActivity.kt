@@ -169,20 +169,68 @@ class TemplateActivity : AppCompatActivity() {
 }
 
 // --------------------
-// CommandsMain: расчёт времени по расстоянию и скорости
-//  (команда 1: "время / time / сколько времени ...")
+// CommandsMain (расширённый): множество физических утилит/команд
+// Поддерживает: время (старый), brake, drag, collision, projectile-drag, rc/rl/rlc, heat, hydro, pendulum
 // --------------------
 private object CommandsMain {
 
     fun handleCommand(cmdRaw: String): List<String> {
         val cmd = cmdRaw.trim()
         val lower = cmd.lowercase(Locale.getDefault())
+
+        // Существующая команда "время"
         if (lower.contains("время") || lower.contains("сколько времени") || lower.contains("time")) {
             return handleTimeForDistance(cmd)
         }
+
+        // Тормозной путь
+        if (listOf("тормоз", "тормозной", "brake", "stopping").any { lower.contains(it) }) {
+            return handleBrake(cmd)
+        }
+
+        // Сопротивление воздуха
+        if (listOf("drag", "сопротивлен", "сопротивление воздуха", "сопротивл").any { lower.contains(it) }) {
+            return handleDrag(cmd)
+        }
+
+        // Столкновение 1D
+        if (listOf("столкн", "удар", "collision").any { lower.contains(it) }) {
+            return handleCollision(cmd)
+        }
+
+        // Projectile with drag (численное)
+        if ( (lower.contains("projectile") && lower.contains("drag")) ||
+             listOf("projectile-drag","pdrag","пдрег","проекц сопротив").any { lower.contains(it) } ||
+             (lower.contains("проект") && lower.contains("сопр") ) ) {
+            return handleProjectileWithDrag(cmd)
+        }
+
+        // RC / RL / RLC
+        if (listOf("rc ", "rl ", "rlc", "переход", "time constant", "tau").any { lower.contains(it) }) {
+            return handleCircuitTransient(cmd)
+        }
+
+        // Тепловой баланс / нагрев
+        if (listOf("heat", "нагрев", "нагревание", "теплов", "тепло").any { lower.contains(it) }) {
+            return handleHeat(cmd)
+        }
+
+        // Гидростатика / архимед
+        if (listOf("hydro", "hydraul", "архимед", "поплав", "гидро", "глубин").any { lower.contains(it) }) {
+            return handleHydro(cmd)
+        }
+
+        // Маятник
+        if (listOf("pendulum", "маятник", "маятни").any { lower.contains(it) }) {
+            return handlePendulum(cmd)
+        }
+
         return emptyList()
     }
 
+    // --------------------
+    // 1) Time (existing) — вынесена сюда (не изменяйте логику)
+    // --------------------
     private fun handleTimeForDistance(cmd: String): List<String> {
         val distMeters = PhysUtils.parseDistanceMeters(cmd)
             ?: return listOf(
@@ -226,6 +274,415 @@ private object CommandsMain {
 
         sb.add("Заметка: модель проста — без учёта рельефа, пробок или остановок.")
         return sb
+    }
+
+    // --------------------
+    // Helper parsing utilities used внутри CommandsMain
+    // (независимые от PhysUtils, но используют его когда возможно)
+    // --------------------
+    private fun parseDoubleByKey(lower: String, keys: List<String>): Double? {
+        return PhysUtils.extractNumberIfPresent(lower, keys)
+    }
+
+    private fun parseNumberWithUnitGeneric(lower: String, label: String): PhysUtils.NumUnit? {
+        // try "label=12unit" or "label 12 unit" or generic capture
+        val re1 = Regex("""\b${Regex.escape(label)}\s*=\s*(-?\d+(?:[.,]\d+)?)([a-zA-Zµ°/%μ\.\-+]*)\b""", RegexOption.IGNORE_CASE).find(lower)
+        if (re1 != null) {
+            val v = re1.groupValues[1].replace(',', '.').toDoubleOrNull() ?: return null
+            val u = re1.groupValues[2].ifBlank { null }
+            return PhysUtils.NumUnit(v, u)
+        }
+        val re2 = Regex("""\b${Regex.escape(label)}\s+(-?\d+(?:[.,]\d+)?)([a-zA-Zµ°/%μ\.\-+]*)\b""", RegexOption.IGNORE_CASE).find(lower)
+        if (re2 != null) {
+            val v = re2.groupValues[1].replace(',', '.').toDoubleOrNull() ?: return null
+            val u = re2.groupValues[2].ifBlank { null }
+            return PhysUtils.NumUnit(v, u)
+        }
+        // fallback to bare
+        val bare = PhysUtils.extractBareNumber(lower, label)
+        return bare?.let { PhysUtils.NumUnit(it, null) }
+    }
+
+    private fun safeDoubleOrNull(s: String?): Double? = s?.replace(',', '.')?.toDoubleOrNull()
+
+    // --------------------
+    // 2) Brake: тормозной путь
+    // Команды: "тормоз 80 км/ч μ=0.7", "brake v=120km/h a=-7"
+    // --------------------
+    private fun handleBrake(cmd: String): List<String> {
+        val lower = cmd.lowercase(Locale.getDefault())
+        // parse speed
+        val v = PhysUtils.parseSpeedToMPerS(lower) ?: PhysUtils.extractBareNumber(lower, "v")
+        // parse mu or a
+        val mu = parseDoubleByKey(lower, listOf("μ", "mu", "mu=","mu")) // try µ
+            ?: parseDoubleByKey(lower, listOf("mu")) // fallback
+        val aExplicit = parseNumberWithUnitGeneric(lower, "a")?.value
+
+        if (v == null) {
+            return listOf("Brake: не найдено скорость (v). Пример: 'тормоз 80 км/ч μ=0.7' или 'brake v=30 m/s a=-6'")
+        }
+        val g = 9.80665
+        val a = when {
+            aExplicit != null -> aExplicit // assume m/s^2 (user-specified)
+            mu != null -> -abs(mu) * g
+            else -> -0.7 * g // default rough (dry asphalt ~0.7) negative sign for deceleration
+        }
+
+        if (a >= 0.0) {
+            return listOf("Brake: неверное значение deceleration a=$a (ожидается отрицательное).")
+        }
+
+        val stoppingDistance = (v * v) / (2.0 * abs(a))
+        val stoppingTime = v / abs(a)
+
+        val lines = mutableListOf<String>()
+        lines.add("Тормозной расчёт:")
+        lines.add(" v = ${"%.2f".format(v)} м/с (${String.format("%.2f", v*3.6)} км/ч)")
+        if (mu != null) lines.add(" Использован μ = ${"%.3f".format(mu)} -> a = ${"%.3f".format(-abs(mu)*g)} м/с²")
+        else if (aExplicit != null) lines.add(" Использовано указанное замедление a = ${"%.3f".format(aExplicit)} м/с²")
+        else lines.add(" Использовано стандартное μ≈0.7 -> a≈${"%.3f".format(a)} м/с²")
+        lines.add(" Время до остановки: ${"%.2f".format(stoppingTime)} с")
+        lines.add(" Тормозной путь: ${"%.3f".format(stoppingDistance)} м (${PhysUtils.formatDistanceNice(stoppingDistance)})")
+        lines.add(" Примечание: простая модель (скольжение без ABS, без реакции водителя, без уклона).")
+        return lines
+    }
+
+    // --------------------
+    // 3) Drag: сопротивление воздуха (F_d и предельная скорость)
+    // Команды: "drag Cd=1.0 A=0.5 v=10 m=80 rho=1.225"
+    // --------------------
+    private fun handleDrag(cmd: String): List<String> {
+        val lower = cmd.lowercase(Locale.getDefault())
+        // Extract speed and optional mass/Cd/A/rho
+        val v = PhysUtils.extractNumberWithUnit(lower, listOf("m/s","м/с","mps"))?.value
+            ?: PhysUtils.parseSpeedToMPerS(lower)
+            ?: PhysUtils.extractBareNumber(lower, "v")
+        val massNum = PhysUtils.extractNumberWithUnit(lower, listOf("kg","кг","g","г","lb"," фунт"))?.let {
+            PhysUtils.normalizeMassToKg(it.value, it.unit)
+        } ?: PhysUtils.extractBareNumber(lower, "m")
+        val cdNum = parseDoubleByKey(lower, listOf("cd","Cd","c_d")) ?: parseDoubleByKey(lower, listOf("коэф","коэфд"))
+        val area = parseDoubleByKey(lower, listOf("a","area","A")) ?: parseDoubleByKey(lower, listOf("площадь"))
+        val rho = PhysUtils.extractNumberWithUnit(lower, listOf("kg/m3","kg/m^3","kg/m³","кг/м3"))?.value ?: parseDoubleByKey(lower, listOf("rho","ρ")) ?: 1.225
+
+        if (v == null) return listOf("Drag: не найдена скорость v. Пример: 'drag v=30 m/s Cd=1.0 A=0.5 m=80'")
+
+        val Cd = cdNum ?: when {
+            area != null -> 1.0 // conservative default
+            else -> 1.0
+        }
+        val A = area ?: 0.5 // default area m^2
+
+        val Fd = 0.5 * rho * Cd * A * v * v
+        val lines = mutableListOf<String>()
+        lines.add("Сопротивление воздуха (приближённо):")
+        lines.add(" v = ${"%.3f".format(v)} м/с (${String.format("%.1f", v*3.6)} км/ч)")
+        lines.add(" Cd = ${"%.3f".format(Cd)}, A = ${"%.3f".format(A)} м², ρ = ${"%.3f".format(rho)} кг/м³")
+        lines.add(" Сила сопротивления F_d = 0.5·ρ·Cd·A·v² = ${"%.3f".format(Fd)} Н")
+        massNum?.let {
+            val weight = it * 9.80665
+            lines.add(" Масса = ${"%.3f".format(it)} кг → вес ≈ ${"%.3f".format(weight)} Н")
+            lines.add(" F_d / weight = ${"%.3f".format(Fd / weight)} (доля от веса)")
+            val vTerm = sqrt((2.0 * it * 9.80665) / (rho * Cd * A))
+            lines.add(" Предельная скорость при падении (пример) v_term ≈ ${"%.3f".format(vTerm)} м/с (~${"%.1f".format(vTerm*3.6)} км/ч)")
+        }
+        lines.add(" Примечание: модель не учитывает форму тела (Cd прибл.), турбулентность и изменение rho с высотой.")
+        return lines
+    }
+
+    // --------------------
+    // 4) Collision 1D: полное/неупругое и коэффициент восстановления
+    // Команды: "collision m1=2 v1=5 m2=3 v2=-1 e=0.8" или "collision inelastic m1 v1 m2 v2"
+    // --------------------
+    private fun handleCollision(cmd: String): List<String> {
+        val lower = cmd.lowercase(Locale.getDefault())
+        val m1 = PhysUtils.extractNumberWithUnit(lower, listOf("m1","m_1","m1="))?.value ?: PhysUtils.extractBareNumber(lower, "m1")
+            ?: PhysUtils.extractBareNumber(lower, "m")
+        val v1 = PhysUtils.extractNumberWithUnit(lower, listOf("v1","v_1"))?.value ?: PhysUtils.extractBareNumber(lower, "v1")
+            ?: PhysUtils.extractBareNumber(lower, "v")
+        val m2 = PhysUtils.extractNumberWithUnit(lower, listOf("m2","m_2"))?.value ?: PhysUtils.extractBareNumber(lower, "m2")
+        val v2 = PhysUtils.extractNumberWithUnit(lower, listOf("v2","v_2"))?.value ?: PhysUtils.extractBareNumber(lower, "v2")
+        val e = parseDoubleByKey(lower, listOf("e","coef","коэф","e="))
+
+        if (m1 == null || v1 == null || m2 == null || v2 == null) {
+            return listOf("Collision: укажите m1,v1,m2,v2. Пример: 'collision m1=2 v1=5 m2=3 v2=-1 e=0.8'")
+        }
+        val lines = mutableListOf<String>()
+        lines.add("Столкновение 1D:")
+        lines.add(" m1=${"%.3f".format(m1)} кг, v1=${"%.3f".format(v1)} м/с; m2=${"%.3f".format(m2)} кг, v2=${"%.3f".format(v2)} м/с")
+        if (lower.contains("inelastic") || lower.contains("неупр") || (e != null && e == 0.0)) {
+            // completely inelastic: stick together
+            val vAfter = (m1*v1 + m2*v2) / (m1 + m2)
+            val keBefore = 0.5*m1*v1*v1 + 0.5*m2*v2*v2
+            val keAfter = 0.5*(m1+m2)*vAfter*vAfter
+            lines.add(" Неразделимое столкновение (完全 неупругое): v_after = ${"%.3f".format(vAfter)} м/с")
+            lines.add(" Кин. энергия до = ${"%.3f".format(keBefore)} J, после = ${"%.3f".format(keAfter)} J, потеря = ${"%.3f".format(keBefore - keAfter)} J")
+            return lines
+        }
+
+        if (e != null) {
+            // general coefficient of restitution e (0..1)
+            // relative velocity after = -e * relative before
+            val vRelBefore = v1 - v2
+            val v1After = ( (m1 - e*m2)*v1 + (1 + e)*m2*v2 ) / (m1 + m2)
+            val v2After = ( (m2 - e*m1)*v2 + (1 + e)*m1*v1 ) / (m1 + m2)
+            val keBefore = 0.5*m1*v1*v1 + 0.5*m2*v2*v2
+            val keAfter = 0.5*m1*v1After*v1After + 0.5*m2*v2After*v2After
+            lines.add(" Коэффициент восстановления e = ${"%.3f".format(e)}")
+            lines.add(" v1' = ${"%.3f".format(v1After)} м/с, v2' = ${"%.3f".format(v2After)} м/с")
+            lines.add(" KE_before = ${"%.3f".format(keBefore)} J, KE_after = ${"%.3f".format(keAfter)} J, ΔKE = ${"%.3f".format(keBefore - keAfter)} J")
+            return lines
+        }
+
+        // default: perfectly elastic (e=1)
+        val v1After = ( (m1 - m2) * v1 + 2.0 * m2 * v2 ) / (m1 + m2)
+        val v2After = ( 2.0 * m1 * v1 + (m2 - m1) * v2 ) / (m1 + m2)
+        val keBefore = 0.5*m1*v1*v1 + 0.5*m2*v2*v2
+        val keAfter = 0.5*m1*v1After*v1After + 0.5*m2*v2After*v2After
+        lines.add(" Упругое столкновение (e≈1):")
+        lines.add(" v1' = ${"%.3f".format(v1After)} м/с, v2' = ${"%.3f".format(v2After)} м/с")
+        lines.add(" KE_before = ${"%.3f".format(keBefore)} J, KE_after = ${"%.3f".format(keAfter)} J (сохраняется в идеале)")
+        return lines
+    }
+
+    // --------------------
+    // 5) Projectile with drag (numerical integration, простая модель)
+    // Пример: "projectile-drag v=200 angle=30 Cd=0.295 A=0.03 m=0.01 rho=1.225 dt=0.01"
+    // --------------------
+    private fun handleProjectileWithDrag(cmd: String): List<String> {
+        val lower = cmd.lowercase(Locale.getDefault())
+        val vRaw = PhysUtils.extractNumberWithUnit(lower, listOf("m/s","м/с","mps"))?.value
+            ?: PhysUtils.extractBareNumber(lower, "v")
+            ?: PhysUtils.extractBareNumber(lower, "speed")
+        val angleDeg = PhysUtils.extractAngleDegrees(lower) ?: PhysUtils.extractBareNumber(lower, "angle") ?: PhysUtils.extractBareNumber(lower, "угол")
+        if (vRaw == null) return listOf("Projectile-drag: не найдена скорость v. Пример: 'projectile-drag v=200 angle=30 Cd=0.3 A=0.02 m=0.05'")
+        if (angleDeg == null) return listOf("Projectile-drag: не найден угол. Пример: 'projectile-drag v=200 angle=30'")
+
+        val Cd = parseDoubleByKey(lower, listOf("cd","Cd")) ?: 0.47 // default: sphere ~0.47
+        val A = parseDoubleByKey(lower, listOf("a","area","A")) ?: 0.03
+        val m = PhysUtils.extractNumberWithUnit(lower, listOf("kg","кг"))?.let { PhysUtils.normalizeMassToKg(it.value, it.unit) } ?: PhysUtils.extractBareNumber(lower, "m") ?: 0.1
+        val rho = PhysUtils.extractNumberWithUnit(lower, listOf("kg/m3","kg/m^3","kg/m³"))?.value ?: parseDoubleByKey(lower, listOf("rho","ρ")) ?: 1.225
+        val dt = parseDoubleByKey(lower, listOf("dt")) ?: 0.01
+        val maxSteps = 200000
+
+        // RK4-like integration for trajectory with quadratic drag: Fd = 0.5*rho*Cd*A*v^2 opposite to v
+        val g = 9.80665
+        var vx = vRaw * cos(Math.toRadians(angleDeg))
+        var vy = vRaw * sin(Math.toRadians(angleDeg))
+        var x = 0.0
+        var y = parseDoubleByKey(lower, listOf("h0","h","height")) ?: 0.0
+
+        var t = 0.0
+        var step = 0
+        var maxH = y
+        var hitGround = false
+
+        // limiter: if dt too small, increase; if steps exceed limit break
+        val dtSafe = dt.coerceIn(1e-4, 0.1)
+
+        while (step < maxSteps) {
+            val v = sqrt(vx*vx + vy*vy)
+            if (v < 1e-12) {
+                // only gravity acts
+                vy -= g * dtSafe
+                y += vy * dtSafe
+                x += vx * dtSafe
+            } else {
+                val Fd = 0.5 * rho * Cd * A * v * v
+                val ax = - (Fd / m) * (vx / v)
+                val ay = -g - (Fd / m) * (vy / v)
+                // simple RK2 (midpoint) integration to be stable but cheap
+                val vx_mid = vx + ax * (dtSafe * 0.5)
+                val vy_mid = vy + ay * (dtSafe * 0.5)
+                val v_mid = sqrt(vx_mid*vx_mid + vy_mid*vy_mid)
+                val Fd_mid = 0.5 * rho * Cd * A * v_mid * v_mid
+                val ax_mid = if (v_mid < 1e-12) 0.0 else - (Fd_mid / m) * (vx_mid / v_mid)
+                val ay_mid = -g - (Fd_mid / m) * (vy_mid / v_mid)
+                vx += ax_mid * dtSafe
+                vy += ay_mid * dtSafe
+                x += vx_mid * dtSafe
+                y += vy_mid * dtSafe
+            }
+            t += dtSafe
+            step += 1
+            if (y > maxH) maxH = y
+            if (y <= 0.0 && t > 1e-6) { // hit ground (assuming ground at y=0)
+                hitGround = true
+                break
+            }
+        }
+
+        val range = x
+        val lines = mutableListOf<String>()
+        lines.add("Projectile с сопротивлением (численно):")
+        lines.add(" v0=${"%.3f".format(vRaw)} м/с, угол=${"%.3f".format(angleDeg)}°, m=${"%.3f".format(m)} кг")
+        lines.add(" Cd=${"%.3f".format(Cd)}, A=${"%.3f".format(A)} м², ρ=${"%.3f".format(rho)} кг/м³")
+        lines.add(" Время полёта (численно, dt=${"%.4f".format(dtSafe)}): ${"%.3f".format(t)} с")
+        lines.add(" Максимальная высота ≈ ${"%.3f".format(maxH)} м")
+        lines.add(" Дальность ≈ ${"%.3f".format(range)} м (${String.format("%.3f", range/1000.0)} км)")
+        if (!hitGround) lines.add(" ВНИМАНИЕ: интеграция остановлена по шагам (возможно dt слишком мал или траектория долгая).")
+        lines.add(" Примечание: модель приближённая (квадратичный тормоз), не учитывает подветренность/смену rho/обтекаемость при высоких M).")
+        return lines
+    }
+
+    // --------------------
+    // 6) RC/RL/RLC переходные процессы (простая оценка)
+    // Примеры: "rc R=10k C=10u step=5V", "rl R=10 L=50m step=12V", "rlc R=10 L=0.1 C=1e-6"
+    // --------------------
+    private fun handleCircuitTransient(cmd: String): List<String> {
+        val lower = cmd.lowercase(Locale.getDefault())
+        // RC
+        if (lower.contains("rc")) {
+            val Rnu = PhysUtils.extractNumberWithUnit(lower, listOf("ohm","Ω","ohms"))?.value ?: parseDoubleByKey(lower, listOf("r","R")) ?: 1000.0
+            val Cnu = PhysUtils.extractNumberWithUnit(lower, listOf("f","farad","ф"))?.value ?: parseDoubleByKey(lower, listOf("c","C")) ?: 1e-6
+            val stepV = parseDoubleByKey(lower, listOf("step","V","v")) ?: 1.0
+            val tau = Rnu * Cnu
+            val lines = mutableListOf<String>()
+            lines.add("RC-circuit:")
+            lines.add(" R = ${"%.6g".format(Rnu)} Ω, C = ${"%.6g".format(Cnu)} F")
+            lines.add(" Постоянная времени τ = R·C = ${"%.6g".format(tau)} с")
+            lines.add(" Отношение при t=τ: vC(τ) = V*(1 - e^{-1}) ≈ ${"%.3f".format(stepV * (1 - exp(-1.0)))} V")
+            lines.add(" Примеры: vC(0)=0, vC(τ)≈${"%.3f".format(stepV*(1-exp(-1.0)))} V, vC(5τ)≈${"%.6g".format(stepV*(1-exp(-5.0)))} V (~почти V)")
+            lines.add(" Примечание: модель идеальна — без утечек, начальных зарядов и ESR/индуктивностей.")
+            return lines
+        }
+
+        // RL
+        if (lower.contains("rl") && !lower.contains("rlc")) {
+            val Rnu = PhysUtils.extractNumberWithUnit(lower, listOf("ohm","Ω"))?.value ?: parseDoubleByKey(lower, listOf("r","R")) ?: 1.0
+            val Lnu = PhysUtils.extractNumberWithUnit(lower, listOf("h","H","henry"))?.value ?: parseDoubleByKey(lower, listOf("l","L")) ?: 0.01
+            val tau = Lnu / Rnu
+            val lines = mutableListOf<String>()
+            lines.add("RL-circuit:")
+            lines.add(" R = ${"%.6g".format(Rnu)} Ω, L = ${"%.6g".format(Lnu)} H")
+            lines.add(" Постоянная времени τ = L / R = ${"%.6g".format(tau)} с")
+            lines.add(" Токи при ступеньке: i(t) = (V/R)*(1 - e^{-t/τ})")
+            lines.add(" Примечание: для точных форм учитывайте индуктивность пиков и насыщение.")
+            return lines
+        }
+
+        // RLC (параметрический анализ)
+        if (lower.contains("rlc")) {
+            val Rnu = PhysUtils.extractNumberWithUnit(lower, listOf("ohm","Ω"))?.value ?: parseDoubleByKey(lower, listOf("r","R")) ?: 1.0
+            val Lnu = PhysUtils.extractNumberWithUnit(lower, listOf("h","H","henry"))?.value ?: parseDoubleByKey(lower, listOf("l","L")) ?: 0.01
+            val Cnu = PhysUtils.extractNumberWithUnit(lower, listOf("f","farad"))?.value ?: parseDoubleByKey(lower, listOf("c","C")) ?: 1e-6
+            val omega0 = 1.0 / sqrt(Lnu * Cnu)
+            val zeta = Rnu / (2.0 * sqrt(Lnu / Cnu)) // damping ratio for series? formula adjusted - we present standard relations qualitatively
+            val lines = mutableListOf<String>()
+            lines.add("RLC (приближённый анализ):")
+            lines.add(" R = ${"%.6g".format(Rnu)} Ω, L = ${"%.6g".format(Lnu)} H, C = ${"%.6g".format(Cnu)} F")
+            lines.add(" Собственная частота ω0 = ${"%.6g".format(omega0)} рад/с (f0=${"%.3f".format(omega0/ (2*Math.PI))} Гц)")
+            lines.add(" Приблизительный коэффициент демпфирования ζ ≈ ${"%.6f".format(zeta)}")
+            lines.add( when {
+                zeta < 1.0 -> " Режим: недемпфированный (колебания)."
+                zeta == 1.0 -> " Режим: критическое затухание."
+                else -> " Режим: апериодическое (пере- или сильное затухание)."
+            } )
+            lines.add(" Для точного времени/амплитуды — решите ОДУ или используйте численный симулятор.")
+            return lines
+        }
+
+        return listOf("Circuit: не распознана команда. Примеры: 'rc R=10k C=10u step=5V', 'rl R=10 L=50m', 'rlc R=10 L=0.1 C=1e-6'")
+    }
+
+    // --------------------
+    // 7) Heat: тепловой баланс и время нагрева
+    // Пример: "heat m=2 c=900 T0=20 T1=80 P=2000 k_loss=0.0"
+    // --------------------
+    private fun handleHeat(cmd: String): List<String> {
+        val lower = cmd.lowercase(Locale.getDefault())
+        val mass = PhysUtils.extractNumberWithUnit(lower, listOf("kg","кг","g","г"))?.let { PhysUtils.normalizeMassToKg(it.value, it.unit) } ?: PhysUtils.extractBareNumber(lower, "m")
+        val c = parseDoubleByKey(lower, listOf("c","cp","heatcapacity","specificheat")) ?: 4184.0 // default: water J/kg·K
+        val T0 = parseDoubleByKey(lower, listOf("t0","T0","T_start","start")) ?: parseDoubleByKey(lower, listOf("t","T")) ?: 20.0
+        val T1 = parseDoubleByKey(lower, listOf("t1","T1","target","end")) ?: parseDoubleByKey(lower, listOf("to")) ?: return listOf("Heat: укажите целевую температуру T1 (пример 'heat m=1.5 c=4184 T0=20 T1=90 P=1500')")
+        val P = parseDoubleByKey(lower, listOf("p","P","power")) ?: parseDoubleByKey(lower, listOf("w","W")) ?: 1000.0
+        val kLoss = parseDoubleByKey(lower, listOf("k_loss","k","loss")) ?: 0.0 // простая модель потерь: мощность потерь в W (или коэффициент)
+
+        if (mass == null) return listOf("Heat: не указана масса. Пример: 'heat m=2 c=900 T0=20 T1=80 P=2000'")
+
+        val deltaT = T1 - T0
+        val Q = mass * c * deltaT // Дж
+        val effectiveP = max(1e-12, P - kLoss) // available heating power
+        val timeSec = Q / effectiveP
+        val lines = mutableListOf<String>()
+        lines.add("Тепловой расчёт:")
+        lines.add(" m=${"%.3f".format(mass)} кг, c=${"%.3f".format(c)} J/(kg·K)")
+        lines.add(" ΔT = ${"%.3f".format(deltaT)} K, Q = m·c·ΔT = ${"%.3f".format(Q)} J (~${"%.6f".format(Q/3_600_000.0)} kWh)")
+        lines.add(" Мощность нагрева P = ${"%.3f".format(P)} W, потери ≈ ${"%.3f".format(kLoss)} W -> эффективная P = ${"%.3f".format(effectiveP)} W")
+        lines.add(" Оценочное время нагрева: ${"%.1f".format(timeSec)} с (≈ ${"%.2f".format(timeSec/60.0)} мин)")
+        if (T1 >= 100.0 && c == 4184.0) lines.add(" ВНИМАНИЕ: T1 ≥ 100°C — возможен фазовый переход (закипание воды). Учтите скрытую теплоту парообразования.")
+        lines.add(" Примечание: модель простая — нет продвинутой теплоотдачи/конвекции/излучения.")
+        return lines
+    }
+
+    // --------------------
+    // 8) Hydro: давление по глубине и архимедова сила
+    // Примеры: "hydro depth=30", "buoy m=2000 rho=1000"
+    // --------------------
+    private fun handleHydro(cmd: String): List<String> {
+        val lower = cmd.lowercase(Locale.getDefault())
+        val depth = PhysUtils.extractNumberWithUnit(lower, listOf("m","м"))?.value ?: parseDoubleByKey(lower, listOf("depth","h","depth="))
+        val rho = PhysUtils.extractNumberWithUnit(lower, listOf("kg/m3","kg/m^3","kg/m³"))?.value ?: parseDoubleByKey(lower, listOf("rho")) ?: 1000.0
+        val g = 9.80665
+        val lines = mutableListOf<String>()
+
+        if (depth != null) {
+            val p0 = 101325.0
+            val p = p0 + rho * g * depth
+            lines.add("Гидростатика:")
+            lines.add(" Глубина h = ${"%.3f".format(depth)} м, ρ=${"%.3f".format(rho)} кг/м³")
+            lines.add(" Давление P = P0 + ρ·g·h = ${"%.0f".format(p)} Па (~${"%.3f".format(p/101325.0)} атм)")
+            lines.add(" Абсолютное давление: ${"%.0f".format(p)} Па; избыточное (гидростатическое) ≈ ${"%.0f".format(rho*g*depth)} Па")
+        }
+
+        // buoyancy: compute displaced volume for given mass or compute buoyant force for given volume
+        val mass = PhysUtils.extractNumberWithUnit(lower, listOf("kg","кг","m","mass"))?.let { PhysUtils.normalizeMassToKg(it.value, it.unit) } ?: parseDoubleByKey(lower, listOf("m","mass"))
+        val volume = PhysUtils.extractNumberWithUnit(lower, listOf("m3","м3","m^3"))?.value ?: parseDoubleByKey(lower, listOf("V","volume","vol"))
+        if (mass != null) {
+            val Vreq = mass / rho
+            val Fb = rho * g * Vreq
+            lines.add(" Для удержания массы m=${"%.3f".format(mass)} кг в жидкости (плотность ${"%.3f".format(rho)}):")
+            lines.add(" Требуемый вытесненный объём V = m/ρ = ${"%.6f".format(Vreq)} м³")
+            lines.add(" Архимедова сила при таком объёме F_b = ρ·g·V = ${"%.3f".format(Fb)} Н (сравн. вес = ${"%.3f".format(mass*g)} Н)")
+        } else if (volume != null) {
+            val Fb = rho * g * volume
+            lines.add(" Вытесненный объём V = ${"%.6f".format(volume)} м³ -> Архимедова сила F_b = ${"%.3f".format(Fb)} Н")
+        }
+
+        if (depth == null && mass == null && volume == null) {
+            return listOf("Hydro: укажите depth (глубина) или mass/volume. Примеры: 'hydro depth=30', 'hydro mass=2000 rho=1000', 'hydro V=0.5'")
+        }
+
+        lines.add(" Примечание: модель статична, не учитывает поверхностные эффекты, сжимаемость, движение жидкости.")
+        return lines
+    }
+
+    // --------------------
+    // 9) Pendulum: период простого и поправка при большой амплитуде
+    // Примеры: "pendulum L=2", "pendulum L=1.5 theta0=30deg"
+    // --------------------
+    private fun handlePendulum(cmd: String): List<String> {
+        val lower = cmd.lowercase(Locale.getDefault())
+        val L = PhysUtils.extractNumberWithUnit(lower, listOf("m","м"))?.value ?: parseDoubleByKey(lower, listOf("L","length")) ?: return listOf("Pendulum: укажите длину L (пример: 'pendulum L=1.5')")
+        val theta0deg = PhysUtils.extractAngleDegrees(lower) ?: parseDoubleByKey(lower, listOf("theta0","theta","theta0=")) ?: 5.0
+        val g = 9.80665
+        val T0 = 2.0 * Math.PI * sqrt(L / g)
+        // small-angle correction (first nonlinear term): T ≈ T0 * (1 + (1/16) θ0^2 + 11/3072 θ0^4 + ...)
+        val theta0rad = Math.toRadians(theta0deg)
+        val correction = 1.0 + (theta0rad*theta0rad)/16.0
+        val Tcorr = T0 * correction
+
+        val lines = mutableListOf<String>()
+        lines.add("Маятник:")
+        lines.add(" L = ${"%.3f".format(L)} м, θ0 = ${"%.3f".format(theta0deg)}°")
+        lines.add(" Период малых колебаний T0 = 2π√(L/g) = ${"%.4f".format(T0)} с")
+        if (theta0deg > 10.0) {
+            lines.add(" Поправка на большую амплитуду (прибл.): T ≈ ${"%.4f".format(Tcorr)} с (коэф. ≈ ${"%.6f".format(correction)})")
+        } else {
+            lines.add(" Малые колебания применимы; поправка мала.")
+        }
+        lines.add(" Частота f = ${"%.4f".format(1.0 / T0)} Гц")
+        lines.add(" Примечание: это идеализированная модель (без трения/воздушного сопротивления).")
+        return lines
     }
 }
 
