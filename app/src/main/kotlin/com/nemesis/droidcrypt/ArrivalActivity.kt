@@ -43,7 +43,7 @@ class ArrivalActivity : AppCompatActivity() {
             )
         }
 
-        setContentView(R.layout.activity_vpr)
+        setContentView(R.layout.activity_arrival)
 
         messagesContainer = findViewById(R.id.messagesContainer)
         scrollView = findViewById(R.id.scrollView)
