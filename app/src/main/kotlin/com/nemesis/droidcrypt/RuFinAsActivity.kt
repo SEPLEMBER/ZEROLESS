@@ -1,5 +1,3 @@
-package com.nemesis.droidcrypt
-
 import android.content.Intent
 import android.graphics.Typeface
 import android.net.Uri
@@ -33,10 +31,10 @@ import java.util.Locale
 import kotlin.math.ln
 import kotlin.math.pow
 
-class VprActivity : AppCompatActivity() {
+class RuFinAsActivity : AppCompatActivity() {
 
     companion object {
-        private const val TAG = "VprActivity"
+        private const val TAG = "RuFinAsActivity"
     }
 
     // UI references
@@ -702,17 +700,17 @@ class VprActivity : AppCompatActivity() {
         }
 
         // --------------------
-        // Try FinanceV2 (low priority): let main parser handle everything first.
+        // Try RuFinanceV2 (low priority): let main parser handle everything first.
         // If it returns non-empty results, we use them. Otherwise continue to fallback.
         // --------------------
         try {
-            val v2Outputs = FinanceV2.handleCommand(cmd)
+            val v2Outputs = RuFinanceV2.handleCommand(cmd)
             if (!v2Outputs.isNullOrEmpty()) {
                 return v2Outputs
             }
         } catch (e: Exception) {
-            Log.w(TAG, "FinanceV2 handling failed", e)
-            // don't fail parsing — FinanceV2 is low priority and must not break main parser
+            Log.w(TAG, "RuFinanceV2 handling failed", e)
+            // don't fail parsing — RuFinanceV2 is low priority and must not break main parser
         }
 
         // fallback
@@ -1308,13 +1306,13 @@ class VprActivity : AppCompatActivity() {
 // --------------------
 // NEW GENERATION FIN ACTIVITY 2
 // Добавлен модуль с новыми финансовыми командами (V2).
-// Модуль спроектирован как "отдельная страница" в файле: все функции находятся в объекте FinanceV2.
+// Модуль спроектирован как "отдельная страница" в файле: все функции находятся в объекте RuFinanceV2.
 // Парсинг команд в этом блоке ориентирован на корни слов (проглатывание лишних символов / вариативность).
 // Возвращаемые строки — готовые к выводу в UI (уже локализованы в простом русском варианте, без getString).
 // --------------------
 
 /**
- * FinanceV2 — набор "чистых" (pure) функций и парсеров для новых финансовых команд.
+ * RuFinanceV2 — набор "чистых" (pure) функций и парсеров для новых финансовых команд.
  * Методы возвращают List<String> — готовые строки для отображения.
  *
  * Примеры команд, которые понимает handleCommand():
@@ -1330,7 +1328,7 @@ class VprActivity : AppCompatActivity() {
  * Замечание: модуль ориентирован на удобство тестирования и независимость от UI.
  */
 
-private object FinanceV2 {
+private object RuFinanceV2 {
 
     // Low-priority finance v2 — расширенная версия. Если throws — вызывающий код должен продолжить работу.
     // Public entrypoint
