@@ -83,7 +83,7 @@
 
         <!-- VprActivity -->
         <activity
-            android:name=".RuFinAsActivity"
+            android:name=".locale.RuFinAsActivity"
             android:exported="false"
             android:parentActivityName=".ArrivalActivity"
             android:theme="@style/VprTheme"
