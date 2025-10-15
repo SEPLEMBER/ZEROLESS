@@ -111,20 +111,32 @@ class RuFinAsActivity : AppCompatActivity() {
         if (lower.contains("справк") || lower == "help" || lower.contains("помощ")) {
             return listOf(
                 "Поддерживаемые команды (примеры):",
-                " - простые проценты 100000 7% 3 года",
-                " - сложные проценты 100000 7% 3 года помесячно",
-                " - месячный доход 120000 рабочие 8",
-                " - бюджет 3000 на 7 дней — лимиты на день/нед/мес/час",
-                " - накопить 100000 к 7 ноября — сколько откладывать в день/нед/мес (поддерживает % для учёта процентов)"
+            " - сравнить цены: 'сравни цены: яблоки 120, апельсины 140'",
+            " - накопить: 'накопить 100000 к 7 ноября под 5%'",
+            " - ипотека/кредит: 'ипотека 1000000 7% 15 лет первые 10'",
+            " - инфляция: 'посчитай инфляцию: 100000 рублей по 8% за 3 года'",
+            " - налог/ндфл: 'посчитай налог на сумму 100000 по 13%'",
+            " - roi/инвест: 'roi: 50000 65000' или 'инвест 50000 прибыль 15000'",
+            " - амортизация: 'амортизация: 100000 5 лет'",
+            " - окупаемость: 'окупаемость 50000 2000 в мес'",
+            " - простые проценты: 'простые проценты 100000 7% 3 года'",
+            " - сложные проценты: 'сложные проценты 100000 7% 3 года помесячно'",
+            " - месячный доход: 'месячный доход 3000 на 7 дней' или 'месячный доход 120000 рабочие 8'",
+            " - xirr: 'xirr -10000@2023-01-01 3000@2023-12-01'",
+            " - npv: 'npv 10% -100000 50000'",
+            " - бюджет: 'составь бюджет 100 на 7 дней'",
+            " - pmt: 'pmt 150000 9% 15 лет annuity'",
+            " - debtplan: 'debtplan a:100000@12% b:50000@8% payment 15000'"
             )
         }
 
-        val compareRoot = Regex("""(?i)\bсравн\w*\b""").find(lower)
-        if (compareRoot != null && (lower.contains("цен") || lower.contains("цена") || lower.contains("цены"))) {
+        // --- сравнение цен (устойчивое к кириллице) ---
+        if (lower.contains("сравн") && (lower.contains("цен") || lower.contains("цена") || lower.contains("цены"))) {
             val numberRegex = Regex("""(\d+(?:[.,]\d+)?)""")
             val matches = numberRegex.findAll(cmd).toList()
             if (matches.size < 2) return listOf("Недостаточно цен для сравнения. Пример: 'сравн цен яблоки 120 апельсины 140'")
-            val rootEnd = compareRoot.range.last + 1
+            val rootIndex = lower.indexOf("сравн").coerceAtLeast(0)
+            val rootEnd = rootIndex + "сравн".length
             val items = mutableListOf<Pair<String, BigDecimal>>()
             val limit = matches.size.coerceAtMost(10)
             for (i in 0 until limit) {
@@ -284,11 +296,22 @@ class RuFinAsActivity : AppCompatActivity() {
             return outputs
         }
 
-        val inflationPattern = Regex("""(?i)\b[\p{L}0-9_]*(инфл|инфляц)[\p{L}0-9_]*\b[ :]*([\s\S]+)""")
-        val inflMatch = inflationPattern.find(cmd)
-        if (inflMatch != null) {
-            var payload = inflMatch.groupValues.getOrNull(2)?.trim() ?: ""
-            if (payload.isEmpty() && colonIndex >= 0) payload = cmd.substring(colonIndex + 1).trim()
+        // --- инфляция: упрощённая, устойчиво к кириллице (ищем корень слова) ---
+        if (lower.contains("инфл") || lower.contains("инфляц") || lower.contains("инфляция")) {
+            var payload = ""
+            // если есть двоеточие, то используем содержимое после него, иначе — всё сообщение после слова "инфл..." (попробуем найти позицию)
+            if (colonIndex >= 0) {
+                payload = cmd.substring(colonIndex + 1).trim()
+            } else {
+                // найдем позицию корня в исходной строке (независимо от регистра)
+                val idx = lower.indexOf("инфл").let { if (it >= 0) it else lower.indexOf("инфляц").let { if (it >= 0) it else lower.indexOf("инфляция") } }
+                payload = if (idx != null && idx >= 0) {
+                    try { cmd.substring(idx + 1 + 0).substringAfter(" ").trim() } catch (_: Exception) { cmd }
+                } else {
+                    cmd
+                }
+            }
+
             val amountMatch = Regex("""(\d+(?:[.,]\d+)?)""").find(payload)
             val amount = if (amountMatch != null) {
                 try {
@@ -419,7 +442,7 @@ class RuFinAsActivity : AppCompatActivity() {
             val allNums = Regex("""(\d+(?:[.,]\d+)?)""").findAll(cmd).map { it.groupValues[1].replace(',', '.') }.toList()
             val principal = when {
                 percVal != null && allNums.isNotEmpty() -> {
-                    val candidate = allNums.firstOrNull { it != percMatch.groupValues.getOrNull(1)?.replace(',', '.') } ?: allNums.first()
+                    val candidate = allNums.firstOrNull { it != percMatch.groupValues?.getOrNull(1)?.replace(',', '.') } ?: allNums.first()
                     try { BigDecimal(candidate) } catch (e: Exception) { BigDecimal.ZERO }
                 }
                 allNums.isNotEmpty() -> try { BigDecimal(allNums[0]) } catch (e: Exception) { BigDecimal.ZERO }
