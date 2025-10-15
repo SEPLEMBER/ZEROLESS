@@ -196,4 +196,19 @@
 
     <string name="welcome_messagen">Offline Assistant — режим оффлайн. Введите команду (напр.: "простые проценты 100000 7% 3 года")</string>
     <string name="cmd_entropy_prefix">энтроп</string>
+
+    <string name="greeting">Good time of day!</string>
+    <string name="question">What do you wish to calculate?</string>
+    <string name="option_digital">&gt; digital data</string>
+    <string name="option_finances">&gt; Finances</string>
+    <string name="option_physics">&gt; Physics</string>
+    <string name="option_other">&gt; Other</string>
+    <string name="note_experimental">Please note that this functionality is completely experimental.</string>
+    <string name="enter_choice">Please enter a choice.</string>
+    <string name="redirect_english_finances">Redirecting to English Finances...</string>
+    <string name="redirect_russian_finances">Перенаправление в Русские Финансы...</string>
+    <string name="redirect_english_physics">Redirecting to English Physics...</string>
+    <string name="redirect_russian_physics">Перенаправление в Русскую Физику...</string>
+    <string name="redirect_main">Redirecting to Main...</string>
+    <string name="unknown_choice">Unknown choice. Please try again.</string>
 </resources>
