@@ -116,7 +116,7 @@ class ArrivalActivity : AppCompatActivity() {
                 return listOf(getString(R.string.redirect_main))
             }
             cmd.contains("dig") -> {
-                startActivity(Intent(this, com.nemesis.droidcrypt.Locale.EnDigAsActivity::class.java))
+                startActivity(Intent(this, com.nemesis.droidcrypt.locale.EnDigAsActivity::class.java))
                 finish()
                 return listOf(getString(R.string.redirect_main))
             }
@@ -124,7 +124,7 @@ class ArrivalActivity : AppCompatActivity() {
             
             }
             cmd.contains("циф") -> {
-                startActivity(Intent(this, com.nemesis.droidcrypt.Locale.RuDigAsActivity::class.java))
+                startActivity(Intent(this, com.nemesis.droidcrypt.locale.RuDigAsActivity::class.java))
                 finish()
                 return listOf(getString(R.string.redirect_main))
             }
