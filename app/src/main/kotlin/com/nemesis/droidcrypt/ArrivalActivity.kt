@@ -91,7 +91,7 @@ class ArrivalActivity : AppCompatActivity() {
 
         when {
             cmd.contains("finance") -> {
-                startActivity(Intent(this, EnFinAsActivity::class.java))
+                startActivity(Intent(this, MainActivity::class.java))
                 finish()
                 return listOf(getString(R.string.redirect_english_finances))
             }
@@ -101,7 +101,7 @@ class ArrivalActivity : AppCompatActivity() {
                 return listOf(getString(R.string.redirect_russian_finances))
             }
             cmd.contains("phys") -> {
-                startActivity(Intent(this, EnPhysAsActivity::class.java))
+                startActivity(Intent(this, MainActivity::class.java))
                 finish()
                 return listOf(getString(R.string.redirect_english_physics))
             }
