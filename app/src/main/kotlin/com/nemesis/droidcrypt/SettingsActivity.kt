@@ -23,6 +23,7 @@ class SettingsActivity : AppCompatActivity() {
 
     private var folderUri: Uri? = null
     private lateinit var selectFolderButton: MaterialButton
+    private lateinit var setupButton: MaterialButton          // <-- new
     private lateinit var backButton: MaterialButton
     private lateinit var disableScreenshotsSwitch: SwitchMaterial
     private lateinit var prefs: SharedPreferences
@@ -66,6 +67,7 @@ class SettingsActivity : AppCompatActivity() {
 
         prefs = getSharedPreferences("PawsTribePrefs", MODE_PRIVATE)
         selectFolderButton = findViewById(R.id.selectFolderButton)
+        setupButton = findViewById(R.id.setupButton)          // <-- new
         backButton = findViewById(R.id.backButton)
         disableScreenshotsSwitch = findViewById(R.id.disableScreenshotsSwitch)
 
@@ -92,6 +94,12 @@ class SettingsActivity : AppCompatActivity() {
         }
 
         selectFolderButton.setOnClickListener { openFolderPicker() }
+
+        // new: переход в SetupActivity
+        setupButton.setOnClickListener {
+            val intent = Intent(this, SetupActivity::class.java)
+            startActivity(intent)
+        }
 
         disableScreenshotsSwitch.setOnCheckedChangeListener { _, isChecked ->
             prefs.edit().putBoolean(PREF_KEY_DISABLE_SCREENSHOTS, isChecked).apply()
