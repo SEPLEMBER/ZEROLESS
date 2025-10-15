@@ -1,4 +1,4 @@
-package com.nemesis.droidcrypt
+package com.nemesis.droidcrypt.locale
 
 import android.content.Intent
 import android.graphics.Typeface
@@ -30,6 +30,7 @@ import java.time.Month
 import java.time.temporal.ChronoUnit
 import java.util.Locale
 import kotlin.math.pow
+import com.nemesis.droidcrypt.R
 
 class RuFinAsActivity : AppCompatActivity() {
 
