@@ -16,7 +16,6 @@ import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.setPadding
 import java.util.Locale
-import com.nemesis.droidcrypt.locale.R
 
 class ArrivalActivity : AppCompatActivity() {
 
@@ -107,7 +106,7 @@ class ArrivalActivity : AppCompatActivity() {
                 return listOf(getString(R.string.redirect_english_physics))
             }
             cmd.contains("физи") -> {
-                startActivity(Intent(this, local.RuPhysAsActivity::class.java))
+                startActivity(Intent(this, com.nemesis.droidcrypt.local.RuPhysAsActivity::class.java))
                 finish()
                 return listOf(getString(R.string.redirect_russian_physics))
             }
