@@ -107,7 +107,7 @@ class ArrivalActivity : AppCompatActivity() {
                 return listOf(getString(R.string.redirect_english_physics))
             }
             cmd.contains("физи") -> {
-                startActivity(Intent(this, RuPhysAsActivity::class.java))
+                startActivity(Intent(this, local.RuPhysAsActivity::class.java))
                 finish()
                 return listOf(getString(R.string.redirect_russian_physics))
             }
