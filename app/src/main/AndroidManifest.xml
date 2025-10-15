@@ -97,7 +97,7 @@
             android:configChanges="orientation|screenSize" />
 
                         <activity
-            android:name=".RuPhysAsActivity"
+            android:name=".locale.RuPhysAsActivity"
             android:exported="false"
             android:parentActivityName=".ArrivalActivity"
             android:theme="@style/VprTheme"
