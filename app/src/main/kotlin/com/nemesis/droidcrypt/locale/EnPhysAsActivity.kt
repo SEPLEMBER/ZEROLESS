@@ -263,11 +263,11 @@ private object EngPhysCommandsMain {
     // Time for distance given speed (now formatted for miles/mph output)
     // --------------------
     private fun handleTimeForDistance(cmd: String): List<String> {
-        val distMeters = PhysUtils.parseDistanceMeters(cmd)
+        val distMeters = EnPhysUtils.parseDistanceMeters(cmd)
             ?: return listOf(
                 "Time: couldn't find distance. Example: 'time 100 mi at 60 mph' or 'time 10mi at 5 m/s'"
             )
-        val speedMetersPerSec = PhysUtils.parseSpeedToMPerS(cmd)
+        val speedMetersPerSec = EnPhysUtils.parseSpeedToMPerS(cmd)
             ?: return listOf(
                 "Time: couldn't find speed. Example: 'time 100 mi at 60 mph' or 'time 10km at 5 m/s'"
             )
@@ -281,18 +281,18 @@ private object EngPhysCommandsMain {
         val ss = ((remMinutes - mm) * 60.0).roundToInt()
 
         val sb = mutableListOf<String>()
-        sb.add("Distance: ${PhysUtils.formatDistanceNice(distMeters)}")
-        sb.add("Speed: ${PhysUtils.formatSpeedNice(speedMetersPerSec)}")
-        sb.add("Exact time: ${"%.2f".format(seconds)} s (${PhysUtils.formatSecondsNice(seconds)})")
+        sb.add("Distance: ${EnPhysUtils.formatDistanceNice(distMeters)}")
+        sb.add("Speed: ${EnPhysUtils.formatSpeedNice(speedMetersPerSec)}")
+        sb.add("Exact time: ${"%.2f".format(seconds)} s (${EnPhysUtils.formatSecondsNice(seconds)})")
         sb.add("Breakdown: ${hh} h ${mm} min ${ss} sec")
-        sb.add("Rounded to 0.5 min: ${roundedHalfMin} min (≈ ${PhysUtils.formatMinutesToHMS(roundedHalfMin)})")
+        sb.add("Rounded to 0.5 min: ${roundedHalfMin} min (≈ ${EnPhysUtils.formatMinutesToHMS(roundedHalfMin)})")
 
         // Pace & per-100mi (adapted: per-100 miles makes little sense — show per-100 miles only when large)
         if (speedMetersPerSec > 0.0) {
             val secPerMile = 1609.344 / speedMetersPerSec
-            sb.add("Pace: ${PhysUtils.formatPace(secPerMile)} (min/mi)")
+            sb.add("Pace: ${EnPhysUtils.formatPace(secPerMile)} (min/mi)")
             val time100miSec = 1609.344 * 100.0 / speedMetersPerSec
-            sb.add("At this speed — 100 miles would take: ${PhysUtils.formatSecondsNice(time100miSec)}")
+            sb.add("At this speed — 100 miles would take: ${EnPhysUtils.formatSecondsNice(time100miSec)}")
             sb.add("Speed: ${"%.2f".format(speedMetersPerSec*2.2369362920544)} mph (${String.format("%.2f", speedMetersPerSec)} m/s)")
         }
 
@@ -314,9 +314,9 @@ private object EngPhysCommandsMain {
         val lower = cmd.lowercase(Locale.getDefault())
 
         // parse speed
-        var v = PhysUtils.parseSpeedToMPerS(lower)
+        var v = EnPhysUtils.parseSpeedToMPerS(lower)
         if (v == null) {
-            val possible = PhysUtils.extractBareNumber(lower, "v") ?: PhysUtils.extractBareNumber(lower, "")
+            val possible = EnPhysUtils.extractBareNumber(lower, "v") ?: EnPhysUtils.extractBareNumber(lower, "")
             if (possible != null) {
                 // if number > 18 assume mph (18 mph ~ 29 km/h) else assume m/s? keep heuristic: > 10 assume mph? better: assume mph if user uses english context and number < 200
                 v = if (possible > 10) possible / 2.2369362920544 else possible
@@ -358,9 +358,9 @@ private object EngPhysCommandsMain {
     // --------------------
     private fun handleGap(cmd: String): List<String> {
         val lower = cmd.lowercase(Locale.getDefault())
-        var v = PhysUtils.parseSpeedToMPerS(lower)
+        var v = EnPhysUtils.parseSpeedToMPerS(lower)
         if (v == null) {
-            val num = PhysUtils.extractBareNumber(lower, "")
+            val num = EnPhysUtils.extractBareNumber(lower, "")
             if (num != null) v = if (num > 10) num / 2.2369362920544 else num
         }
         if (v == null) return listOf("Gap: couldn't find speed. Example: 'distance 60 mph'")
@@ -384,9 +384,9 @@ private object EngPhysCommandsMain {
     private fun handleBikeStop(cmd: String): List<String> {
         val lower = cmd.lowercase(Locale.getDefault())
         // speed
-        var v = PhysUtils.parseSpeedToMPerS(lower)
+        var v = EnPhysUtils.parseSpeedToMPerS(lower)
         if (v == null) {
-            val num = PhysUtils.extractBareNumber(lower, "")
+            val num = EnPhysUtils.extractBareNumber(lower, "")
             if (num != null) v = if (num > 10) num / 2.2369362920544 else num
         }
         if (v == null) return listOf("Bike-stop: specify speed. Example: 'bike-stop 20 mph disc dry'")
@@ -432,8 +432,8 @@ private object EngPhysCommandsMain {
     private fun handleFall(cmd: String): List<String> {
         val lower = cmd.lowercase(Locale.getDefault())
         // parse height in meters or feet or miles
-        val h = PhysUtils.extractNumberIfPresent(lower, listOf("m", "meter", "meters", "ft", "feet", "height"))
-            ?: PhysUtils.parseDistanceMeters(lower) ?: PhysUtils.extractBareNumber(lower, "") ?: return listOf("Fall: specify height. Example: 'fall 10 m' or 'fall 30 ft'")
+        val h = EnPhysUtils.extractNumberIfPresent(lower, listOf("m", "meter", "meters", "ft", "feet", "height"))
+            ?: EnPhysUtils.parseDistanceMeters(lower) ?: EnPhysUtils.extractBareNumber(lower, "") ?: return listOf("Fall: specify height. Example: 'fall 10 m' or 'fall 30 ft'")
 
         val hMeters = h
         if (hMeters < 0.0) return listOf("Fall: height must be positive.")
@@ -454,8 +454,8 @@ private object EngPhysCommandsMain {
         val lower = cmd.lowercase(Locale.getDefault())
 
         // parse volume (liters)
-        val volParsed = PhysUtils.extractNumberWithUnit(lower, listOf("l", "liter", "litre"))
-        val volumeL = volParsed?.value ?: PhysUtils.extractNumberIfPresent(lower, listOf("v", "volume")) ?: PhysUtils.extractBareNumber(lower, "") ?: return listOf("Boiling: specify water volume. Example: 'boil 1.5 l from 20° power 2000 W'")
+        val volParsed = EnPhysUtils.extractNumberWithUnit(lower, listOf("l", "liter", "litre"))
+        val volumeL = volParsed?.value ?: EnPhysUtils.extractNumberIfPresent(lower, listOf("v", "volume")) ?: EnPhysUtils.extractBareNumber(lower, "") ?: return listOf("Boiling: specify water volume. Example: 'boil 1.5 l from 20° power 2000 W'")
 
         val volumeM3 = volumeL / 1000.0
         val massKg = 1000.0 * volumeM3 // density ~1000 kg/m3
@@ -463,7 +463,7 @@ private object EngPhysCommandsMain {
         // temperatures
         val tFromMatch = Regex("""from\s*(-?\d+(?:[.,]\d+)?)\s*°?c""").find(lower)
         val tFrom = tFromMatch?.groupValues?.get(1)?.replace(',', '.')?.toDoubleOrNull()
-            ?: PhysUtils.extractNumberIfPresent(lower, listOf("t0", "start", "from")) ?: 20.0
+            ?: EnPhysUtils.extractNumberIfPresent(lower, listOf("t0", "start", "from")) ?: 20.0
         val tTo = 100.0
 
         // power (W or kW)
@@ -480,7 +480,7 @@ private object EngPhysCommandsMain {
         val sb = mutableListOf<String>()
         sb.add("Heat ${"%.2f".format(volumeL)} L water from ${"%.1f".format(tFrom)}°C to 100°C at P=${formatWatts(power)} (eff ≈ ${"%.0f".format(eff*100)}%):")
         sb.add(" - Energy required: ≈ ${"%.0f".format(Q)} J (${String.format("%.3f", Q/3_600_000.0)} kWh)")
-        sb.add(" - Approx. time: ${PhysUtils.formatSecondsNice(tSec)} (≈ ${"%.1f".format(tSec/60.0)} min)")
+        sb.add(" - Approx. time: ${EnPhysUtils.formatSecondsNice(tSec)} (≈ ${"%.1f".format(tSec/60.0)} min)")
         sb.add("Note: actual time depends on pot shape and heat losses.")
         return sb
     }
@@ -492,7 +492,7 @@ private object EngPhysCommandsMain {
         val lower = cmd.lowercase(Locale.getDefault())
 
         // try Wh first
-        val whParsed = PhysUtils.extractNumberWithUnit(lower, listOf("wh", "w h", "watt-hour", "watthours"))
+        val whParsed = EnPhysUtils.extractNumberWithUnit(lower, listOf("wh", "w h", "watt-hour", "watthours"))
         var energyWh: Double? = null
         if (whParsed != null) energyWh = whParsed.value
 
@@ -507,7 +507,7 @@ private object EngPhysCommandsMain {
 
         // fallback: capacity without unit
         if (energyWh == null) {
-            val bare = PhysUtils.extractBareNumber(lower, "")
+            val bare = EnPhysUtils.extractBareNumber(lower, "")
             if (bare != null && bare > 1000) {
                 // assume mAh
                 val volt = vMatch?.groupValues?.get(1)?.replace(',', '.')?.toDoubleOrNull() ?: 3.7
@@ -542,7 +542,7 @@ private object EngPhysCommandsMain {
         val sb = mutableListOf<String>()
         sb.add("Charging: capacity ≈ ${"%.2f".format(energyWh)} Wh, from ${fromP}% to ${toP}% at P=${formatWatts(power)} (eff ≈ ${"%.0f".format(eff*100)}%):")
         sb.add(" - Required energy: ≈ ${"%.2f".format(needWh)} Wh")
-        sb.add(" - Approx. time: ${PhysUtils.formatSecondsNice(timeSec)} (≈ ${"%.1f".format(timeSec/3600.0)} h)")
+        sb.add(" - Approx. time: ${EnPhysUtils.formatSecondsNice(timeSec)} (≈ ${"%.1f".format(timeSec/3600.0)} h)")
         sb.add("Note: fast charge behavior and battery specifics may affect real time.")
         return sb
     }
@@ -554,17 +554,17 @@ private object EngPhysCommandsMain {
         val lower = cmd.lowercase(Locale.getDefault())
         // floors or height
         val floorsMatch = Regex("""(\d+)\s*floor|(\d+)\s*story""").find(lower)
-        val heightProvided = PhysUtils.extractNumberIfPresent(lower, listOf("h", "height"))
+        val heightProvided = EnPhysUtils.extractNumberIfPresent(lower, listOf("h", "height"))
         val floors = floorsMatch?.groupValues?.get(1)?.toIntOrNull() ?: floorsMatch?.groupValues?.get(2)?.toIntOrNull()
         val floorHeight = 3.0
         val height = when {
             floors != null -> floors * floorHeight
             heightProvided != null -> heightProvided
-            else -> PhysUtils.extractBareNumber(lower, "") ?: return listOf("Stairs: specify floors or height. Example: 'stairs 3 floors' or 'stairs height 9'")
+            else -> EnPhysUtils.extractBareNumber(lower, "") ?: return listOf("Stairs: specify floors or height. Example: 'stairs 3 floors' or 'stairs height 9'")
         }
 
-        val mass = (PhysUtils.extractNumberWithUnit(lower, listOf("kg", "lb", "lbs"))?.let { PhysUtils.normalizeMassToKg(it.value, it.unit) }
-            ?: PhysUtils.extractBareNumber(lower, "weight") ?: PhysUtils.extractBareNumber(lower, "") ?: 70.0)
+        val mass = (EnPhysUtils.extractNumberWithUnit(lower, listOf("kg", "lb", "lbs"))?.let { EnPhysUtils.normalizeMassToKg(it.value, it.unit) }
+            ?: EnPhysUtils.extractBareNumber(lower, "weight") ?: EnPhysUtils.extractBareNumber(lower, "") ?: 70.0)
 
         val deltaPE = mass * G * height // J
         val kcalPure = deltaPE / 4184.0
@@ -585,15 +585,15 @@ private object EngPhysCommandsMain {
     private fun handleIncline(cmd: String): List<String> {
         val lower = cmd.lowercase(Locale.getDefault())
 
-        val distMeters = PhysUtils.parseDistanceMeters(lower) ?: run {
-            val bare = PhysUtils.extractBareNumber(lower, "") ?: return listOf("Incline: specify distance (e.g. 2 mi).")
+        val distMeters = EnPhysUtils.parseDistanceMeters(lower) ?: run {
+            val bare = EnPhysUtils.extractBareNumber(lower, "") ?: return listOf("Incline: specify distance (e.g. 2 mi).")
             // assume miles if >3 (user likely meant miles); by default convert to meters assuming miles
             if (bare > 3) bare * 1609.344 else bare * 1000.0
         }
 
-        val slopePercent = PhysUtils.extractNumberIfPresent(lower, listOf("slope", "grade", "%")) ?: 0.0
-        val speedMps = PhysUtils.parseSpeedToMPerS(lower) ?: ( (PhysUtils.extractBareNumber(lower, "") ?: 5.0) / 3.6 )
-        val mass = (PhysUtils.extractNumberWithUnit(lower, listOf("kg", "lb", "lbs"))?.let { PhysUtils.normalizeMassToKg(it.value, it.unit) }
+        val slopePercent = EnPhysUtils.extractNumberIfPresent(lower, listOf("slope", "grade", "%")) ?: 0.0
+        val speedMps = EnPhysUtils.parseSpeedToMPerS(lower) ?: ( (EnPhysUtils.extractBareNumber(lower, "") ?: 5.0) / 3.6 )
+        val mass = (EnPhysUtils.extractNumberWithUnit(lower, listOf("kg", "lb", "lbs"))?.let { EnPhysUtils.normalizeMassToKg(it.value, it.unit) }
             ?: 75.0)
 
         val height = distMeters * (slopePercent / 100.0)
@@ -608,7 +608,7 @@ private object EngPhysCommandsMain {
         val sb = mutableListOf<String>()
         sb.add("Route ${"%.2f".format(distMeters/1609.344)} mi at ${"%.2f".format(slopePercent)}% grade, speed ${"%.1f".format(speedMps*2.2369362920544)} mph:")
         sb.add(" - Elevation gain: ≈ ${"%.2f".format(height)} m")
-        sb.add(" - Time: ≈ ${PhysUtils.formatSecondsNice(timeSec)}")
+        sb.add(" - Time: ≈ ${EnPhysUtils.formatSecondsNice(timeSec)}")
         sb.add(" - Estimated calories: ≈ ${"%.0f".format(totalKcal)} kcal (including base & climb)")
         sb.add("Note: estimates are approximate and depend on pace and terrain.")
         return sb
@@ -620,11 +620,11 @@ private object EngPhysCommandsMain {
     private fun handleLift(cmd: String): List<String> {
         val lower = cmd.lowercase(Locale.getDefault())
 
-        val mass = PhysUtils.extractNumberWithUnit(lower, listOf("kg", "lb", "lbs"))?.let { PhysUtils.normalizeMassToKg(it.value, it.unit) }
-            ?: PhysUtils.extractBareNumber(lower, "m") ?: PhysUtils.extractBareNumber(lower, "") ?: return listOf("Lift: specify mass. Example: 'lift 200 kg 2 m 5 s'")
+        val mass = EnPhysUtils.extractNumberWithUnit(lower, listOf("kg", "lb", "lbs"))?.let { EnPhysUtils.normalizeMassToKg(it.value, it.unit) }
+            ?: EnPhysUtils.extractBareNumber(lower, "m") ?: EnPhysUtils.extractBareNumber(lower, "") ?: return listOf("Lift: specify mass. Example: 'lift 200 kg 2 m 5 s'")
 
-        val height = PhysUtils.extractNumberIfPresent(lower, listOf("h", "height", "m", "meter")) ?: PhysUtils.extractBareNumber(lower, "") ?: 1.0
-        val time = PhysUtils.extractNumberIfPresent(lower, listOf("t", "time", "s")) ?: PhysUtils.extractBareNumber(lower, "") ?: 1.0
+        val height = EnPhysUtils.extractNumberIfPresent(lower, listOf("h", "height", "m", "meter")) ?: EnPhysUtils.extractBareNumber(lower, "") ?: 1.0
+        val time = EnPhysUtils.extractNumberIfPresent(lower, listOf("t", "time", "s")) ?: EnPhysUtils.extractBareNumber(lower, "") ?: 1.0
 
         val force = mass * G
         val power = if (time > 0) mass * G * height / time else Double.POSITIVE_INFINITY
@@ -644,7 +644,7 @@ private object EngPhysCommandsMain {
         val lower = cmd.lowercase(Locale.getDefault())
         // parse dB
         val dbMatch = Regex("""(-?\d+(?:[.,]\d+)?)\s*(d\s?b|db)\b""").find(lower)
-        val L1 = dbMatch?.groupValues?.get(1)?.replace(',', '.')?.toDoubleOrNull() ?: PhysUtils.extractBareNumber(lower, "")?.let { if (it > 10) it else null }
+        val L1 = dbMatch?.groupValues?.get(1)?.replace(',', '.')?.toDoubleOrNull() ?: EnPhysUtils.extractBareNumber(lower, "")?.let { if (it > 10) it else null }
         if (L1 == null) return listOf("Sound: specify level in dB. Example: 'sound 95 dB at 1 m to 10 m'")
 
         // r1 and r2
@@ -672,12 +672,12 @@ private object EngPhysCommandsMain {
         val lower = cmd.lowercase(Locale.getDefault())
         val tMatch = Regex("""(-?\d+(?:[.,]\d+)?)\s*°?c\b""").find(lower)
         val T = tMatch?.groupValues?.get(1)?.replace(',', '.')?.toDoubleOrNull()
-            ?: PhysUtils.extractNumberIfPresent(lower, listOf("t", "temp", "temperature")) ?: return listOf("Windchill: specify temperature in °C. Example: 'windchill -5° wind 20 mph'")
+            ?: EnPhysUtils.extractNumberIfPresent(lower, listOf("t", "temp", "temperature")) ?: return listOf("Windchill: specify temperature in °C. Example: 'windchill -5° wind 20 mph'")
 
         // wind speed in mph or m/s
-        var v = PhysUtils.parseSpeedToMPerS(lower)
+        var v = EnPhysUtils.parseSpeedToMPerS(lower)
         if (v == null) {
-            val num = PhysUtils.extractBareNumber(lower, "wind") ?: PhysUtils.extractBareNumber(lower, "")
+            val num = EnPhysUtils.extractBareNumber(lower, "wind") ?: EnPhysUtils.extractBareNumber(lower, "")
             if (num != null) {
                 v = if (num <= 60) num / 2.2369362920544 else num // if <=60 assume mph
             }
@@ -702,11 +702,11 @@ private object EngPhysCommandsMain {
     // --------------------
     private fun handleHeatLoss(cmd: String): List<String> {
         val lower = cmd.lowercase(Locale.getDefault())
-        val area = PhysUtils.extractNumberIfPresent(lower, listOf("area", "m2", "ft2", "sqft")) ?: PhysUtils.extractBareNumber(lower, "") ?: return listOf("Heat loss: specify room area in m². Example: 'heatloss 200 ft2 height 8 good ΔT 20'")
+        val area = EnPhysUtils.extractNumberIfPresent(lower, listOf("area", "m2", "ft2", "sqft")) ?: EnPhysUtils.extractBareNumber(lower, "") ?: return listOf("Heat loss: specify room area in m². Example: 'heatloss 200 ft2 height 8 good ΔT 20'")
 
         // If user provided ft2, convert to m2 in extractNumberWithUnit; otherwise treat as m2
-        val height = PhysUtils.extractNumberIfPresent(lower, listOf("height", "h")) ?: 2.5
-        val deltaT = PhysUtils.extractNumberIfPresent(lower, listOf("dT", "dt", "delta")) ?: 20.0
+        val height = EnPhysUtils.extractNumberIfPresent(lower, listOf("height", "h")) ?: 2.5
+        val deltaT = EnPhysUtils.extractNumberIfPresent(lower, listOf("dT", "dt", "delta")) ?: 20.0
         val insulation = when {
             lower.contains("poor") || lower.contains("bad") -> "poor"
             lower.contains("good") || lower.contains("well") -> "good"
@@ -772,9 +772,9 @@ private object EngPhysCommandsV2 {
     }
 
     private fun handleRequiredSpeed(cmd: String): List<String> {
-        val distMeters = PhysUtils.parseDistanceMeters(cmd)
+        val distMeters = EnPhysUtils.parseDistanceMeters(cmd)
             ?: return listOf("Speed: couldn't find distance. Example: 'how fast 10 mi in 15 minutes' or 'how fast walk 5 mi in 50 minutes'")
-        val timeSec = PhysUtils.parseTimeToSeconds(cmd)
+        val timeSec = EnPhysUtils.parseTimeToSeconds(cmd)
             ?: return listOf("Speed: couldn't find target time. Examples: 'in 15 minutes', '1:30', '90 min', '0.5 hours'")
 
         val lower = cmd.lowercase(Locale.getDefault())
@@ -792,12 +792,12 @@ private object EngPhysCommandsV2 {
         val paceSecPerMile = if (neededMps > 0) 1609.344 / neededMps else Double.POSITIVE_INFINITY
 
         val lines = mutableListOf<String>()
-        lines.add("Distance: ${PhysUtils.formatDistanceNice(distMeters)}")
-        lines.add("Target time: ${PhysUtils.formatSecondsNice(timeSec)}")
+        lines.add("Distance: ${EnPhysUtils.formatDistanceNice(distMeters)}")
+        lines.add("Target time: ${EnPhysUtils.formatSecondsNice(timeSec)}")
         lines.add("Required speed: ${"%.2f".format(neededMph)} mph (${String.format("%.2f", neededMps)} m/s)")
 
         if (mode == "walk" || mode == "either") {
-            lines.add("Pace for walking: ${PhysUtils.formatPace(paceSecPerMile)} (min/mi)")
+            lines.add("Pace for walking: ${EnPhysUtils.formatPace(paceSecPerMile)} (min/mi)")
             val steps = (distMeters / 0.75).roundToInt() // step ≈0.75 m
             lines.add("Estimated steps (step ≈0.75 m): ≈ $steps steps")
             lines.add("Comfortable walking speeds: ~3–3.5 mph — brisk ~4 mph")
@@ -815,7 +815,7 @@ private object EngPhysCommandsV2 {
 
         lines.add("Details:")
         lines.add(" - Average speed = ${"%.2f".format(neededMph)} mph")
-        lines.add(" - Pace = ${PhysUtils.formatPace(paceSecPerMile)} (min/mi)")
+        lines.add(" - Pace = ${EnPhysUtils.formatPace(paceSecPerMile)} (min/mi)")
 
         return lines
     }
@@ -924,17 +924,17 @@ private object EngPhysCommandsV3 {
         val lower = cmd.lowercase(Locale.getDefault())
 
         // parse v: supports m/s, km/h, mph
-        val vParsed = PhysUtils.extractNumberWithUnit(lower, listOf("m/s", "mps", "m/s", "km/h", "kmh", "mph", "mi/h"))
-        val v = vParsed?.let { PhysUtils.normalizeSpeedToMPerS(it.value, it.unit) }
-            ?: PhysUtils.extractBareNumber(lower, "v") // maybe "v 30"
+        val vParsed = EnPhysUtils.extractNumberWithUnit(lower, listOf("m/s", "mps", "m/s", "km/h", "kmh", "mph", "mi/h"))
+        val v = vParsed?.let { EnPhysUtils.normalizeSpeedToMPerS(it.value, it.unit) }
+            ?: EnPhysUtils.extractBareNumber(lower, "v") // maybe "v 30"
         if (v == null) return listOf("Projectile: velocity (v) not found. Example: 'projectile v=30 angle 45'")
 
         // angle degrees
-        var angleDeg: Double? = PhysUtils.extractAngleDegrees(lower)
+        var angleDeg: Double? = EnPhysUtils.extractAngleDegrees(lower)
         // range (m)
-        val rangeMeters = PhysUtils.extractNumberIfPresent(lower, listOf("range", "distance", "r"))
+        val rangeMeters = EnPhysUtils.extractNumberIfPresent(lower, listOf("range", "distance", "r"))
         // initial height h0
-        val h0 = PhysUtils.extractNumberIfPresent(lower, listOf("h0", "h", "height")) ?: 0.0
+        val h0 = EnPhysUtils.extractNumberIfPresent(lower, listOf("h0", "h", "height")) ?: 0.0
 
         val g = 9.80665
         val out = mutableListOf<String>()
@@ -1012,20 +1012,20 @@ private object EngPhysCommandsV3 {
         val lower = cmd.lowercase(Locale.getDefault())
 
         // parse mass (kg, g, lb)
-        val massParsed = PhysUtils.extractNumberWithUnit(lower, listOf("kg", "g", "lb", "lbs"))
+        val massParsed = EnPhysUtils.extractNumberWithUnit(lower, listOf("kg", "g", "lb", "lbs"))
         val massKg = when {
-            massParsed == null -> PhysUtils.extractBareNumber(lower, "m") // maybe "m 80"
-            else -> PhysUtils.normalizeMassToKg(massParsed.value, massParsed.unit)
+            massParsed == null -> EnPhysUtils.extractBareNumber(lower, "m") // maybe "m 80"
+            else -> EnPhysUtils.normalizeMassToKg(massParsed.value, massParsed.unit)
         }
 
         // parse velocity (m/s, km/h, mph)
-        val velParsed = PhysUtils.extractNumberWithUnit(lower, listOf("m/s", "km/h", "mph", "mi/h"))
-        val v = velParsed?.let { PhysUtils.normalizeSpeedToMPerS(it.value, it.unit) }
-            ?: PhysUtils.extractBareNumber(lower, "v")
+        val velParsed = EnPhysUtils.extractNumberWithUnit(lower, listOf("m/s", "km/h", "mph", "mi/h"))
+        val v = velParsed?.let { EnPhysUtils.normalizeSpeedToMPerS(it.value, it.unit) }
+            ?: EnPhysUtils.extractBareNumber(lower, "v")
 
         // parse height
-        val hParsed = PhysUtils.extractNumberWithUnit(lower, listOf("m", "meter", "ft", "feet"))
-        val h = hParsed?.value ?: PhysUtils.extractNumberIfPresent(lower, listOf("h", "height")) ?: PhysUtils.extractBareNumber(lower, "h")
+        val hParsed = EnPhysUtils.extractNumberWithUnit(lower, listOf("m", "meter", "ft", "feet"))
+        val h = hParsed?.value ?: EnPhysUtils.extractNumberIfPresent(lower, listOf("h", "height")) ?: EnPhysUtils.extractBareNumber(lower, "h")
 
         val g = 9.80665
         val out = mutableListOf<String>()
@@ -1055,9 +1055,9 @@ private object EngPhysCommandsV3 {
 }
 
 // --------------------
-// PhysUtils: parsing & formatting utilities (adapted to accept imperial units and format outputs in imperial)
+// EnPhysUtils: parsing & formatting utilities (adapted to accept imperial units and format outputs in imperial)
 // --------------------
-private object PhysUtils {
+private object EnPhysUtils {
 
     data class NumUnit(val value: Double, val unit: String?)
 
