@@ -11,7 +11,6 @@ import androidx.appcompat.app.AppCompatActivity
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.snackbar.Snackbar
 import kotlin.random.Random
-import com.nemesis.droidcrypt.SplashActivity
 
 class MainActivity : AppCompatActivity() {
     private val settingsResultLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -50,7 +49,7 @@ class MainActivity : AppCompatActivity() {
             val sharedPrefs = getSharedPreferences("PawsTribePrefs", MODE_PRIVATE)
             val folderUri = sharedPrefs.getString("folderUri", null)
             if (folderUri != null) {
-                val i = Intent(this@MainActivity, SplashActivity::class.java)
+                val i = Intent(this@MainActivity, ChatActivity::class.java)
                 startActivity(i)
                 finish() // Закрываем MainActivity для освобождения памяти
             } else {
@@ -63,7 +62,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         setupText.setOnClickListener {
-            val i = Intent(this@MainActivity, ArrivalActivity::class.java)
+            val i = Intent(this@MainActivity, SetupActivity::class.java)
             startActivity(i)
         }
 
