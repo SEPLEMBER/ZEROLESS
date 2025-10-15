@@ -30,7 +30,6 @@ import java.time.LocalDate
 import java.time.Month
 import java.time.temporal.ChronoUnit
 import java.util.Locale
-import kotlin.math.ln
 import kotlin.math.pow
 
 class RuFinAsActivity : AppCompatActivity() {
@@ -131,8 +130,6 @@ class RuFinAsActivity : AppCompatActivity() {
         if (lower.contains("справк") || lower == "help" || lower.contains("помощ")) {
             return listOf(
                 "Поддерживаемые команды (примеры):",
-                " - энтроп/энтропия <текст>        — посчитать энтропию",
-                " - трафик 5gb                     — разделить трафик по дням/часам/сек (поддерживает 'на 7 дней', 'за неделю')",
                 " - простые проценты 100000 7% 3 года",
                 " - сложные проценты 100000 7% 3 года помесячно",
                 " - месячный доход 120000 рабочие 8",
@@ -287,42 +284,6 @@ class RuFinAsActivity : AppCompatActivity() {
                 outputs.add("${idx + 1}) $name — ${price.toPlainString()} ₽$extra")
             }
             return outputs
-        }
-
-        // --------------------
-        // Entropy command (improved)
-        // --------------------
-        val prefix = getString(R.string.cmd_entropy_prefix)
-        val entropyPattern = Regex("""(?i)\b\w*${Regex.escape(prefix)}\w*\b[ :]*([\s\S]+)""")
-        val entMatch = entropyPattern.find(cmd)
-        if (entMatch != null) {
-            var payload = entMatch.groupValues.getOrNull(1)?.trim() ?: ""
-            if (payload.isEmpty() && colonIndex >= 0) payload = cmd.substring(colonIndex + 1).trim()
-            if (payload.isEmpty()) return listOf(getString(R.string.usage_entropy))
-
-            // bytes-level entropy
-            val bytes = payload.toByteArray(Charsets.UTF_8)
-            val byteEntropyPerSymbol = shannonEntropyBytes(bytes)
-            val totalBitsBytes = byteEntropyPerSymbol * bytes.size
-
-            // codepoint-level entropy (Unicode symbols)
-            val codepoints = payload.codePointCount(0, payload.length)
-            val codepointEntropyPerSymbol = shannonEntropyCodepoints(payload)
-            val totalBitsCodepoints = codepointEntropyPerSymbol * codepoints
-
-            // background rarity metric — marks characters like '&' as rarer
-            val bgSurprisal = backgroundAverageSurprisalBits(payload)
-
-            val strengthLabel = entropyStrengthLabel(totalBitsBytes)
-
-            return listOf(
-                getString(R.string.entropy_per_symbol_bytes, "%.4f".format(Locale.getDefault(), byteEntropyPerSymbol)),
-                getString(R.string.entropy_total_bits_bytes, "%.2f".format(Locale.getDefault(), totalBitsBytes), bytes.size),
-                getString(R.string.entropy_per_symbol_codepoints, "%.4f".format(Locale.getDefault(), codepointEntropyPerSymbol)),
-                getString(R.string.entropy_total_bits_codepoints, "%.2f".format(Locale.getDefault(), totalBitsCodepoints), codepoints),
-                "Средняя фон. непредсказуемость (по таблице частот): ${"%.4f".format(Locale.getDefault(), bgSurprisal)} бит/симв",
-                getString(R.string.entropy_strength, strengthLabel)
-            )
         }
 
         // --------------------
@@ -587,42 +548,6 @@ class RuFinAsActivity : AppCompatActivity() {
         }
 
         // --------------------
-        // Traffic command (supports days)
-        // --------------------
-        if (lower.contains("трафик") || Regex("""\d+\s*(gb|гб|mb|мб|kb|кб|b|байт)""").containsMatchIn(lower)) {
-            val m = Regex("""(\d+(?:[.,]\d+)?)\s*(gb|гб|mb|мб|kb|кб|b|байт)?""", RegexOption.IGNORE_CASE).find(lower)
-            if (m == null) return listOf(getString(R.string.usage_traffic))
-            val numStr = m.groupValues[1].replace(',', '.')
-            val unit = m.groupValues.getOrNull(2) ?: ""
-            val bytes = parseBytes(numStr.toDouble(), unit)
-
-            val days = parseDaysFromText(cmd)
-            if (days != null) {
-                val bPerDay = bytes.toDouble() / days.toDouble()
-                val bPerHour = bPerDay / 24.0
-                val bPerMin = bPerHour / 60.0
-                val bPerSec = bPerMin / 60.0
-                return listOf(
-                    getString(R.string.traffic_input_approx, m.value.trim(), formatBytesDecimal(bytes)),
-                    "Период: $days дней",
-                    "В день: ${formatBytesDecimalDouble(bPerDay)}",
-                    "В час: ${formatBytesDecimalDouble(bPerHour)}",
-                    "В мин: ${formatBytesDecimalDouble(bPerMin)}",
-                    "В сек: ${formatBitsPerSecond(bPerSec)}"
-                )
-            } else {
-                val rates = bytesPerMonthToRates(bytes)
-                return listOf(
-                    getString(R.string.traffic_input_approx, m.value.trim(), formatBytesDecimal(bytes)),
-                    getString(R.string.traffic_per_day, formatBytesDecimalDouble(rates["B/day"] ?: 0.0)),
-                    getString(R.string.traffic_per_hour, formatBytesDecimalDouble(rates["B/hour"] ?: 0.0)),
-                    getString(R.string.traffic_per_min, formatBytesDecimalDouble(rates["B/min"] ?: 0.0)),
-                    getString(R.string.traffic_per_sec, formatBitsPerSecond(rates["B/s"] ?: 0.0))
-                )
-            }
-        }
-
-        // --------------------
         // Simple interest
         // --------------------
         if (lower.contains("прост") && lower.contains("процент")) {
@@ -803,144 +728,6 @@ class RuFinAsActivity : AppCompatActivity() {
             }
         }
         return null
-    }
-
-    // --------------------
-    // --- Entropy helpers (fixed numeric types + background freq)
-    // --------------------
-    private fun shannonEntropyBytes(bytes: ByteArray): Double {
-        if (bytes.isEmpty()) return 0.0
-        val freq = IntArray(256)
-        bytes.forEach { b -> freq[b.toInt() and 0xFF]++ }
-        val len = bytes.size.toDouble()
-        var entropy = 0.0
-        for (count in freq) {
-            if (count == 0) continue
-            val p = count.toDouble() / len
-            entropy -= p * (ln(p) / ln(2.0))
-        }
-        return entropy
-    }
-
-    private fun shannonEntropyCodepoints(s: String): Double {
-        val cps = s.codePoints().toArray()
-        if (cps.isEmpty()) return 0.0
-        val map = mutableMapOf<Int, Int>()
-        for (cp in cps) map[cp] = (map[cp] ?: 0) + 1
-        val len = cps.size.toDouble()
-        var entropy = 0.0
-        for ((_, count) in map) {
-            val p = count.toDouble() / len
-            entropy -= p * (ln(p) / ln(2.0))
-        }
-        return entropy
-    }
-
-    private fun entropyStrengthLabel(totalBits: Double): String {
-        return when {
-            totalBits < 28.0 -> getString(R.string.entropy_label_weak)
-            totalBits < 46.0 -> getString(R.string.entropy_label_acceptable)
-            totalBits < 71.0 -> getString(R.string.entropy_label_normal)
-            else -> getString(R.string.entropy_label_strong)
-        }
-    }
-
-    /**
-     * backgroundAverageSurprisalBits:
-     * Оценивает среднюю "фоную" непредсказуемость символов по заранее заданной таблице частот.
-     * Это НЕ заменяет эмпирическую энтропию, но показывает насколько символы в строке редки относительно обычного текста.
-     */
-    private fun backgroundAverageSurprisalBits(s: String): Double {
-        if (s.isEmpty()) return 0.0
-        // простая таблица частот (примерные значения) для латиницы/кириллицы/пробела/цифр/пунктуации
-        val freqMap = mutableMapOf<Int, Double>().apply {
-            // space
-            put(' '.code, 0.13)
-            // common Russian letters (approx)
-            val commonRu = mapOf(
-                'о' to 0.09, 'е' to 0.07, 'а' to 0.062, 'и' to 0.06, 'н' to 0.055,
-                'т' to 0.052, 'с' to 0.045, 'р' to 0.039, 'в' to 0.037, 'л' to 0.035
-            )
-            for ((ch, v) in commonRu) put(ch.code, v)
-            // digits
-            for (d in '0'..'9') put(d.code, 0.01)
-            // Latin letters
-            for (c in 'a'..'z') put(c.code, 0.01)
-            for (c in 'A'..'Z') put(c.code, 0.01)
-            // punctuation common
-            put('.'.code, 0.03); put(','.code, 0.03); put('-'.code, 0.005); put('_'.code, 0.002)
-            // fallback: others considered rare
-        }
-        val defaultProb = 0.0005 // rare by default
-        val cps = s.codePoints().toArray()
-        var sum = 0.0
-        for (cp in cps) {
-            val p = freqMap[cp] ?: defaultProb
-            // surprisal in bits: -log2(p)
-            val surprisal = - (ln(p) / ln(2.0))
-            sum += surprisal
-        }
-        return sum / cps.size.toDouble()
-    }
-
-    // --------------------
-    // --- Traffic helpers
-    // --------------------
-    private fun parseBytes(amount: Double, unitRaw: String?): Long {
-        val unit = unitRaw?.lowercase(Locale.getDefault()) ?: ""
-        return when (unit) {
-            "gb", "гб" -> (amount * 1000.0 * 1000.0 * 1000.0).toLong()
-            "mb", "мб" -> (amount * 1000.0 * 1000.0).toLong()
-            "kb", "кб" -> (amount * 1000.0).toLong()
-            "b", "байт" -> amount.toLong()
-            "" -> amount.toLong()
-            else -> amount.toLong()
-        }
-    }
-
-    private fun formatBytesDecimal(bytes: Long): String {
-        val kb = 1000.0
-        val mb = kb * 1000.0
-        val gb = mb * 1000.0
-        return when {
-            bytes >= gb -> String.format(Locale.getDefault(), "%.1f GB", bytes / gb)
-            bytes >= mb -> String.format(Locale.getDefault(), "%.1f MB", bytes / mb)
-            bytes >= kb -> String.format(Locale.getDefault(), "%.1f kB", bytes / kb)
-            else -> "$bytes B"
-        }
-    }
-
-    private fun formatBytesDecimalDouble(bytesDouble: Double): String {
-        val kb = 1000.0
-        val mb = kb * 1000.0
-        val gb = mb * 1000.0
-        return when {
-            bytesDouble >= gb -> String.format(Locale.getDefault(), "%.1f GB", bytesDouble / gb)
-            bytesDouble >= mb -> String.format(Locale.getDefault(), "%.1f MB", bytesDouble / mb)
-            bytesDouble >= kb -> String.format(Locale.getDefault(), "%.1f kB", bytesDouble / kb)
-            bytesDouble >= 1.0 -> String.format(Locale.getDefault(), "%.1f B", bytesDouble)
-            else -> String.format(Locale.getDefault(), "%.3f B", bytesDouble)
-        }
-    }
-
-    private fun formatBitsPerSecond(bytesPerSecond: Double): String {
-        val bitsPerSecond = bytesPerSecond * 8.0
-        val kbps = 1000.0
-        val mbps = kbps * 1000.0
-        return when {
-            bitsPerSecond >= mbps -> String.format(Locale.getDefault(), "%.2f Mb/s", bitsPerSecond / mbps)
-            bitsPerSecond >= kbps -> String.format(Locale.getDefault(), "%.2f kb/s", bitsPerSecond / kbps)
-            else -> String.format(Locale.getDefault(), "%.2f bit/s", bitsPerSecond)
-        }
-    }
-
-    private fun bytesPerMonthToRates(bytesPerMonth: Long, daysInMonth: Int = 30): Map<String, Double> {
-        val bMonth = bytesPerMonth.toDouble()
-        val bDay = bMonth / daysInMonth
-        val bHour = bDay / 24.0
-        val bMin = bHour / 60.0
-        val bSec = bMin / 60.0
-        return mapOf("B/day" to bDay, "B/hour" to bHour, "B/min" to bMin, "B/s" to bSec)
     }
 
     // --------------------
