@@ -111,6 +111,13 @@
             android:theme="@style/VprTheme"
             android:configChanges="orientation|screenSize" />
 
+                                        <activity
+            android:name=".locale.EnDigAsActivity"
+            android:exported="false"
+            android:parentActivityName=".ArrivalActivity"
+            android:theme="@style/VprTheme"
+            android:configChanges="orientation|screenSize" />
+        
                         <activity
             android:name=".locale.RuPhysAsActivity"
             android:exported="false"
@@ -119,7 +126,7 @@
             android:configChanges="orientation|screenSize" />
 
                                 <activity
-            android:name=".RuDigAsActivity"
+            android:name=".locale.RuDigAsActivity"
             android:exported="false"
             android:parentActivityName=".ArrivalActivity"
             android:theme="@style/VprTheme"
