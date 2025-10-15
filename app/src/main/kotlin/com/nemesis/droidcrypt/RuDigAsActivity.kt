@@ -597,7 +597,7 @@ private object RuDigAsCommandsV3 {
 // Общие утилиты для парсинга/форматирования (переиспользуются во всех модулях)
 // Добавлены функции для работы с байтами, форматированием и сетевыми единицами
 // --------------------
-private object DigitUtils {
+private object RuDigitUtils {
 
     data class NumUnit(val value: Double, val unit: String?)
 
