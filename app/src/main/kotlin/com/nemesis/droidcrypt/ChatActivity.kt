@@ -4,6 +4,7 @@ import android.animation.ObjectAnimator
 import android.content.Intent
 import android.graphics.BitmapFactory
 import android.graphics.Color
+import android.graphics.Typeface
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.GradientDrawable
 import android.media.MediaPlayer
@@ -69,6 +70,9 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private var currentThemeBackground = "#0A0A0A"
     private var currentContext = "base.txt"
     private var isContextLocked = false
+
+    // Overlay view shown on startup
+    private var startupOverlay: FrameLayout? = null
 
     private val dialogHandler = Handler(Looper.getMainLooper())
     private var idleCheckRunnable: Runnable? = null
@@ -143,6 +147,9 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         window.setBackgroundDrawable(ColorDrawable(Color.BLACK))
         setupToolbar()
 
+        // show the startup overlay immediately
+        showStartupOverlay()
+
         scrollView = findViewById(R.id.scrollView)
         queryInput = findViewById(R.id.queryInput)
         envelopeInputButton = findViewById(R.id.envelope_button)
@@ -177,12 +184,8 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         } catch (e: Exception) {
         }
 
-        setupIconTouchEffect(btnLock)
-        setupIconTouchEffect(btnTrash)
+        // NOTE: removed touch effect and click handlers for lock/trash per request
         setupIconTouchEffect(envelopeInputButton)
-
-        btnLock?.setOnClickListener { finish() }
-        btnTrash?.setOnClickListener { clearChat() }
 
         envelopeInputButton?.setOnClickListener {
             val now = System.currentTimeMillis()
@@ -317,25 +320,33 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     }
 
     private fun loadToolbarIcons() {
-        val uri = folderUri ?: return
+        val uri = folderUri ?: run {
+            // still set send icon if available from files, otherwise keep default
+            tryLoadSendIconFromFolder(null)
+            return
+        }
         try {
-            val dir = DocumentFile.fromTreeUri(this, uri) ?: return
-            fun tryLoadToImageButton(name: String, target: ImageButton?) {
-                if (target == null) return
-                try {
-                    val file = dir.findFile(name)
-                    if (file != null && file.exists()) {
-                        contentResolver.openInputStream(file.uri)?.use { ins ->
-                            val bmp = BitmapFactory.decodeStream(ins)
-                            target.setImageBitmap(bmp)
-                        }
-                    }
-                } catch (e: Exception) {
+            val dir = DocumentFile.fromTreeUri(this, uri) ?: run {
+                tryLoadSendIconFromFolder(null)
+                return
+            }
+            // Removed loading of lock.png and trash.png per request.
+            tryLoadSendIconFromFolder(dir)
+        } catch (e: Exception) {
+        }
+    }
+
+    private fun tryLoadSendIconFromFolder(dir: DocumentFile?) {
+        try {
+            val target = envelopeInputButton ?: return
+            if (dir == null) return
+            val file = dir.findFile("send.png") ?: return
+            if (file.exists()) {
+                contentResolver.openInputStream(file.uri)?.use { ins ->
+                    val bmp = BitmapFactory.decodeStream(ins)
+                    target.setImageBitmap(bmp)
                 }
             }
-            tryLoadToImageButton("lock.png", btnLock)
-            tryLoadToImageButton("trash.png", btnTrash)
-            tryLoadToImageButton("send.png", envelopeInputButton)
         } catch (e: Exception) {
         }
     }
@@ -1313,4 +1324,69 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             dialogHandler.postDelayed(it, 500000)
         }
     }
+
+    // ---------- STARTUP OVERLAY IMPLEMENTATION ----------
+    private fun showStartupOverlay() {
+        try {
+            val root = findViewById<ViewGroup>(android.R.id.content)
+            // If overlay already exists, don't add twice
+            if (startupOverlay != null) return
+
+            val overlay = FrameLayout(this).apply {
+                layoutParams = FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT
+                )
+                setBackgroundColor(Color.parseColor("#0A0A0A"))
+                isClickable = true
+                isFocusable = true
+                // consume all touches so underlying UI is not interactive
+                setOnTouchListener { _, _ -> true }
+            }
+
+            val tv = TextView(this).apply {
+                text = "Loading..." // hardcoded per request
+                textSize = 20f
+                typeface = Typeface.DEFAULT_BOLD
+                gravity = Gravity.CENTER
+                try {
+                    setTextColor(getColor(R.color.neon_cyan))
+                } catch (_: Exception) {
+                    // fallback neon-like color if resource missing
+                    setTextColor(Color.parseColor("#00E5FF"))
+                }
+                layoutParams = FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.WRAP_CONTENT,
+                    FrameLayout.LayoutParams.WRAP_CONTENT,
+                    Gravity.CENTER
+                )
+            }
+
+            overlay.addView(tv)
+            startupOverlay = overlay
+            root.addView(overlay)
+
+            // lifecycle-aware delay and removal (5 seconds)
+            lifecycleScope.launch {
+                delay(5000)
+                withContext(Dispatchers.Main) {
+                    try {
+                        startupOverlay?.animate()?.alpha(0f)?.setDuration(300)?.withEndAction {
+                            try {
+                                root.removeView(startupOverlay)
+                            } catch (_: Exception) {}
+                            startupOverlay = null
+                        }
+                    } catch (_: Exception) {
+                        try {
+                            root.removeView(startupOverlay)
+                        } catch (_: Exception) {}
+                        startupOverlay = null
+                    }
+                }
+            }
+        } catch (_: Exception) {
+        }
+    }
+    // ---------- END STARTUP OVERLAY IMPLEMENTATION ----------
 }
