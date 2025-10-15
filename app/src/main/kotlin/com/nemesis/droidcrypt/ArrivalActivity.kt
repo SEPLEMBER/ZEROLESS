@@ -60,7 +60,7 @@ class ArrivalActivity : AppCompatActivity() {
                     submitCommand(text)
                     input.text = Editable.Factory.getInstance().newEditable("")
                 } else {
-                    addAssistantLine("Please enter a choice.")
+                    addAssistantLine(getString(R.string.enter_choice))
                 }
                 true
             } else {
@@ -68,7 +68,15 @@ class ArrivalActivity : AppCompatActivity() {
             }
         }
 
-        addSystemLine("Good time of day! What do you wish to calculate?\n\n> digital data\n> Finances\n> Physics\n> Other\n\nPlease note that this functionality is completely experimental.")
+        addSystemLine(getString(R.string.greeting))
+        addSystemLine(getString(R.string.question))
+        addSystemLine("") // vertical separation
+        addSystemLine(getString(R.string.option_digital))
+        addSystemLine(getString(R.string.option_finances))
+        addSystemLine(getString(R.string.option_physics))
+        addSystemLine(getString(R.string.option_other))
+        addSystemLine("") // vertical separation
+        addSystemLine(getString(R.string.note_experimental))
     }
 
     private fun submitCommand(command: String) {
@@ -83,36 +91,36 @@ class ArrivalActivity : AppCompatActivity() {
 
         when {
             cmd.contains("finance") -> {
-                startActivity(Intent(this, SettingsActivity::class.java))
+                startActivity(Intent(this, EnFinAsActivity::class.java))
                 finish()
-                return listOf("Welcome!")
+                return listOf(getString(R.string.redirect_english_finances))
             }
             cmd.contains("финансы") -> {
                 startActivity(Intent(this, RuFinAsActivity::class.java))
                 finish()
-                return listOf("Перенаправление в Русскую версию...")
+                return listOf(getString(R.string.redirect_russian_finances))
             }
             cmd.contains("phys") -> {
-                startActivity(Intent(this, SetupActivity::class.java))
+                startActivity(Intent(this, EnPhysAsActivity::class.java))
                 finish()
-                return listOf("Redirecting to English Physics...")
+                return listOf(getString(R.string.redirect_english_physics))
             }
             cmd.contains("физи") -> {
                 startActivity(Intent(this, RuPhysAsActivity::class.java))
                 finish()
-                return listOf("Добро пожаловать!...")
+                return listOf(getString(R.string.redirect_russian_physics))
             }
             cmd.contains("other") || cmd.contains("другое") -> {
                 startActivity(Intent(this, MainActivity::class.java))
                 finish()
-                return listOf("Redirecting to Main...")
+                return listOf(getString(R.string.redirect_main))
             }
             cmd.contains("dig") || cmd.contains("циф") -> {
-                startActivity(Intent(this, RuDigAsActivity::class.java))
+                startActivity(Intent(this, MainActivity::class.java))
                 finish()
-                return listOf("Redirecting to Main...")
+                return listOf(getString(R.string.redirect_main))
             }
-            else -> return listOf("Unknown choice. Please try again.")
+            else -> return listOf(getString(R.string.unknown_choice))
         }
     }
 
