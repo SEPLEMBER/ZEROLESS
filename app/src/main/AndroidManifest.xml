@@ -89,6 +89,22 @@
             android:theme="@style/VprTheme"
             android:configChanges="orientation|screenSize" />
 
+                <!-- VprActivity -->
+        <activity
+            android:name=".locale.RuFinAsActivity"
+            android:exported="false"
+            android:parentActivityName=".ArrivalActivity"
+            android:theme="@style/VprTheme"
+            android:configChanges="orientation|screenSize" />
+
+                <!-- VprActivity -->
+        <activity
+            android:name=".locale.EnFinAsActivity"
+            android:exported="false"
+            android:parentActivityName=".ArrivalActivity"
+            android:theme="@style/VprTheme"
+            android:configChanges="orientation|screenSize" />
+        
                 <activity
             android:name=".StreetFoodActivity"
             android:exported="false"
