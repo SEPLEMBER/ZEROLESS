@@ -1,4 +1,4 @@
-package com.nemesis.droidcrypt.locale
+package com.nemesis.droidcrypt.local
 
 import android.content.Intent
 import android.graphics.Typeface
@@ -58,7 +58,8 @@ class EnFinAsActivity : AppCompatActivity() {
             )
         }
 
-        setContentView(R.layout.activity_ru_fin_as)
+        // NOTE: rename your layout resource accordingly or change this back.
+        setContentView(R.layout.activity_en_fin_as)
 
         messagesContainer = findViewById(R.id.messagesContainer)
         scrollView = findViewById(R.id.scrollView)
@@ -478,13 +479,13 @@ class EnFinAsActivity : AppCompatActivity() {
             return listOfNotNull(monthlyIncomeReport(amount, workHours))
         }
 
-        try {
-            val v2Outputs = EnFinanceV2.handleCommand(cmd)
-            if (!v2Outputs.isNullOrEmpty()) {
-                return v2Outputs
-            }
-        } catch (e: Exception) {
-        }
+try {
+    val v2Outputs = EnFinanceV2.handleCommand(cmd)
+    if (v2Outputs.isNotEmpty()) {
+        return v2Outputs
+    }
+} catch (e: Exception) {
+}
 
         return listOf("Unknown command. Type 'help' for a list of commands.")
     }
@@ -663,9 +664,9 @@ class EnFinAsActivity : AppCompatActivity() {
         if (tail.isBlank()) return 1.0
         val lower = tail.lowercase(Locale.getDefault())
 
-        if (Regex("""\byear\b""").containsMatchIn(lower) && !Regex("""\b\d+\s*year\b""").find(lower).isNullOrEmpty()) {
-            // handled below
-        }
+if (Regex("""\byear\b""").containsMatchIn(lower) && Regex("""\b\d+\s*year\b""").find(lower) != null) {
+    // handled below
+}
 
         val y = Regex("""(\d+(?:[.,]\d+)?)\s*(years|year|y)\b""").find(lower)
         if (y != null) return y.groupValues[1].replace(',', '.').toDoubleOrNull() ?: 1.0
