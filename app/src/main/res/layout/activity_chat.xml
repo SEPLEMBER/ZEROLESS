@@ -1,185 +1,221 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    android:id="@+id/chat_layout"
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/chat_frame"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical"
-    android:background="@color/matte_black"
-    android:padding="8dp">
+    android:background="@color/matte_black">
 
-    <!-- Top bar: Battery icon + percentage (left), time (center), icons (right) -->
+    <!-- Original content moved inside a container so we can overlay the startup view on top -->
     <LinearLayout
-        android:id="@+id/topBar"
+        android:id="@+id/chat_layout"
         android:layout_width="match_parent"
-        android:layout_height="72dp"
-        android:orientation="horizontal"
-        android:gravity="center_vertical"
-        android:weightSum="3"
-        android:paddingStart="8dp"
-        android:paddingEnd="8dp"
-        android:background="@color/matte_black">
-
-        <!-- Left section: Battery icon and percentage -->
-        <LinearLayout
-            android:layout_width="0dp"
-            android:layout_height="match_parent"
-            android:layout_weight="1"
-            android:orientation="horizontal"
-            android:gravity="center_vertical|start">
-
-            <ImageView
-                android:id="@+id/battery_image"
-                android:layout_width="56dp"
-                android:layout_height="56dp"
-                android:scaleType="fitCenter"
-                android:adjustViewBounds="true"
-                android:contentDescription="@string/battery" />
-
-            <TextView
-                android:id="@+id/battery_percent"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="-"
-                android:textColor="@color/neon_cyan"
-                android:textSize="16sp"
-                android:layout_marginStart="8dp"
-                android:fontFamily="monospace" />
-        </LinearLayout>
-
-        <!-- Centered time -->
-        <TextView
-            android:id="@+id/time_text"
-            android:layout_width="0dp"
-            android:layout_height="match_parent"
-            android:layout_weight="1"
-            android:text="PAWSTRIBE"
-            android:textColor="@color/neon_cyan"
-            android:textSize="20sp"
-            android:gravity="center"
-            android:fontFamily="monospace" />
-
-        <!-- Right section: Icons -->
-        <LinearLayout
-            android:layout_width="0dp"
-            android:layout_height="match_parent"
-            android:layout_weight="1"
-            android:orientation="horizontal"
-            android:gravity="center_vertical|end">
-
-            <ImageButton
-                android:id="@+id/info_icon_button"
-                android:layout_width="56dp"
-                android:layout_height="56dp"
-                android:layout_marginStart="6dp"
-                android:background="?attr/selectableItemBackgroundBorderless"
-                android:contentDescription="@string/info"
-                android:scaleType="fitCenter"
-                android:adjustViewBounds="true" />
-
-            <ImageButton
-                android:id="@+id/btn_lock"
-                android:layout_width="56dp"
-                android:layout_height="56dp"
-                android:layout_marginStart="6dp"
-                android:background="?attr/selectableItemBackgroundBorderless"
-                android:contentDescription="@string/lock"
-                android:scaleType="fitCenter"
-                android:adjustViewBounds="true" />
-
-            <ImageButton
-                android:id="@+id/btn_trash"
-                android:layout_width="56dp"
-                android:layout_height="56dp"
-                android:layout_marginStart="6dp"
-                android:background="?attr/selectableItemBackgroundBorderless"
-                android:contentDescription="@string/trash"
-                android:scaleType="fitCenter"
-                android:adjustViewBounds="true" />
-
-            <ImageButton
-                android:id="@+id/btn_envelope_top"
-                android:layout_width="56dp"
-                android:layout_height="56dp"
-                android:layout_marginStart="6dp"
-                android:background="?attr/selectableItemBackgroundBorderless"
-                android:contentDescription="@string/envelope"
-                android:scaleType="fitCenter"
-                android:adjustViewBounds="true" />
-
-            <ImageButton
-                android:id="@+id/btn_settings"
-                android:layout_width="56dp"
-                android:layout_height="56dp"
-                android:layout_marginStart="6dp"
-                android:background="?attr/selectableItemBackgroundBorderless"
-                android:contentDescription="@string/settings"
-                android:scaleType="fitCenter"
-                android:adjustViewBounds="true" />
-
-            <ImageButton
-                android:id="@+id/btn_charging"
-                android:layout_width="56dp"
-                android:layout_height="56dp"
-                android:layout_marginStart="6dp"
-                android:background="?attr/selectableItemBackgroundBorderless"
-                android:contentDescription="@string/charging"
-                android:scaleType="fitCenter"
-                android:adjustViewBounds="true"
-                android:visibility="gone" />
-        </LinearLayout>
-    </LinearLayout>
-
-    <!-- Chat area background slightly lighter than page -->
-    <ScrollView
-        android:id="@+id/scrollView"
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1"
-        android:fillViewport="true"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
         android:background="@color/matte_black"
         android:padding="8dp">
 
+        <!-- Top bar: Battery icon + percentage (left), time (center), icons (right) -->
         <LinearLayout
-            android:id="@+id/chatMessagesContainer"
+            android:id="@+id/topBar"
+            android:layout_width="match_parent"
+            android:layout_height="72dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:weightSum="3"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp"
+            android:background="@color/matte_black">
+
+            <!-- Left section: Battery icon and percentage -->
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:orientation="horizontal"
+                android:gravity="center_vertical|start">
+
+                <ImageView
+                    android:id="@+id/battery_image"
+                    android:layout_width="56dp"
+                    android:layout_height="56dp"
+                    android:scaleType="fitCenter"
+                    android:adjustViewBounds="true"
+                    android:contentDescription="@string/battery" />
+
+                <TextView
+                    android:id="@+id/battery_percent"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="-"
+                    android:textColor="@color/neon_cyan"
+                    android:textSize="16sp"
+                    android:layout_marginStart="8dp"
+                    android:fontFamily="monospace" />
+            </LinearLayout>
+
+            <!-- Centered time -->
+            <TextView
+                android:id="@+id/time_text"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:text="PAWSTRIBE"
+                android:textColor="@color/neon_cyan"
+                android:textSize="20sp"
+                android:gravity="center"
+                android:fontFamily="monospace" />
+
+            <!-- Right section: Icons -->
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:orientation="horizontal"
+                android:gravity="center_vertical|end">
+
+                <ImageButton
+                    android:id="@+id/info_icon_button"
+                    android:layout_width="56dp"
+                    android:layout_height="56dp"
+                    android:layout_marginStart="6dp"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:contentDescription="@string/info"
+                    android:scaleType="fitCenter"
+                    android:adjustViewBounds="true" />
+
+                <ImageButton
+                    android:id="@+id/btn_lock"
+                    android:layout_width="56dp"
+                    android:layout_height="56dp"
+                    android:layout_marginStart="6dp"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:contentDescription="@string/lock"
+                    android:scaleType="fitCenter"
+                    android:adjustViewBounds="true" />
+
+                <ImageButton
+                    android:id="@+id/btn_trash"
+                    android:layout_width="56dp"
+                    android:layout_height="56dp"
+                    android:layout_marginStart="6dp"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:contentDescription="@string/trash"
+                    android:scaleType="fitCenter"
+                    android:adjustViewBounds="true" />
+
+                <ImageButton
+                    android:id="@+id/btn_envelope_top"
+                    android:layout_width="56dp"
+                    android:layout_height="56dp"
+                    android:layout_marginStart="6dp"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:contentDescription="@string/envelope"
+                    android:scaleType="fitCenter"
+                    android:adjustViewBounds="true" />
+
+                <ImageButton
+                    android:id="@+id/btn_settings"
+                    android:layout_width="56dp"
+                    android:layout_height="56dp"
+                    android:layout_marginStart="6dp"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:contentDescription="@string/settings"
+                    android:scaleType="fitCenter"
+                    android:adjustViewBounds="true" />
+
+                <ImageButton
+                    android:id="@+id/btn_charging"
+                    android:layout_width="56dp"
+                    android:layout_height="56dp"
+                    android:layout_marginStart="6dp"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:contentDescription="@string/charging"
+                    android:scaleType="fitCenter"
+                    android:adjustViewBounds="true"
+                    android:visibility="gone" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- Chat area background slightly lighter than page -->
+        <ScrollView
+            android:id="@+id/scrollView"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:fillViewport="true"
+            android:background="@color/matte_black"
+            android:padding="8dp">
+
+            <LinearLayout
+                android:id="@+id/chatMessagesContainer"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical" />
+        </ScrollView>
+
+        <!-- Input row: text + envelope (send) -->
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="vertical" />
-    </ScrollView>
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:paddingTop="8dp"
+            android:background="@color/matte_black"
+            android:padding="8dp">
 
-    <!-- Input row: text + envelope (send) -->
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:gravity="center_vertical"
-        android:paddingTop="8dp"
-        android:background="@color/matte_black"
-        android:padding="8dp">
+            <AutoCompleteTextView
+                android:id="@+id/queryInput"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:hint="@string/inp_text"
+                android:textColor="@color/neon_cyan"
+                android:textColorHint="@color/neon_cyan"
+                android:background="@android:color/transparent"
+                android:padding="8dp"
+                android:inputType="textMultiLine"
+                android:maxLines="3"
+                android:scrollbars="vertical"
+                android:popupBackground="@color/popup_bg" />
 
-        <AutoCompleteTextView
-            android:id="@+id/queryInput"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:hint="@string/inp_text"
-            android:textColor="@color/neon_cyan"
-            android:textColorHint="@color/neon_cyan"
-            android:background="@android:color/transparent"
-            android:padding="8dp"
-            android:inputType="textMultiLine"
-            android:maxLines="3"
-            android:scrollbars="vertical"
-            android:popupBackground="@color/popup_bg" />
+            <ImageButton
+                android:id="@+id/envelope_button"
+                android:layout_width="56dp"
+                android:layout_height="56dp"
+                android:layout_marginStart="8dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="@string/send"
+                android:scaleType="fitCenter"
+                android:adjustViewBounds="true" />
+        </LinearLayout>
 
-        <ImageButton
-            android:id="@+id/envelope_button"
-            android:layout_width="56dp"
-            android:layout_height="56dp"
-            android:layout_marginStart="8dp"
-            android:background="?attr/selectableItemBackgroundBorderless"
-            android:contentDescription="@string/send"
-            android:scaleType="fitCenter"
-            android:adjustViewBounds="true" />
     </LinearLayout>
 
-</LinearLayout>
+    <!-- STARTUP OVERLAY (Variant A) -->
+    <!-- Visible on startup; placed last so it sits above the rest of UI -->
+    <FrameLayout
+        android:id="@+id/startup_overlay"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#0A0A0A"
+        android:visibility="visible"
+        android:clickable="true"
+        android:focusable="true">
+
+        <TextView
+            android:id="@+id/startup_overlay_text"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Loading..."
+            android:textStyle="bold"
+            android:textSize="20sp"
+            android:layout_gravity="center"
+            android:contentDescription="Startup loading overlay"
+            android:fontFamily="sans-serif-medium"
+            android:padding="8dp"
+            android:gravity="center"
+            android:textColor="@color/neon_cyan" />
+    </FrameLayout>
+    <!-- END STARTUP OVERLAY -->
+
+</FrameLayout>
