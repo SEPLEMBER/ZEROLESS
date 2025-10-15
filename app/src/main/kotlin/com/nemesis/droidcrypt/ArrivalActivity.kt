@@ -108,7 +108,7 @@ class ArrivalActivity : AppCompatActivity() {
                 return listOf("Redirecting to Main...")
             }
             cmd.contains("dig") || cmd.contains("циф") -> {
-                startActivity(Intent(this, MainActivity::class.java))
+                startActivity(Intent(this, RuDigAsActivity::class.java))
                 finish()
                 return listOf("Redirecting to Main...")
             }
