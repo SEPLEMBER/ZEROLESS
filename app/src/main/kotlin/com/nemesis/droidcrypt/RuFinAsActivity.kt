@@ -8,7 +8,6 @@ import android.provider.Settings
 import android.text.Editable
 import android.text.InputType
 import android.text.method.ScrollingMovementMethod
-import android.util.Log
 import android.view.KeyEvent
 import android.view.WindowManager
 import android.view.inputmethod.EditorInfo
@@ -34,16 +33,10 @@ import kotlin.math.pow
 
 class RuFinAsActivity : AppCompatActivity() {
 
-    companion object {
-        private const val TAG = "RuFinAsActivity"
-    }
-
-    // UI references
     private lateinit var messagesContainer: LinearLayout
     private lateinit var scrollView: ScrollView
     private lateinit var input: EditText
 
-    // Styling constants
     private val bgColor = 0xFF0A0A0A.toInt()
     private val neonCyan = 0xFF00F5FF.toInt()
     private val userGray = 0xFFB0B0B0.toInt()
@@ -51,13 +44,11 @@ class RuFinAsActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // hide status bar (full screen)
         window.setFlags(
             WindowManager.LayoutParams.FLAG_FULLSCREEN,
             WindowManager.LayoutParams.FLAG_FULLSCREEN
         )
 
-        // Apply FLAG_SECURE if screenshots are disabled in prefs (key matches SettingsActivity)
         val prefs = getSharedPreferences("PawsTribePrefs", MODE_PRIVATE)
         if (prefs.getBoolean("disableScreenshots", false)) {
             window.setFlags(
@@ -74,7 +65,6 @@ class RuFinAsActivity : AppCompatActivity() {
 
         window.decorView.setBackgroundColor(bgColor)
 
-        // Input behaviour: IME_ACTION_DONE submits command
         input.imeOptions = EditorInfo.IME_ACTION_DONE
         input.setRawInputType(InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS)
         input.setOnEditorActionListener { _, actionId, event ->
@@ -84,7 +74,6 @@ class RuFinAsActivity : AppCompatActivity() {
                     submitCommand(text)
                     input.text = Editable.Factory.getInstance().newEditable("")
                 } else {
-                    // friendly hint when empty
                     addAssistantLine(getString(R.string.err_empty_input))
                 }
                 true
@@ -93,13 +82,9 @@ class RuFinAsActivity : AppCompatActivity() {
             }
         }
 
-        // seed welcome
         addSystemLine(getString(R.string.welcome_messagen))
     }
 
-    // --------------------
-    // Command routing
-    // --------------------
     private fun submitCommand(command: String) {
         addUserLine("> $command")
         lifecycleScope.launch(Dispatchers.Default) {
@@ -114,7 +99,6 @@ class RuFinAsActivity : AppCompatActivity() {
                     addAssistantLine("= ${getString(R.string.err_processing_command)}: ${t.message ?: t::class.java.simpleName}")
                     scrollView.post { scrollView.fullScroll(ScrollView.FOCUS_DOWN) }
                 }
-                Log.e(TAG, "Error while processing command", t)
             }
         }
     }
@@ -124,34 +108,17 @@ class RuFinAsActivity : AppCompatActivity() {
         val lower = cmd.lowercase(Locale.getDefault())
         val colonIndex = cmd.indexOf(':')
 
-        // --------------------
-        // help / справка
-        // --------------------
         if (lower.contains("справк") || lower == "help" || lower.contains("помощ")) {
             return listOf(
-            "Поддерживаемые команды (примеры):",
-            " - сравнить цены: 'сравни цены: яблоки 120, апельсины 140'",
-            " - накопить: 'накопить 100000 к 7 ноября под 5%'",
-            " - ипотека/кредит: 'ипотека 1000000 7% 15 лет первые 10'",
-            " - инфляция: 'посчитай инфляцию: 100000 рублей по 8% за 3 года'",
-            " - налог/ндфл: 'посчитай налог на сумму 100000 по 13%'",
-            " - roi/инвест: 'roi: 50000 65000' или 'инвест 50000 прибыль 15000'",
-            " - амортизация: 'амортизация: 100000 5 лет'",
-            " - окупаемость: 'окупаемость 50000 2000 в мес'",
-            " - простые проценты: 'простые проценты 100000 7% 3 года'",
-            " - сложные проценты: 'сложные проценты 100000 7% 3 года помесячно'",
-            " - месячный доход: 'месячный доход 3000 на 7 дней' или 'месячный доход 120000 рабочие 8'",
-            " - xirr: 'xirr -10000@2023-01-01 3000@2023-12-01'",
-            " - npv: 'npv 10% -100000 50000'",
-            " - бюджет: 'составь бюджет 100 на 7 дней'",
-            " - pmt: 'pmt 150000 9% 15 лет annuity'",
-            " - debtplan: 'debtplan a:100000@12% b:50000@8% payment 15000'"
-                )
+                "Поддерживаемые команды (примеры):",
+                " - простые проценты 100000 7% 3 года",
+                " - сложные проценты 100000 7% 3 года помесячно",
+                " - месячный доход 120000 рабочие 8",
+                " - бюджет 3000 на 7 дней — лимиты на день/нед/мес/час",
+                " - накопить 100000 к 7 ноября — сколько откладывать в день/нед/мес (поддерживает % для учёта процентов)"
+            )
         }
 
-        // --------------------
-        // Compare prices
-        // --------------------
         val compareRoot = Regex("""(?i)\bсравн\w*\b""").find(lower)
         if (compareRoot != null && (lower.contains("цен") || lower.contains("цена") || lower.contains("цены"))) {
             val numberRegex = Regex("""(\d+(?:[.,]\d+)?)""")
@@ -192,10 +159,6 @@ class RuFinAsActivity : AppCompatActivity() {
             return outputs
         }
 
-        // --------------------
-        // НАКОПИТЬ — now supports % and fixed days/weeks/dates
-        // usage: "накопить <сумма> к <дате>" or "накопить <сумма> за <N дней>" or "накопить <сумма> за 30 дней под 5%"
-        // --------------------
         if (lower.contains("накоп") || lower.contains("накопить") || lower.contains("накопление") || lower.contains("отлож")) {
             val payload = if (colonIndex >= 0) cmd.substring(colonIndex + 1) else cmd
             val nums = Regex("""(\d+(?:[.,]\d+)?)""").findAll(payload).map { it.groupValues[1].replace(',', '.') }.toList()
@@ -203,7 +166,6 @@ class RuFinAsActivity : AppCompatActivity() {
 
             val amount = try { BigDecimal(nums[0]) } catch (e: Exception) { BigDecimal.ZERO }
 
-            // days from text if present
             val daysFromText = parseDaysFromText(payload)
             val daysDouble = daysFromText?.toDouble()
             val yearsFallback = parseTimeToYears(payload)
@@ -215,14 +177,12 @@ class RuFinAsActivity : AppCompatActivity() {
                 else -> 30.0
             }.coerceAtLeast(1.0)
 
-            // check percent (optional)
             val percentRegex = Regex("""(\d+(?:[.,]\d+)?)\s*%""")
             val percMatch = percentRegex.find(payload)
             val annualRate = percMatch?.groupValues?.getOrNull(1)?.replace(',', '.')?.let {
                 try { BigDecimal(it).divide(BigDecimal(100)) } catch (_: Exception) { BigDecimal.ZERO }
             } ?: BigDecimal.ZERO
 
-            // basic per-day/week/month if no interest
             val perDay = amount.divide(BigDecimal.valueOf(daysToUse), 10, RoundingMode.HALF_UP)
             val perWeek = perDay.multiply(BigDecimal(7))
             val perMonth = perDay.multiply(BigDecimal(30))
@@ -233,14 +193,12 @@ class RuFinAsActivity : AppCompatActivity() {
             if (annualRate == BigDecimal.ZERO) {
                 outputs.add("Нужно откладывать: в день ${perDay.setScale(2, RoundingMode.HALF_UP)} ₽, в неделю ${perWeek.setScale(2, RoundingMode.HALF_UP)} ₽, в месяц ≈ ${perMonth.setScale(2, RoundingMode.HALF_UP)} ₽")
             } else {
-                // compute monthly payment (annuity) required with monthly compounding as approximation
                 val months = Math.max(1, Math.round(daysToUse / 30.0).toInt())
                 val rMonth = annualRate.divide(BigDecimal(12), 20, RoundingMode.HALF_UP)
                 val n = months
                 val pm: BigDecimal = if (rMonth.compareTo(BigDecimal.ZERO) == 0) {
                     amount.divide(BigDecimal.valueOf(n.toLong()), 10, RoundingMode.HALF_UP)
                 } else {
-                    // PMT = FV * r / ((1+r)^n - 1)  (approximation using BigDecimal)
                     try {
                         val mc = MathContext(34)
                         val onePlus = BigDecimal.ONE.add(rMonth, mc)
@@ -253,7 +211,6 @@ class RuFinAsActivity : AppCompatActivity() {
                             numerator.divide(denominator, 10, RoundingMode.HALF_UP)
                         }
                     } catch (e: Exception) {
-                        Log.w(TAG, "Failed to calculate monthly pmt precisely, fallback to double", e)
                         val rDouble = rMonth.toDouble()
                         val factor = (1.0 + rDouble).pow(n.toDouble())
                         val numerator = amount.toDouble() * rDouble
@@ -271,9 +228,6 @@ class RuFinAsActivity : AppCompatActivity() {
             return outputs
         }
 
-        // --------------------
-        // Mortgage / Loan
-        // --------------------
         val mortgagePattern = Regex("""(?i)\b\w*(ипотек|кредит)\w*\b[ :]*([\s\S]+)""")
         val mortMatch = mortgagePattern.find(cmd)
         if (mortMatch != null) {
@@ -330,10 +284,7 @@ class RuFinAsActivity : AppCompatActivity() {
             return outputs
         }
 
-        // --------------------
-        // Inflation
-        // --------------------
-        val inflationPattern = Regex("""(?i)\b\w*(инфл|инфляц)\w*\b[ :]*([\s\S]+)""")
+        val inflationPattern = Regex("""(?i)\b[\p{L}0-9_]*(инфл|инфляц)[\p{L}0-9_]*\b[ :]*([\s\S]+)""")
         val inflMatch = inflationPattern.find(cmd)
         if (inflMatch != null) {
             var payload = inflMatch.groupValues.getOrNull(2)?.trim() ?: ""
@@ -374,9 +325,6 @@ class RuFinAsActivity : AppCompatActivity() {
             return results
         }
 
-        // --------------------
-        // Tax
-        // --------------------
         if (lower.contains("налог") || lower.contains("ндфл")) {
             val percentRegex = Regex("""(\d+(?:[.,]\d+)?)\s*%""")
             val percMatch = percentRegex.find(cmd)
@@ -400,12 +348,9 @@ class RuFinAsActivity : AppCompatActivity() {
             return listOf("Сумма: ${amount.setScale(2, RoundingMode.HALF_UP)}", "Налог: ${tax.toPlainString()}", "После налога: ${net.toPlainString()}")
         }
 
-        // --------------------
-        // ROI / инвестиции / окупаемость
-        // --------------------
         if (lower.contains("roi") || lower.contains("окупаем") || lower.contains("инвест")) {
             val nums = Regex("""(\d+(?:[.,]\d+)?)""").findAll(cmd).map { it.groupValues[1].replace(',', '.') }.toList()
-            if (nums.isEmpty()) return listOf("Использование: roi <вложено> <итоговая сумма>  — или 'инвест 50000 прибыль 15000'")
+            if (nums.isEmpty()) return listOf("Использование: roi <вложено> <итоговая сумма> — или 'инвест 50000 прибыль 15000'")
             if (nums.size >= 2 && (lower.contains("прибыл") || lower.contains("прибыль"))) {
                 val invested = try { BigDecimal(nums[0]) } catch (e: Exception) { BigDecimal.ZERO }
                 val profit = try { BigDecimal(nums[1]) } catch (e: Exception) { BigDecimal.ZERO }
@@ -422,9 +367,6 @@ class RuFinAsActivity : AppCompatActivity() {
             }
         }
 
-        // --------------------
-        // Linear amortization
-        // --------------------
         if (lower.contains("амортиз") || lower.contains("амортизац")) {
             val nums = Regex("""(\d+(?:[.,]\d+)?)""").findAll(cmd).map { it.groupValues[1].replace(',', '.') }.toList()
             if (nums.isEmpty()) return listOf("Использование: амортиз <стоимость> <срок в годах> [ликв. стоимость]")
@@ -437,9 +379,6 @@ class RuFinAsActivity : AppCompatActivity() {
             return listOf("Амортизация (линейная): стоимость ${cost.setScale(2, RoundingMode.HALF_UP)}", "Срок (лет): ${"%.4f".format(Locale.getDefault(), usefulYears)}", "Ежегодно: ${annual.setScale(2, RoundingMode.HALF_UP)}", "Ежемесячно: ${monthly.setScale(2, RoundingMode.HALF_UP)}")
         }
 
-        // --------------------
-        // Payback / окупаемость
-        // --------------------
         if (lower.contains("окупа") || lower.contains("окупаемость")) {
             val nums = Regex("""(\d+(?:[.,]\d+)?)""").findAll(cmd).map { it.groupValues[1].replace(',', '.') }.toList()
             if (nums.size < 2) return listOf("Использование: окупаемость <вложено> <прибыль в мес/год>")
@@ -453,9 +392,6 @@ class RuFinAsActivity : AppCompatActivity() {
             return listOf("Вложено: ${invested.setScale(2, RoundingMode.HALF_UP)}", "Ежемесячная прибыль: ${monthlyProfit.setScale(2, RoundingMode.HALF_UP)}", "Окупаемость: ${months.setScale(2, RoundingMode.HALF_UP)} мес (~${years.setScale(2, RoundingMode.HALF_UP)} лет)")
         }
 
-        // --------------------
-        // Simple interest
-        // --------------------
         if (lower.contains("прост") && lower.contains("процент")) {
             val percentRegex = Regex("""(\d+(?:[.,]\d+)?)\s*%""")
             val percMatch = percentRegex.find(cmd)
@@ -475,9 +411,6 @@ class RuFinAsActivity : AppCompatActivity() {
             return listOfNotNull(simpleInterestReport(principal, rate, timeYears))
         }
 
-        // --------------------
-        // Compound interest
-        // --------------------
         if (lower.contains("слож") && lower.contains("процент")) {
             val percentRegex = Regex("""(\d+(?:[.,]\d+)?)\s*%""")
             val percMatch = percentRegex.find(cmd)
@@ -503,11 +436,6 @@ class RuFinAsActivity : AppCompatActivity() {
             return listOfNotNull(compoundInterestReport(principal, rate, timeYears, capitalization))
         }
 
-        // --------------------
-        // Monthly conversion & BUDGET: supports "за N дней" and "на N дней" and "на неделю"
-        // Now budget = limits (сколько можно тратить)
-        // Examples: "бюджет 3000 на 7 дней"
-        // --------------------
         if (lower.contains("бюджет") || (lower.contains("месяч") && (lower.contains("доход") || lower.contains("зарп") || lower.contains("расход")))) {
             val payload = if (colonIndex >= 0) cmd.substring(colonIndex + 1) else cmd
             val amountMatch = Regex("""(\d+(?:[.,]\d+)?)""").find(payload)
@@ -519,40 +447,27 @@ class RuFinAsActivity : AppCompatActivity() {
 
             val days = parseDaysFromText(payload)
             if (days != null) {
-                // compute limits: per day/week/month/hour/work-hour
                 return listOfNotNull(moneyPerDaysReport(amount, days, workHours))
             }
 
-            // if it's a monthly income (not budget), use monthlyIncomeReport
             if (lower.contains("месяч") && (lower.contains("доход") || lower.contains("зарп") || lower.contains("расход"))) {
                 return listOfNotNull(monthlyIncomeReport(amount, workHours))
             }
 
-            // fallback: monthly conversion semantics assume this is income if "месяч" phrase present, else present budgets as monthly->rates
             return listOfNotNull(monthlyIncomeReport(amount, workHours))
         }
 
-        // --------------------
-        // Try RuFinanceV2 (low priority): let main parser handle everything first.
-        // If it returns non-empty results, we use them. Otherwise continue to fallback.
-        // --------------------
         try {
             val v2Outputs = RuFinanceV2.handleCommand(cmd)
             if (!v2Outputs.isNullOrEmpty()) {
                 return v2Outputs
             }
         } catch (e: Exception) {
-            Log.w(TAG, "RuFinanceV2 handling failed", e)
-            // don't fail parsing — RuFinanceV2 is low priority and must not break main parser
         }
 
-        // fallback
         return listOf(getString(R.string.fallback_unknown_command))
     }
 
-    // --------------------
-    // Helpers: mortgage amortization generator
-    // --------------------
     private fun calculateMonthlyAnnuity(principal: BigDecimal, annualRate: BigDecimal, months: Int): BigDecimal {
         if (months <= 0) return principal.setScale(10, RoundingMode.HALF_UP)
         val r = annualRate
@@ -560,9 +475,6 @@ class RuFinAsActivity : AppCompatActivity() {
             return principal.divide(BigDecimal.valueOf(months.toLong()), 10, RoundingMode.HALF_UP)
         }
 
-        // Use BigDecimal arithmetic to compute:
-        // rMonth = r / 12
-        // payment = principal * (rMonth * (1 + rMonth)^n) / ((1 + rMonth)^n - 1)
         return try {
             val mc = MathContext(34)
             val rMonth = r.divide(BigDecimal(12), 34, RoundingMode.HALF_UP)
@@ -576,8 +488,6 @@ class RuFinAsActivity : AppCompatActivity() {
                 numerator.divide(denominator, 10, RoundingMode.HALF_UP)
             }
         } catch (e: Exception) {
-            Log.w(TAG, "BigDecimal annuity calculation failed, falling back to double", e)
-            // Fallback to double (should be rare)
             val rMonthDouble = r.divide(BigDecimal(12), 20, RoundingMode.HALF_UP).toDouble()
             val factor = (1.0 + rMonthDouble).pow(months.toDouble())
             val numerator = principal.toDouble() * (rMonthDouble * factor)
@@ -617,7 +527,6 @@ class RuFinAsActivity : AppCompatActivity() {
         return rows
     }
 
-    // Helper to find "первые N" or "табл N" pattern in payload
     private fun findRequestedFirstN(payload: String): Int? {
         val patterns = listOf(
             Regex("""первые\s*(\d{1,3})""", RegexOption.IGNORE_CASE),
@@ -636,14 +545,6 @@ class RuFinAsActivity : AppCompatActivity() {
         return null
     }
 
-    // --------------------
-    // --- Money helpers (budget fixed to be 'limits')
-    // --------------------
-    /**
-     * moneyPerDaysReport:
-     * Используется для команды "бюджет X на N дней" — возвращает лимиты (сколько можно тратить),
-     * а не доход. Чётко показывает лимит в день/нед/мес/час/рабочий час.
-     */
     private fun moneyPerDaysReport(amount: BigDecimal, days: Int, workingHours: Int = 8): String {
         val d = days.coerceAtLeast(1)
         val daily = amount.divide(BigDecimal.valueOf(d.toLong()), 10, RoundingMode.HALF_UP)
@@ -663,17 +564,10 @@ class RuFinAsActivity : AppCompatActivity() {
         }
     }
 
-    /**
-     * monthlyIncomeReport:
-     * Используется для команды "месячный доход X" — превращает месячный доход в:
-     * год, неделя (условно 7/30 части месяца), день (30-дн), час, рабочий час.
-     */
     private fun monthlyIncomeReport(monthly: BigDecimal, workingHours: Int): String {
-        // assume month ~ 30 days for straightforward conversion
         val perMonth = monthly.setScale(2, RoundingMode.HALF_UP)
         val perYear = monthly.multiply(BigDecimal(12)).setScale(2, RoundingMode.HALF_UP)
         val perDay = monthly.divide(BigDecimal(30), 10, RoundingMode.HALF_UP).setScale(2, RoundingMode.HALF_UP)
-        // weeks per month ≈ 30/7, so week = month * 7 / 30
         val perWeek = monthly.multiply(BigDecimal(7)).divide(BigDecimal(30), 10, RoundingMode.HALF_UP).setScale(2, RoundingMode.HALF_UP)
         val perHour24 = monthly.divide(BigDecimal(30), 10, RoundingMode.HALF_UP).divide(BigDecimal(24), 10, RoundingMode.HALF_UP).setScale(4, RoundingMode.HALF_UP)
         val perWorkHour = if (workingHours > 0) monthly.divide(BigDecimal(30), 10, RoundingMode.HALF_UP).divide(BigDecimal(workingHours), 10, RoundingMode.HALF_UP).setScale(2, RoundingMode.HALF_UP) else BigDecimal.ZERO.setScale(2)
@@ -688,12 +582,6 @@ class RuFinAsActivity : AppCompatActivity() {
         }
     }
 
-    /**
-     * monthlyConversionReport:
-     * Переименованный дубликат — сохранён, чтобы не потерять вариант расчётов,
-     * если где-то понадобится альтернативный формат вывода.
-     * (Этот метод сейчас не вызывается напрямую, но оставлен специально.)
-     */
     private fun monthlyConversionReport(monthly: BigDecimal, workingHours: Int): String {
         val yearly = monthly.multiply(BigDecimal(12))
         val perDay = monthly.divide(BigDecimal(30), 10, RoundingMode.HALF_UP)
@@ -711,9 +599,6 @@ class RuFinAsActivity : AppCompatActivity() {
         }
     }
 
-    // --------------------
-    // --- Percent & Time helpers
-    // --------------------
     private fun parsePercent(s: String): BigDecimal {
         val cleaned = s.replace("%", "").replace(',', '.').trim()
         return try {
@@ -723,23 +608,15 @@ class RuFinAsActivity : AppCompatActivity() {
         }
     }
 
-    /**
-     * parseDaysFromText:
-     * - распознаёт "на N дней", "за N дней", "на неделю", "на 2 недели", "на 7 дней"
-     * - возвращает количество дней (Int) либо null
-     * - учитывает "к 7 ноября", "2 числа", "7 ноября" через parseDaysUntilTargetDate
-     */
     private fun parseDaysFromText(textRaw: String): Int? {
         val text = textRaw.lowercase(Locale.getDefault())
 
-        // explicit "на 7 дней" / "за 7 дней" / "7 дней"
         val explicitDays = Regex("""\b(?:на|за)?\s*(\d{1,4})(?:-(\d{1,4}))?\s*(дн|дня|дней|дн\.)\b""", RegexOption.IGNORE_CASE).find(text)
         if (explicitDays != null) {
             val days = explicitDays.groupValues[1].toIntOrNull() ?: return null
             return days.coerceAtLeast(1)
         }
 
-        // "на неделю", "на 2 недели", "2 недели", "за неделю"
         val weeks = Regex("""\b(?:на|за)?\s*(\d{1,3})?\s*(недел|нед|недели|неделя)\b""", RegexOption.IGNORE_CASE).find(text)
         if (weeks != null) {
             val maybeNum = weeks.groupValues[1]
@@ -749,7 +626,6 @@ class RuFinAsActivity : AppCompatActivity() {
 
         if (Regex("""\b(?:на|за)?\s*недел(?:я|и|ь)\b""", RegexOption.IGNORE_CASE).containsMatchIn(text)) return 7
 
-        // day-only like "2 числа" or "числа 2" (supports optional whitespace)
         val dayOnly = Regex("""\b(\d{1,2})\s*(числ|числа|число)\b""", RegexOption.IGNORE_CASE).find(text)
         if (dayOnly != null) {
             val daysToDate = parseDaysUntilTargetDate(text)
@@ -762,9 +638,6 @@ class RuFinAsActivity : AppCompatActivity() {
         return null
     }
 
-    /**
-     * parseTimeToYears: (keeps previous behavior but uses parseDaysFromText)
-     */
     private fun parseTimeToYears(tail: String): Double {
         if (tail.isBlank()) return 1.0
         val lower = tail.lowercase(Locale.getDefault())
@@ -798,20 +671,10 @@ class RuFinAsActivity : AppCompatActivity() {
         return 1.0
     }
 
-    /**
-     * Parse expressions like:
-     * - "к 7 ноября", "7 ноября" -> days from today until that date (next occurrence)
-     * - "2 числа" -> nearest 2nd of month (next if passed)
-     *
-     * IMPORTANT: allow absence of whitespace between day and month (e.g. "7ноября").
-     * Also supports ISO date YYYY-MM-DD and DD.MM.YYYY
-     */
     private fun parseDaysUntilTargetDate(lowerInput: String): Double? {
         val today = LocalDate.now()
-
         val input = lowerInput.lowercase(Locale.getDefault())
 
-        // ISO date YYYY-MM-DD
         val iso = Regex("""\b(\d{4})-(\d{2})-(\d{2})\b""").find(input)
         if (iso != null) {
             try {
@@ -822,12 +685,9 @@ class RuFinAsActivity : AppCompatActivity() {
                 val delta = ChronoUnit.DAYS.between(today, target).toDouble()
                 return if (delta >= 0) delta else null
             } catch (e: Exception) {
-                // parse error — ignore and continue
-                Log.w(TAG, "Failed to parse ISO date", e)
             }
         }
 
-        // DD.MM.YYYY or DD.MM (assume next occurrence of day.month)
         val dotPattern = Regex("""\b(\d{1,2})\.(\d{1,2})(?:\.(\d{2,4}))?\b""").find(input)
         if (dotPattern != null) {
             try {
@@ -840,7 +700,6 @@ class RuFinAsActivity : AppCompatActivity() {
                 } else today.year
                 var target = LocalDate.of(year, month.coerceIn(1, 12), day.coerceIn(1, Month.of(month.coerceIn(1,12)).length(today.isLeapYear)))
                 if (!target.isAfter(today)) {
-                    // if year not specified, try next year
                     if (dotPattern.groupValues.getOrNull(3).isNullOrBlank()) {
                         target = target.plusYears(1)
                     }
@@ -848,11 +707,9 @@ class RuFinAsActivity : AppCompatActivity() {
                 val delta = ChronoUnit.DAYS.between(today, target).toDouble()
                 return if (delta >= 0) delta else null
             } catch (e: Exception) {
-                Log.w(TAG, "Failed to parse dot date", e)
             }
         }
 
-        // pattern "к 7 ноября" or "7 ноября" or "7ноября" (allow optional whitespace)
         val dayMonth = Regex("""\b(?:к\s*)?(\d{1,2})\s*(янв|фев|мар|апр|май|мая|июн|июл|авг|сен|окт|ноя|дек|января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)\b""", RegexOption.IGNORE_CASE).find(input)
         if (dayMonth != null) {
             val day = dayMonth.groupValues[1].toIntOrNull() ?: return null
@@ -880,7 +737,6 @@ class RuFinAsActivity : AppCompatActivity() {
             return delta
         }
 
-        // pattern "2 числа" or "числа 2" (supports optional whitespace)
         val dayOnly = Regex("""\b(\d{1,2})\s*(числ|числа|число)\b""", RegexOption.IGNORE_CASE).find(input)
         if (dayOnly != null) {
             val day = dayOnly.groupValues[1].toIntOrNull() ?: return null
@@ -949,9 +805,6 @@ class RuFinAsActivity : AppCompatActivity() {
         }
     }
 
-    // --------------------
-    // --- UI helpers (moved to end)
-    // --------------------
     private fun addUserLine(text: String) {
         val tv = TextView(this).apply {
             this.text = text
@@ -989,7 +842,6 @@ class RuFinAsActivity : AppCompatActivity() {
         scrollView.post { scrollView.fullScroll(ScrollView.FOCUS_DOWN) }
     }
 
-    // Utility: generate random bytes (unused but left)
     private fun randomBytes(size: Int): ByteArray {
         val rnd = SecureRandom()
         val arr = ByteArray(size)
@@ -998,45 +850,13 @@ class RuFinAsActivity : AppCompatActivity() {
     }
 }
 
-// --------------------
-// NEW GENERATION FIN ACTIVITY 2
-// Добавлен модуль с новыми финансовыми командами (V2).
-// Модуль спроектирован как "отдельная страница" в файле: все функции находятся в объекте RuFinanceV2.
-// Парсинг команд в этом блоке ориентирован на корни слов (проглатывание лишних символов / вариативность).
-// Возвращаемые строки — готовые к выводу в UI (уже локализованы в простом русском варианте, без getString).
-// --------------------
-
-/**
- * RuFinanceV2 — набор "чистых" (pure) функций и парсеров для новых финансовых команд.
- * Методы возвращают List<String> — готовые строки для отображения.
- *
- * Примеры команд, которые понимает handleCommand():
- *  - xirr  - ожидает пары amount@date (date ISO yyyy-MM-dd или dd.MM.yyyy)
- *      Пример: "xirr -10000@2023-01-01 3000@2023-12-01 8000@2024-06-01"
- *  - npv <ставка%> <пары amount@date или amount>
- *      Пример: "npv 10% -100000 30000@1y 40000@2y" (если указаны даты — используются даты)
- *  - pmt <сумма> <ставка%> <сроквгодах|Nмес> [annuity|diff]
- *      Пример: "pmt 150000 9% 15 лет annuity"
- *  - savingsgoal / накопить (улучшенная реализация)
- *      Пример: "накопить 300000 к 01.06.2026 под 7%"
- *
- * Замечание: модуль ориентирован на удобство тестирования и независимость от UI.
- */
-
 private object RuFinanceV2 {
 
-    // Low-priority finance v2 — расширенная версия. Если throws — вызывающий код должен продолжить работу.
-    // Public entrypoint
-    /**
-     * Попробовать распознать и обработать новую команду.
-     * Если команда не распознана — вернуть пустой список.
-     */
     fun handleCommand(cmdRaw: String): List<String> {
         val cmd = cmdRaw.trim()
         if (cmd.isEmpty()) return emptyList()
         val lower = cmd.lowercase()
 
-        // Используем "корни слов" для распознавания (проглатывание вариантов)
         return when {
             (lower.contains("xirr") || (lower.contains("ирр") && lower.contains("x"))) -> handleXirr(cmd)
             lower.contains("xirr") -> handleXirr(cmd)
@@ -1047,8 +867,6 @@ private object RuFinanceV2 {
             else -> emptyList()
         }
     }
-
-    // ---------- Handlers ----------
 
     private fun handleXirr(cmd: String): List<String> {
         val cf = parseCashflowsWithDates(cmd)
@@ -1076,12 +894,11 @@ private object RuFinanceV2 {
             val dailyRate = Math.pow(1.0 + result, 1.0 / 365.0) - 1.0
             val hourlyRate = Math.pow(1.0 + result, 1.0 / (365.0 * 24.0)) - 1.0
 
-            // Check NPV at found rate (should be ~0)
             val npvAt = npvWithDates(result, cf)
 
             return listOf(
                 "XIRR (годовая действительная): ${formatPercent(annualPct)}%",
-                "Эквивалент: месяц ${formatPercent(monthlyRate * 100)}%  — в день ${formatPercent(dailyRate * 100)}%  — в час ${formatPercent(hourlyRate * 100)}%",
+                "Эквивалент: месяц ${formatPercent(monthlyRate * 100)}% — в день ${formatPercent(dailyRate * 100)}% — в час ${formatPercent(hourlyRate * 100)}%",
                 "Период: ${"%.1f".format(spanDays)} дней (~${"%.3f".format(spanYears)} лет)",
                 "Сумма входящих (инвестиций): ${formatMoney(totalIn)} (отрицательные = вложено)",
                 "Сумма исходящих (возвратов): ${formatMoney(totalOut)}",
@@ -1108,7 +925,6 @@ private object RuFinanceV2 {
             val durationYears = ChronoUnit.DAYS.between(flowsWithDates.first().first, flowsWithDates.last().first).toDouble() / 365.0
             out.add("NPV (даты): ставка ${formatPercent(rate * 100)}% → ${formatMoney(npvVal)}")
             out.add("Сумма всех потоков: ${formatMoney(totalCash)}; период ~ ${"%.3f".format(durationYears)} лет")
-            // IRR estimate if possible
             val irr = try { xirr(flowsWithDates) } catch (_: Exception) { null }
             if (irr != null) {
                 out.add("Найденный IRR для тех же потоков: ${formatPercent(irr * 100)}% (годовой).")
@@ -1122,7 +938,6 @@ private object RuFinanceV2 {
             val total = amounts.sum()
             out.add("NPV (равные периоды): ставка ${formatPercent(rate * 100)}% → ${formatMoney(npvVal)}")
             out.add("Потоки: ${amounts.size} шт, сумма ${formatMoney(total)}")
-            // additional breakdown: PV of positive parts and PV of negative parts
             val pvPos = amounts.mapIndexed { i, a -> if (a > 0) a / Math.pow(1.0 + rate, i.toDouble()) else 0.0 }.sum()
             val pvNeg = amounts.mapIndexed { i, a -> if (a < 0) a / Math.pow(1.0 + rate, i.toDouble()) else 0.0 }.sum()
             out.add("PV положительных потоков: ${formatMoney(pvPos)}, PV отрицательных: ${formatMoney(pvNeg)}")
@@ -1158,7 +973,6 @@ private object RuFinanceV2 {
             lines.add("Первые 12 месяцев амортизации (платёж, проценты, погашение тела, остаток):")
             val amort = amortizationAnnuity(principal, percent, months, 12)
             lines.addAll(amort)
-            // add yearly summary (approx)
             val yearsToShow = Math.min(10, months / 12)
             if (yearsToShow >= 1) {
                 lines.add("Годовые итоги (приблизительно):")
@@ -1273,15 +1087,11 @@ private object RuFinanceV2 {
         return out
     }
 
-    // ---------- Data structures ----------
     private data class Debt(val name: String, var balance: Double, val annualRate: Double)
     private enum class Strategy { SNOWBALL, AVALANCHE }
     private data class DebtPlanStep(val paid: Double, val interest: Double, val remaining: Double)
     private data class DebtPlanResult(val months: Int, val totalInterest: Double, val steps: List<DebtPlanStep>)
 
-    // ---------- Utilities & helpers ----------
-
-    /** Проверяет принадлежность любого из "корней" слова (root) в тексте */
     private fun rootIn(textLower: String, vararg roots: String): Boolean {
         for (r in roots) {
             if (textLower.contains(r)) return true
@@ -1289,12 +1099,6 @@ private object RuFinanceV2 {
         return false
     }
 
-    // --- Parsing helpers ---
-
-    /**
-     * Парсер формата amount@date. Поддерживаем ISO yyyy-MM-dd и dd.MM.yyyy и dd-MM-yyyy.
-     * Возвращает null если не найдено.
-     */
     private fun parseCashflowsWithDates(cmd: String): List<Pair<LocalDate, Double>>? {
         val list = mutableListOf<Pair<LocalDate, Double>>()
         val pattern = Regex("""(-?\d+(?:[.,]\d+)?)\s*@\s*([0-9]{4}-[0-9]{2}-[0-9]{2}|[0-9]{1,2}\.[0-9]{1,2}\.[0-9]{4}|[0-9]{1,2}-[0-9]{1,2}-[0-9]{4})""")
@@ -1338,7 +1142,6 @@ private object RuFinanceV2 {
         }
     }
 
-    /** Простейший парсер чисел (без дат) — возвращает список сумм в порядке появления */
     private fun parseAmountsSimple(cmd: String): List<Double> {
         return Regex("""(-?\d+(?:[.,]\d+)?)""").findAll(cmd)
             .map { it.groupValues[1].replace(',', '.').toDoubleOrNull() }
@@ -1363,9 +1166,6 @@ private object RuFinanceV2 {
         return 1.0
     }
 
-    // --- Math / Finance helpers (improved) ---
-
-    // XIRR solver (Newton + bisection fallback) — оставлен как раньше
     private fun xirr(cashflows: List<Pair<LocalDate, Double>>): Double? {
         if (cashflows.size < 2) return null
         val baseDate = cashflows.first().first
@@ -1540,7 +1340,6 @@ private object RuFinanceV2 {
         return futureValue * r / factor
     }
 
-    // Debt plan simulator (simple model)
     private fun simulateDebtPlan(debtsInput: List<Debt>, monthlyPayment: Double, strategy: Strategy): DebtPlanResult {
         val debts = debtsInput.map { Debt(it.name, it.balance, it.annualRate) }.toMutableList()
         val steps = mutableListOf<DebtPlanStep>()
@@ -1576,7 +1375,6 @@ private object RuFinanceV2 {
         return DebtPlanResult(months, totalInterest, steps)
     }
 
-    // --- Formatting helpers ---
     private fun formatMoney(v: Double): String {
         return try {
             String.format(Locale.getDefault(), "%.2f", v)
@@ -1593,7 +1391,6 @@ private object RuFinanceV2 {
         }
     }
 
-    // lightweight parseDaysFromText (used by savings)
     private fun parseDaysFromText(textRaw: String): Int? {
         val text = textRaw.lowercase()
         val explicitDays = Regex("""\b(?:на|за)?\s*(\d{1,4})(?:-(\d{1,4}))?\s*(дн|дня|дней|дн\.)\b""", RegexOption.IGNORE_CASE).find(text)
