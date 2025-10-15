@@ -115,8 +115,16 @@ class ArrivalActivity : AppCompatActivity() {
                 finish()
                 return listOf(getString(R.string.redirect_main))
             }
-            cmd.contains("dig") || cmd.contains("циф") -> {
-                startActivity(Intent(this, MainActivity::class.java))
+            cmd.contains("dig") -> {
+                startActivity(Intent(this, com.nemesis.droidcrypt.Locale.EnDigAsActivity::class.java))
+                finish()
+                return listOf(getString(R.string.redirect_main))
+            }
+            else -> return listOf(getString(R.string.unknown_choice))
+            
+            }
+            cmd.contains("циф") -> {
+                startActivity(Intent(this, com.nemesis.droidcrypt.Locale.RuDigAsActivity::class.java))
                 finish()
                 return listOf(getString(R.string.redirect_main))
             }
