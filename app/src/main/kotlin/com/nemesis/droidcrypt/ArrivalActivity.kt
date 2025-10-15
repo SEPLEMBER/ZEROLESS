@@ -101,7 +101,7 @@ class ArrivalActivity : AppCompatActivity() {
                 return listOf(getString(R.string.redirect_russian_finances))
             }
             cmd.contains("phys") -> {
-                startActivity(Intent(this, MainActivity::class.java))
+                startActivity(Intent(this, com.nemesis.droidcrypt.locale.EnPhysAsActivity::class.java))
                 finish()
                 return listOf(getString(R.string.redirect_english_physics))
             }
