@@ -180,9 +180,9 @@ private object RuDigAsCommandsMain {
         val lower = cmd.lowercase(Locale.getDefault())
 
         // Storage command triggers
-        if (lower.contains("сколько места") ||
-            lower.contains("сколько займ") ||
-            lower.contains("сколько займёт") ||
+        if (lower.contains("места") ||
+            lower.contains("займё") ||
+            lower.contains("занять") ||
             lower.contains("хранилище") ||
             lower.contains("файлов") && (lower.contains("средн") || Regex("""\d+\s*(gb|гб|mb|мб|kb|кб|b|байт)""").containsMatchIn(lower))
         ) {
@@ -190,7 +190,7 @@ private object RuDigAsCommandsMain {
         }
 
         // Download time triggers
-        if (lower.contains("скачать") || lower.contains("за сколько скачать") || lower.contains("время скач") || lower.contains("download") || Regex("""\d+\s*(gb|гб|mb|мб|kb|кб|b|байт)""").containsMatchIn(lower) && Regex("""\d+\s*(mbit/s|mbps|мбит/с|мб/с|kbps|кбит/с|гбит/с|gbps|mb/s|мбит)""").containsMatchIn(lower)) {
+        if (lower.contains("скачать") || lower.contains("скачать") || lower.contains("время загрузки") || lower.contains("download") || Regex("""\d+\s*(gb|гб|mb|мб|kb|кб|b|байт)""").containsMatchIn(lower) && Regex("""\d+\s*(mbit/s|mbps|мбит/с|мб/с|kbps|кбит/с|гбит/с|gbps|mb/s|мбит)""").containsMatchIn(lower)) {
             return handleDownloadTime(cmd)
         }
 
@@ -480,13 +480,20 @@ private object RuDigAsCommandsV3 {
         // help
         if (lower.contains("справк") || lower == "help" || lower.contains("помощ")) {
             return listOf(
-                "Справка (RuDigAsCommandsV3 — цифровые утилиты):",
-                "1) Трафик: 'трафик 50 GB' или 'трафик 300GB за 30 дней' — выведет B/день/час/мин/сек и биты/с.",
-                "2) Планирование потоков: '10 потоков 1080p' или '3 streams 4k' — оценит требуемую пропускную способность.",
-                "Примеры:",
-                " - 'сколько места 2500 файлов по 3.5 MB' (RuDigAsCommandsMain)",
-                " - 'скачать 5 GB при 20 Mbps' (RuDigAsCommandsMain)",
-                " - 'image 1920x1080 32bit in 8 GB' (RuDigAsCommandsV2)"
+"Доступные команды:",
+                "1) Хранилище: Оценка объёма для N файлов среднего размера (с учётом копий/дисков).",
+                "   Пример: 'сколько места займёт 2500 файлов по 3.5 MB' или '2500 files avg 3.5MB copies 2 на 4 дисках'",
+                "2) Время загрузки: Расчёт времени скачивания для заданного размера и скорости.",
+                "   Пример: 'скачать 5 GB при 20 Mbps' или 'download 500MB at 10 MB/s'",
+                "3) Память изображения: Оценка объёма памяти для несжатого изображения по разрешению и глубине цвета.",
+                "   Пример: 'image 1920x1080 24bit' или 'изображение 3840x2160 rgba в 8 GB'",
+                "4) Размер таблицы/CSV: Оценка размера таблицы по строкам, столбцам и средней длине ячейки.",
+                "   Пример: 'csv 100000 rows 12 cols avg 20' или 'таблица 1000000 строк 10 столбцов средний 50'",
+                "5) Трафик: Лимит веб-трафика за период.",
+                "   Пример: 'трафик 50 GB' или 'трафик 30GB на 10 дней'",
+                "6) Планирование потоков: Оценка пропускной способности для N потоков (720p, 1080p, 4k).",
+                "   Пример: '10 потоков 1080p' или '3 streams 4k по 25 Mbps'",
+                "Введите команду или используйте 'help' для повторного вывода справки."
             )
         }
 
