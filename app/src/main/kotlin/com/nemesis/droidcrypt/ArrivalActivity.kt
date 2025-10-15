@@ -120,16 +120,15 @@ class ArrivalActivity : AppCompatActivity() {
                 finish()
                 return listOf(getString(R.string.redirect_main))
             }
-            else -> return listOf(getString(R.string.unknown_choice))
-            
-            }
-            cmd.contains("циф") -> {
+
+                cmd.contains("циф") -> {
                 startActivity(Intent(this, com.nemesis.droidcrypt.locale.RuDigAsActivity::class.java))
                 finish()
                 return listOf(getString(R.string.redirect_main))
             }
             else -> return listOf(getString(R.string.unknown_choice))
         }
+        
     }
 
     private fun addUserLine(text: String) {
