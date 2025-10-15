@@ -58,8 +58,7 @@ class EnFinAsActivity : AppCompatActivity() {
             )
         }
 
-        // NOTE: rename your layout resource accordingly or change this back.
-        setContentView(R.layout.activity_en_fin_as)
+        setContentView(R.layout.activity_ru_fin_as)
 
         messagesContainer = findViewById(R.id.messagesContainer)
         scrollView = findViewById(R.id.scrollView)
