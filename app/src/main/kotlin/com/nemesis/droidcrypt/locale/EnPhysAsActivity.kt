@@ -54,7 +54,7 @@ class EnPhysAsActivity : AppCompatActivity() {
             )
         }
 
-        setContentView(R.layout.activity_en_phys_as)
+        setContentView(R.layout.activity_ru_phys_as)
 
         messagesContainer = findViewById(R.id.messagesContainer)
         scrollView = findViewById(R.id.scrollView)
