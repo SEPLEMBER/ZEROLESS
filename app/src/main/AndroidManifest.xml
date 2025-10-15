@@ -96,6 +96,13 @@
             android:theme="@style/StreetFoodTheme"
             android:configChanges="orientation|screenSize" />
 
+                                <activity
+            android:name=".locale.EnPhysAsActivity"
+            android:exported="false"
+            android:parentActivityName=".ArrivalActivity"
+            android:theme="@style/VprTheme"
+            android:configChanges="orientation|screenSize" />
+
                         <activity
             android:name=".locale.RuPhysAsActivity"
             android:exported="false"
