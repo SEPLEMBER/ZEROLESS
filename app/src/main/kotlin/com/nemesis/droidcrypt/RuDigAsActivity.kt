@@ -224,7 +224,7 @@ private object RuDigAsCommandsMain {
         val avgBytes = sizeMatch?.let {
             val num = it.groupValues[1].replace(',', '.').toDoubleOrNull() ?: 0.0
             val unit = it.groupValues[2].lowercase(Locale.getDefault())
-            PhysUtils.parseBytes(num, unit)
+            RuDigitUtils.parseBytes(num, unit)
         }
 
         if (finalCount == null || avgBytes == null) {
@@ -243,18 +243,18 @@ private object RuDigAsCommandsMain {
 
         val lines = mutableListOf<String>()
         lines.add("Файлов: ${"%.0f".format(finalCount)} (копий: $copies)")
-        lines.add("Средний размер файла: ${PhysUtils.formatBytesDecimalDouble(avgBytes)}")
-        lines.add("Итого (с учётом копий): ${PhysUtils.formatBytesDecimal(totalBytes)} (${totalBytes.toLong()} bytes)")
+        lines.add("Средний размер файла: ${RuDigitUtils.formatBytesDecimalDouble(avgBytes)}")
+        lines.add("Итого (с учётом копий): ${RuDigitUtils.formatBytesDecimal(totalBytes)} (${totalBytes.toLong()} bytes)")
 
         if (perDisk != null) {
-            lines.add("Распределение на $disksNum дисках: ≈ ${PhysUtils.formatBytesDecimal(perDisk)} на диск")
+            lines.add("Распределение на $disksNum дисках: ≈ ${RuDigitUtils.formatBytesDecimal(perDisk)} на диск")
         }
 
         // helpful extras: how many files per common storage sizes
         val common = listOf(1_000_000_000.0 /*1GB*/, 10_000_000_000.0 /*10GB*/, 100_000_000_000.0 /*100GB*/, 1_000_000_000_000.0 /*1TB*/)
         val fits = common.map { cap ->
             val n = floor(cap / avgBytes).toLong()
-            "${PhysUtils.formatBytesDecimal(cap)} → ≈ $n файлов"
+            "${RuDigitUtils.formatBytesDecimal(cap)} → ≈ $n файлов"
         }
         lines.add("Примеры вместимости:")
         fits.forEach { lines.add(" - $it") }
@@ -278,7 +278,7 @@ private object RuDigAsCommandsMain {
         val bytes = sizeMatch?.let {
             val num = it.groupValues[1].replace(',', '.').toDoubleOrNull() ?: return@let null
             val unit = it.groupValues[2].lowercase(Locale.getDefault())
-            PhysUtils.parseBytes(num, unit)
+            RuDigitUtils.parseBytes(num, unit)
         }
 
         // parse speed: support Mbps, Kbps, MB/s, KB/s, Gbps, мбит/с, мб/с
@@ -302,7 +302,7 @@ private object RuDigAsCommandsMain {
         }
 
         val lines = mutableListOf<String>()
-        lines.add("Размер: ${PhysUtils.formatBytesDecimalDouble(bytes)} (${bytes.toLong()} bytes)")
+        lines.add("Размер: ${RuDigitUtils.formatBytesDecimalDouble(bytes)} (${bytes.toLong()} bytes)")
 
         if (bitsPerSec == null) {
             // if no speed provided, show typical times for common links
@@ -315,18 +315,18 @@ private object RuDigAsCommandsMain {
             lines.add("Скорость не указана — примерные времена при типичных скоростях:")
             for ((name, bps) in sampleSpeeds) {
                 val sec = (bytes * 8.0) / bps
-                lines.add(" - $name: ${PhysUtils.formatSecondsNice(sec)} (~${PhysUtils.prettyDurationHMS(sec)})")
+                lines.add(" - $name: ${RuDigitUtils.formatSecondsNice(sec)} (~${RuDigitUtils.prettyDurationHMS(sec)})")
             }
             lines.add("Укажите скорость: 'при 20 Mbps' или 'at 10 MB/s'")
             return lines
         } else {
             val seconds = (bytes * 8.0) / bitsPerSec
-            lines.add("Скорость канала: ${PhysUtils.formatBitsPerSecond(bitsPerSec)}")
-            lines.add("Ожидаемое время: ${PhysUtils.formatSecondsNice(seconds)}")
-            lines.add("Разбивка: ${PhysUtils.prettyDurationHMS(seconds)}")
+            lines.add("Скорость канала: ${RuDigitUtils.formatBitsPerSecond(bitsPerSec)}")
+            lines.add("Ожидаемое время: ${RuDigitUtils.formatSecondsNice(seconds)}")
+            lines.add("Разбивка: ${RuDigitUtils.prettyDurationHMS(seconds)}")
             // show effective throughput in bytes/s
             val bytesPerSec = bitsPerSec / 8.0
-            lines.add("Эффективная скорость: ${PhysUtils.formatBytesDecimalDouble(bytesPerSec)}/s")
+            lines.add("Эффективная скорость: ${RuDigitUtils.formatBytesDecimalDouble(bytesPerSec)}/s")
             return lines
         }
     }
@@ -398,7 +398,7 @@ private object RuDigAsCommandsV2 {
         val lines = mutableListOf<String>()
         lines.add("Разрешение: ${w}×${h}")
         lines.add("Глубина цвета: ${bpp} бит/пикс")
-        lines.add("Не сжатый объём: ${PhysUtils.formatBytesDecimal(bytes)} (${bytes.toLong()} bytes)")
+        lines.add("Не сжатый объём: ${RuDigitUtils.formatBytesDecimal(bytes)} (${bytes.toLong()} bytes)")
 
         // if user specified a RAM size, compute how many such images fit
         val ramRe = Regex("""в\s*(-?\d+(?:[.,]\d+)?)\s*(tb|тб|gb|гб|mb|мб|kb|кб|b|байт)\b""", RegexOption.IGNORE_CASE)
@@ -407,9 +407,9 @@ private object RuDigAsCommandsV2 {
             val num = ramMatch.groupValues[1].replace(',', '.').toDoubleOrNull()
             val unit = ramMatch.groupValues[2].lowercase(Locale.getDefault())
             if (num != null) {
-                val ramBytes = PhysUtils.parseBytes(num, unit)
+                val ramBytes = RuDigitUtils.parseBytes(num, unit)
                 val fit = floor(ramBytes / bytes).toLong()
-                lines.add("В указанной памяти (${PhysUtils.formatBytesDecimal(ramBytes)}) помещается ≈ $fit таких изображений")
+                lines.add("В указанной памяти (${RuDigitUtils.formatBytesDecimal(ramBytes)}) помещается ≈ $fit таких изображений")
             }
         }
 
@@ -449,7 +449,7 @@ private object RuDigAsCommandsV2 {
         lines.add("Оценка CSV / таблицы:")
         lines.add("Строк: $rows, Столбцов: $cols, Средняя длина поля: ${"%.1f".format(avgChars)} символов")
         lines.add("Примерный размер строки: ${"%.1f".format(bytesPerRow)} байт")
-        lines.add("Оценочный общий размер: ${PhysUtils.formatBytesDecimal(totalBytes)} (${totalBytes.toLong()} bytes)")
+        lines.add("Оценочный общий размер: ${RuDigitUtils.formatBytesDecimal(totalBytes)} (${totalBytes.toLong()} bytes)")
         lines.add("Примечание: реальный размер зависит от разделителя, кавычек и кодировки (UTF-8/UTF-16).")
         return lines
     }
@@ -502,30 +502,30 @@ private object RuDigAsCommandsV3 {
         if (m == null) return listOf("Использование трафика: укажите объём, например 'трафик 50 GB' или 'трафик 300GB за 30 дней'")
         val numStr = m.groupValues[1].replace(',', '.')
         val unit = m.groupValues.getOrNull(2) ?: ""
-        val bytes = PhysUtils.parseBytes(numStr.toDouble(), unit)
+        val bytes = RuDigitUtils.parseBytes(numStr.toDouble(), unit)
 
-        val days = PhysUtils.parseDaysFromText(cmdRaw)
+        val days = RuDigitUtils.parseDaysFromText(cmdRaw)
         if (days != null) {
             val bPerDay = bytes / days.toDouble()
             val bPerHour = bPerDay / 24.0
             val bPerMin = bPerHour / 60.0
             val bPerSec = bPerMin / 60.0
             return listOf(
-                "Ввод: ${m.value.trim()} → ${PhysUtils.formatBytesDecimal(bytes)}",
+                "Ввод: ${m.value.trim()} → ${RuDigitUtils.formatBytesDecimal(bytes)}",
                 "Период: $days дней",
-                "В день: ${PhysUtils.formatBytesDecimalDouble(bPerDay)}",
-                "В час: ${PhysUtils.formatBytesDecimalDouble(bPerHour)}",
-                "В мин: ${PhysUtils.formatBytesDecimalDouble(bPerMin)}",
-                "В сек (бит/с): ${PhysUtils.formatBitsPerSecond(bPerSec)}"
+                "В день: ${RuDigitUtils.formatBytesDecimalDouble(bPerDay)}",
+                "В час: ${RuDigitUtils.formatBytesDecimalDouble(bPerHour)}",
+                "В мин: ${RuDigitUtils.formatBytesDecimalDouble(bPerMin)}",
+                "В сек (бит/с): ${RuDigitUtils.formatBitsPerSecond(bPerSec)}"
             )
         } else {
-            val rates = PhysUtils.bytesPerMonthToRates(bytes)
+            val rates = RuDigitUtils.bytesPerMonthToRates(bytes)
             return listOf(
-                "Ввод: ${m.value.trim()} → ${PhysUtils.formatBytesDecimal(bytes)}",
-                "В день: ${PhysUtils.formatBytesDecimalDouble(rates["B/day"] ?: 0.0)}",
-                "В час: ${PhysUtils.formatBytesDecimalDouble(rates["B/hour"] ?: 0.0)}",
-                "В мин: ${PhysUtils.formatBytesDecimalDouble(rates["B/min"] ?: 0.0)}",
-                "В сек (бит/с): ${PhysUtils.formatBitsPerSecond(rates["B/s"] ?: 0.0)}"
+                "Ввод: ${m.value.trim()} → ${RuDigitUtils.formatBytesDecimal(bytes)}",
+                "В день: ${RuDigitUtils.formatBytesDecimalDouble(rates["B/day"] ?: 0.0)}",
+                "В час: ${RuDigitUtils.formatBytesDecimalDouble(rates["B/hour"] ?: 0.0)}",
+                "В мин: ${RuDigitUtils.formatBytesDecimalDouble(rates["B/min"] ?: 0.0)}",
+                "В сек (бит/с): ${RuDigitUtils.formatBitsPerSecond(rates["B/s"] ?: 0.0)}"
             )
         }
     }
@@ -583,12 +583,12 @@ private object RuDigAsCommandsV3 {
         val perBps = perStreamBps ?: (quality?.let { typicalMap[it] } ?: 5_000_000.0)
         val totalBps = perBps * count
         lines.add("Потоков: $count")
-        lines.add("Оценка на поток: ${PhysUtils.formatBitsPerSecond(perBps)}")
-        lines.add("Итого нужно: ${PhysUtils.formatBitsPerSecond(totalBps)}")
-        lines.add("Рекомендуется добавить запас 20%: ${PhysUtils.formatBitsPerSecond(totalBps * 1.2)}")
+        lines.add("Оценка на поток: ${RuDigitUtils.formatBitsPerSecond(perBps)}")
+        lines.add("Итого нужно: ${RuDigitUtils.formatBitsPerSecond(totalBps)}")
+        lines.add("Рекомендуется добавить запас 20%: ${RuDigitUtils.formatBitsPerSecond(totalBps * 1.2)}")
         // monthly transfer if stream runs 24/7
         val monthBytes = totalBps / 8.0 * 3600.0 * 24.0 * 30.0
-        lines.add("Если стримы идут 24/7 — ≈ ${PhysUtils.formatBytesDecimal(monthBytes)} в месяц")
+        lines.add("Если стримы идут 24/7 — ≈ ${RuDigitUtils.formatBytesDecimal(monthBytes)} в месяц")
         return lines
     }
 }
