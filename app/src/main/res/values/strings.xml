@@ -26,7 +26,8 @@
     <string name="avatar">Аватар</string>
     <string name="open_settings">Открыть настройки</string>
     <string name="user_label">Пользователь</string>
-    <string name="setup">Установить</string>
+    <string name="setupfold">Установить</string>
+    <string name="setup">Счетовод</string>
     <string name="connecting">Подключение...</string>
     <string name="choose_template_version">Выберите версию шаблонов:</string>
     <string name="select_folder_instruction">Выберите папку для сохранения шаблонов</string>
