@@ -29,6 +29,7 @@ import java.time.Month
 import java.time.temporal.ChronoUnit
 import java.util.Locale
 import kotlin.math.*
+import com.nemesis.droidcrypt.R
 
 class RuDigAsActivity : AppCompatActivity() {
 
