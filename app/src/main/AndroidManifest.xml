@@ -1,8 +1,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools"
-    package="com.nemesis.droidcrypt">
+    package="app.pawstribe.assistant">
 
-    <!-- Storage (только для API <= 30) -->
     <uses-permission
         android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="30"
@@ -13,11 +12,9 @@
         tools:ignore="ScopedStorage" />
 
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-    <!-- Bluetooth (старые разрешения для совместимости до API 30) -->
     <uses-permission android:name="android.permission.BLUETOOTH" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
 
-    <!-- Bluetooth (новые разрешения начиная с API 31 / Android 12) -->
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <uses-permission
         android:name="android.permission.BLUETOOTH_SCAN"
@@ -32,7 +29,6 @@
         android:theme="@style/Theme.AppCompat.Light.NoActionBar"
         tools:targetApi="34">
 
-        <!-- MainActivity -->
         <activity
         android:name=".MainActivity"
         android:theme="@style/AppTheme"
@@ -43,14 +39,12 @@
     </intent-filter>
         </activity>
 
-        <!-- ChatActivity -->
         <activity
             android:name=".ChatActivity"
             android:exported="false"
             android:parentActivityName=".MainActivity"
             android:configChanges="orientation|screenSize" />
 
-        <!-- SettingsActivity -->
         <activity
             android:name=".SettingsActivity"
             android:exported="false"
@@ -58,14 +52,12 @@
             android:theme="@style/SettingsTheme"
             android:configChanges="orientation|screenSize" />
 
-        <!-- PostsActivity -->
         <activity
             android:name=".PostsActivity"
             android:exported="false"
             android:parentActivityName=".MainActivity"
             android:configChanges="orientation|screenSize" />
 
-        <!-- SplashActivity -->
         <activity
             android:name=".SplashActivity"
             android:exported="false"
@@ -73,7 +65,6 @@
             android:theme="@style/SplashTheme"
             android:configChanges="orientation|screenSize" />
 
-        <!-- SetupActivity -->
         <activity
             android:name=".SetupActivity"
             android:exported="false"
@@ -81,7 +72,6 @@
             android:theme="@style/SetupTheme"
             android:configChanges="orientation|screenSize" />
 
-                <!-- VprActivity -->
         <activity
             android:name=".locale.RuFinAsActivity"
             android:exported="false"
@@ -89,7 +79,6 @@
             android:theme="@style/VprTheme"
             android:configChanges="orientation|screenSize" />
 
-                <!-- VprActivity -->
         <activity
             android:name=".locale.EnFinAsActivity"
             android:exported="false"
