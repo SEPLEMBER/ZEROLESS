@@ -1,3 +1,15 @@
+if (filename == "base.txt" && l.startsWith(":") && l.endsWith(":")) {
+    val contextLine = l.substring(1, l.length - 1)
+    if (contextLine.contains("=")) {
+        val parts = contextLine.split("=", limit = 2)
+        val keyword = parts[0].trim()
+        val contextFile = parts[1].trim()
+        val keyCanon = canonicalKeyFromTextStatic(keyword, synonymsMap, stopwords)
+        if (keyCanon.isNotEmpty()) contextMap[keyCanon] = contextFile
+    }
+}
+
+
 package app.pawstribe.assistant
 
 import android.animation.ObjectAnimator
@@ -1131,6 +1143,54 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                                 }
                             }
                             if (filename == "base.txt" && l.startsWith(":" ) && l.endsWith(":")) {
+                                val contextLine = l.substring(1, l.length - 1)
+                                if (contextLine.contains("=")) {
+                                    val parts = contextLine.split("=", limit = 2)
+                                    if (parts.size == 2) {
+                                        val keyword = parts[0].trim()
+                                        val contextFile = parts[1].trim()
+                                        if (keyword.isNotEmpty() && contextFile.isNotEmpty()) {
+                                            val keyCanon = canonicalKeyFromTextStatic(keyword, synonymsMap, stopwords)
+                                            if (keyCanon.isNotEmpty()) contextMap[keyCanon] = contextFile
+                                        }
+                                    }
+                           if (filename == "core1.txt" && l.startsWith(":" ) && l.endsWith(":")) {
+                                val contextLine = l.substring(1, l.length - 1)
+                                if (contextLine.contains("=")) {
+                                    val parts = contextLine.split("=", limit = 2)
+                                    if (parts.size == 2) {
+                                        val keyword = parts[0].trim()
+                                        val contextFile = parts[1].trim()
+                                        if (keyword.isNotEmpty() && contextFile.isNotEmpty()) {
+                                            val keyCanon = canonicalKeyFromTextStatic(keyword, synonymsMap, stopwords)
+                                            if (keyCanon.isNotEmpty()) contextMap[keyCanon] = contextFile
+                                        }
+                                    }
+                           if (filename == "core2.txt" && l.startsWith(":" ) && l.endsWith(":")) {
+                                val contextLine = l.substring(1, l.length - 1)
+                                if (contextLine.contains("=")) {
+                                    val parts = contextLine.split("=", limit = 2)
+                                    if (parts.size == 2) {
+                                        val keyword = parts[0].trim()
+                                        val contextFile = parts[1].trim()
+                                        if (keyword.isNotEmpty() && contextFile.isNotEmpty()) {
+                                            val keyCanon = canonicalKeyFromTextStatic(keyword, synonymsMap, stopwords)
+                                            if (keyCanon.isNotEmpty()) contextMap[keyCanon] = contextFile
+                                        }
+                                    }
+                           if (filename == "cybersecurity.txt" && l.startsWith(":" ) && l.endsWith(":")) {
+                                val contextLine = l.substring(1, l.length - 1)
+                                if (contextLine.contains("=")) {
+                                    val parts = contextLine.split("=", limit = 2)
+                                    if (parts.size == 2) {
+                                        val keyword = parts[0].trim()
+                                        val contextFile = parts[1].trim()
+                                        if (keyword.isNotEmpty() && contextFile.isNotEmpty()) {
+                                            val keyCanon = canonicalKeyFromTextStatic(keyword, synonymsMap, stopwords)
+                                            if (keyCanon.isNotEmpty()) contextMap[keyCanon] = contextFile
+                                        }
+                                    }
+                           if (filename == "rex.txt" && l.startsWith(":" ) && l.endsWith(":")) {
                                 val contextLine = l.substring(1, l.length - 1)
                                 if (contextLine.contains("=")) {
                                     val parts = contextLine.split("=", limit = 2)
