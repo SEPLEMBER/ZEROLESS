@@ -1,4 +1,4 @@
-package com.nemesis.droidcrypt
+package app.pawstribe.assistant
 
 import android.content.Intent
 import android.graphics.Typeface
@@ -91,22 +91,22 @@ class ArrivalActivity : AppCompatActivity() {
 
         when {
             cmd.contains("finance") -> {
-                startActivity(Intent(this, com.nemesis.droidcrypt.locale.EnFinAsActivity::class.java))
+                startActivity(Intent(this, app.pawstribe.assistant.locale.EnFinAsActivity::class.java))
                 finish()
                 return listOf(getString(R.string.redirect_english_finances))
             }
             cmd.contains("финансы") -> {
-                startActivity(Intent(this, com.nemesis.droidcrypt.locale.RuFinAsActivity::class.java))
+                startActivity(Intent(this, app.pawstribe.assistant.locale.RuFinAsActivity::class.java))
                 finish()
                 return listOf(getString(R.string.redirect_russian_finances))
             }
             cmd.contains("phys") -> {
-                startActivity(Intent(this, com.nemesis.droidcrypt.locale.EnPhysAsActivity::class.java))
+                startActivity(Intent(this, app.pawstribe.assistant.locale.EnPhysAsActivity::class.java))
                 finish()
                 return listOf(getString(R.string.redirect_english_physics))
             }
             cmd.contains("физи") -> {
-                startActivity(Intent(this, com.nemesis.droidcrypt.locale.RuPhysAsActivity::class.java))
+                startActivity(Intent(this, app.pawstribe.assistant.locale.RuPhysAsActivity::class.java))
                 finish()
                 return listOf(getString(R.string.redirect_russian_physics))
             }
