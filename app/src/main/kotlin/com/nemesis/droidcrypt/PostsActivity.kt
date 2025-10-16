@@ -1,4 +1,4 @@
-package com.nemesis.droidcrypt
+package app.pawstribe.assistant
 
 import android.os.Bundle
 import androidx.appcompat.app.AppCompatActivity
