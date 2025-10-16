@@ -1,12 +1,12 @@
-package com.nemesis.droidcrypt
+package app.pawstribe.assistant
 
 import android.content.Context
 import android.net.Uri
 import androidx.documentfile.provider.DocumentFile
-import com.nemesis.droidcrypt.Engine
-import com.nemesis.droidcrypt.MemoryManager
+import app.pawstribe.assistant.Engine
+import app.pawstribe.assistant.MemoryManager
 import java.io.InputStreamReader
-import com.nemesis.droidcrypt.R
+import app.pawstribe.assistant.R
 import java.util.Locale
 
 object ChatCore {
