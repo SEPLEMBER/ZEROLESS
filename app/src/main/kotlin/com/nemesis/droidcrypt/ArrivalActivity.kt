@@ -111,7 +111,7 @@ class ArrivalActivity : AppCompatActivity() {
                 return listOf(getString(R.string.redirect_russian_physics))
             }
             cmd.contains("other") || cmd.contains("другое") -> {
-                startActivity(Intent(this, MainActivity::class.java))
+                startActivity(Intent(this, PostsActivity::class.java))
                 finish()
                 return listOf(getString(R.string.redirect_main))
             }
