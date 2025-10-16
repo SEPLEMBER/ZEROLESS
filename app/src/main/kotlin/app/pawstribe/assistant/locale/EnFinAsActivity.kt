@@ -1,4 +1,4 @@
-package com.nemesis.droidcrypt.locale
+package app.pawstribe.assistant.locale
 
 import android.content.Intent
 import android.graphics.Typeface
@@ -30,7 +30,7 @@ import java.time.Month
 import java.time.temporal.ChronoUnit
 import java.util.Locale
 import kotlin.math.pow
-import com.nemesis.droidcrypt.R
+import app.pawstribe.assistant.R
 
 class EnFinAsActivity : AppCompatActivity() {
 
