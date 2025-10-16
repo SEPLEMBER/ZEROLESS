@@ -96,13 +96,6 @@
             android:parentActivityName=".ArrivalActivity"
             android:theme="@style/VprTheme"
             android:configChanges="orientation|screenSize" />
-        
-                <activity
-            android:name=".StreetFoodActivity"
-            android:exported="false"
-            android:parentActivityName=".EggActivity"
-            android:theme="@style/StreetFoodTheme"
-            android:configChanges="orientation|screenSize" />
 
                                 <activity
             android:name=".locale.EnPhysAsActivity"
