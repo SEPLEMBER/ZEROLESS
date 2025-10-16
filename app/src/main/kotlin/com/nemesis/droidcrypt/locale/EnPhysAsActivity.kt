@@ -1,4 +1,4 @@
-package com.nemesis.droidcrypt.locale
+package app.pawstribe.assistant.locale
 
 import android.content.Intent
 import android.graphics.Typeface
@@ -26,7 +26,7 @@ import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 import kotlin.math.*
-import com.nemesis.droidcrypt.R
+import app.pawstribe.assistant.R
 
 class EnPhysAsActivity : AppCompatActivity() {
 
