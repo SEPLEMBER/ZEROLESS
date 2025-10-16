@@ -1,4 +1,4 @@
-package com.nemesis.droidcrypt
+package app.pawstribe.assistant
 
 import android.content.Intent
 import android.content.SharedPreferences
@@ -23,7 +23,7 @@ class SettingsActivity : AppCompatActivity() {
 
     private var folderUri: Uri? = null
     private lateinit var selectFolderButton: MaterialButton
-    private lateinit var setupButton: MaterialButton          // <-- new
+    private lateinit var setupButton: MaterialButton
     private lateinit var backButton: MaterialButton
     private lateinit var disableScreenshotsSwitch: SwitchMaterial
     private lateinit var prefs: SharedPreferences
@@ -59,7 +59,7 @@ class SettingsActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_settings)
 
-        // Скрытие статус-бара
+        // hide statusbar
         window.setFlags(
             WindowManager.LayoutParams.FLAG_FULLSCREEN,
             WindowManager.LayoutParams.FLAG_FULLSCREEN
@@ -67,11 +67,10 @@ class SettingsActivity : AppCompatActivity() {
 
         prefs = getSharedPreferences("PawsTribePrefs", MODE_PRIVATE)
         selectFolderButton = findViewById(R.id.selectFolderButton)
-        setupButton = findViewById(R.id.setupButton)          // <-- new
+        setupButton = findViewById(R.id.setupButton)
         backButton = findViewById(R.id.backButton)
         disableScreenshotsSwitch = findViewById(R.id.disableScreenshotsSwitch)
 
-        // Применяем FLAG_SECURE, если скриншоты запрещены
         if (prefs.getBoolean(PREF_KEY_DISABLE_SCREENSHOTS, false)) {
             window.setFlags(
                 WindowManager.LayoutParams.FLAG_SECURE,
@@ -79,7 +78,6 @@ class SettingsActivity : AppCompatActivity() {
             )
         }
 
-        // Восстанавливаем настройки
         disableScreenshotsSwitch.isChecked = prefs.getBoolean(PREF_KEY_DISABLE_SCREENSHOTS, false)
         prefs.getString(PREF_KEY_FOLDER_URI, null)?.let { saved: String ->
             try {
@@ -95,7 +93,7 @@ class SettingsActivity : AppCompatActivity() {
 
         selectFolderButton.setOnClickListener { openFolderPicker() }
 
-        // new: переход в SetupActivity
+        // launch SetupActivity
         setupButton.setOnClickListener {
             val intent = Intent(this, SetupActivity::class.java)
             startActivity(intent)
