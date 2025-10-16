@@ -1,15 +1,3 @@
-if (filename == "base.txt" && l.startsWith(":") && l.endsWith(":")) {
-    val contextLine = l.substring(1, l.length - 1)
-    if (contextLine.contains("=")) {
-        val parts = contextLine.split("=", limit = 2)
-        val keyword = parts[0].trim()
-        val contextFile = parts[1].trim()
-        val keyCanon = canonicalKeyFromTextStatic(keyword, synonymsMap, stopwords)
-        if (keyCanon.isNotEmpty()) contextMap[keyCanon] = contextFile
-    }
-}
-
-
 package app.pawstribe.assistant
 
 import android.animation.ObjectAnimator
