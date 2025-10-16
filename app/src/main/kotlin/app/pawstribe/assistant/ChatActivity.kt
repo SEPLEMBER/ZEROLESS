@@ -212,11 +212,8 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         tts = TextToSpeech(this, this)
 
-        queryInput.setOnItemClickListener { parent, _, position, _ ->
-            val selected = parent.getItemAtPosition(position) as String
-            queryInput.setText(selected)
-            processUserQuery(selected)
-        }
+        // Autocomplete item click handling removed because autocomplete is disabled.
+        // queryInput.setOnItemClickListener { ... } was intentionally removed.
 
         idleCheckRunnable = object : Runnable {
             override fun run() {
@@ -1233,27 +1230,18 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     }
 
     private fun updateAutoComplete() {
-        val suggestions = mutableListOf<String>()
-        suggestions.addAll(templatesMap.keys)
-        for (s in ChatCore.fallbackReplies) {
-            val low = Engine.normalizeText(s)
-            if (!suggestions.contains(low)) suggestions.add(low)
-        }
-        if (adapter == null) {
-            adapter = object : ArrayAdapter<String>(this, android.R.layout.simple_dropdown_item_1line, suggestions) {
-                override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
-                    val v = super.getView(position, convertView, parent) as TextView
-                    v.setTextColor(Color.WHITE)
-                    return v
-                }
-            }
-            queryInput.setAdapter(adapter)
-            queryInput.threshold = 1
-            queryInput.setDropDownBackgroundDrawable(ColorDrawable(Color.parseColor("#80000000")))
-        } else {
-            adapter?.clear()
-            adapter?.addAll(suggestions)
-            adapter?.notifyDataSetChanged()
+        // Autocomplete / dropdown suggestions disabled per request.
+        // Ensure no adapter is attached and the threshold is set high to prevent suggestions.
+        adapter = null
+        runOnUiThread {
+            try {
+                queryInput.setAdapter(null)
+                queryInput.threshold = Int.MAX_VALUE
+                // Make dropdown invisible / transparent if any attempt is made to show it.
+                queryInput.setDropDownBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+                // Also disable long-click suggestion popup (if any)
+                queryInput.isLongClickable = true
+            } catch (_: Exception) { }
         }
     }
 
@@ -1324,6 +1312,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             dialogHandler.postDelayed(it, 500000)
         }
     }
+}
 
     // ---------- STARTUP OVERLAY IMPLEMENTATION ----------
     private fun showStartupOverlay() {
