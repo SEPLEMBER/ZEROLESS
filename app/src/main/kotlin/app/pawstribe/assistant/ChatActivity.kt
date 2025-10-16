@@ -1404,4 +1404,5 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             startupOverlay = null
         }
     }
+}
     // ---------- END STARTUP OVERLAY IMPLEMENTATION ----------
