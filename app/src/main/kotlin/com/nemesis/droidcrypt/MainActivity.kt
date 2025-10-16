@@ -1,4 +1,4 @@
-package com.nemesis.droidcrypt
+package app.pawstribe.assistant
 
 import android.content.Intent
 import android.net.Uri
@@ -27,16 +27,16 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        // Скрытие статус-бара
+        // hide statusbar
         window.setFlags(
             android.view.WindowManager.LayoutParams.FLAG_FULLSCREEN,
             android.view.WindowManager.LayoutParams.FLAG_FULLSCREEN
         )
 
-        // Отображение процента батареи
+        //visibl battery indicator
         updateBatteryLevel()
 
-        // Случайное приветствие с эффектом печатания
+        // random reply with typing effect
         val greetings = resources.getStringArray(R.array.greetings)
         val randomGreeting = greetings[Random.nextInt(greetings.size)]
         animateGreeting(randomGreeting)
