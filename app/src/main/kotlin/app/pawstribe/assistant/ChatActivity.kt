@@ -1344,7 +1344,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 }
 
                 val tv = TextView(this).apply {
-                    text = "Connecting..." // hardcoded per request
+                    text = "initialization..." // hardcoded per request
                     textSize = 20f
                     typeface = Typeface.DEFAULT_BOLD
                     gravity = Gravity.CENTER
@@ -1365,10 +1365,10 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 root.addView(overlay)
             }
 
-            // Schedule hide after 3 seconds on the main dispatcher
+            // Schedule hide after 5 seconds on the main dispatcher
             lifecycleScope.launch(Dispatchers.Main) {
                 try {
-                    delay(3000)
+                    delay(5000)
                     // Fade out and then hide/remove
                     startupOverlay?.animate()?.alpha(0f)?.setDuration(300)?.withEndAction {
                         try {
