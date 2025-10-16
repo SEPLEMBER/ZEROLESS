@@ -1312,7 +1312,6 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             dialogHandler.postDelayed(it, 500000)
         }
     }
-}
 
     // ---------- STARTUP OVERLAY IMPLEMENTATION ----------
     private fun showStartupOverlay() {
@@ -1406,4 +1405,3 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
     }
     // ---------- END STARTUP OVERLAY IMPLEMENTATION ----------
-}
