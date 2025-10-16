@@ -65,16 +65,16 @@
     <string name="date_day_response">Сегодня %1$s, %2$s.</string>
 
     <!-- Антиспам -->
-    <string name="antispam_1">Ты надоел, давай что-то новенького!</string>
-    <string name="antispam_2">Спамить нехорошо, попробуй другой запрос.</string>
-    <string name="antispam_3">Я устал от твоих повторений!</string>
-    <string name="antispam_4">Хватит спамить, придумай что-то интересное.</string>
-    <string name="antispam_5">Эй, не зацикливайся, попробуй другой вопрос!</string>
-    <string name="antispam_6">Повторяешь одно и то же? Давай разнообразие!</string>
-    <string name="antispam_7">Слишком много повторов, я же не робот... ну, почти.</string>
+    <string name="antispam_1">Ты надоел, давай что-нибудь новенького!</string>
+    <string name="antispam_2">Спамить нехорошо!</string>
+    <string name="antispam_3">Я устал от повторений!</string>
+    <string name="antispam_4">Придумай что-то более интересное.</string>
+    <string name="antispam_5">Эй, не зацикливайся на этой ерунде, чувак!</string>
+    <string name="antispam_6">Давай разнообразие, повторяшка!</string>
+    <string name="antispam_7">Слишком много суеты, я же не робот... ну, почти.</string>
     <string name="antispam_8">Не спамь, пожалуйста, задай новый вопрос!</string>
-    <string name="antispam_9">Пять раз одно и то же? Попробуй что-то другое.</string>
-    <string name="antispam_10">Я уже ответил, давай новый запрос!</string>
+    <string name="antispam_9">Пять раз одно и то же? Да ты гений! Попробуй что-нибудь другое.</string>
+    <string name="antispam_10">У меня уже процессор плавится от повторений. А, ой, это твой.</string>
 
     <!-- Сообщения о батарее -->
     <string name="battery_urgent_warning">Это не шутки. Поставь на зарядку.</string>
@@ -107,10 +107,10 @@
     <string name="error_copying_files">Ошибка копирования файлов: %1$s</string>
 
     <!-- Fallback -->
-    <string name="fallback_1">Привет! Чем могу помочь?</string>
+    <string name="fallback_1">Что нового?</string>
     <string name="fallback_2">Здравствуй!</string>
-    <string name="fallback_3">Всё отлично, а у тебя?</string>
-    <string name="fallback_4">Нормально, как дела?</string>
+    <string name="fallback_3">Хм</string>
+    <string name="fallback_4">Как дела?</string>
 
     <!-- Шаблоны -->
     <string name="tpl_greeting_1">Привет! Чем могу помочь?</string>
@@ -127,16 +127,21 @@
     <!-- Случайные приветствия для MainActivity -->
     <string-array name="greetings">
         <item>Говорящие кибер-звери!</item>
-        <item>Сейчас 2017, инфа 100%!</item>
+        <item>Сейчас 2017... Или 2020?</item>
         <item>Математику не заказывали?</item>
-        <item>Здесь ничего нет, честно!</item>
+        <item>Ты кто?</item>
+        <item>2+2=5</item>
+        <item>Ракета! Опять ты за старое!</item>
+        <item>Мы ещё не закончили!</item>
+        <item>Crow, отдай мой сыр!</item>
+        <item>Чай будешь?</item>
+        <item>К такому жизнь меня не готовила...</item>
+        <item>Ну давай, сынок, рассказывай.</item>     
         <item>Запускаем матрицу...</item>
     </string-array>
 
     <!-- Дополнительные строки (ассистент) -->
-    <string name="hint_input">Введите команду (Enter = отправить)</string>
-
-    <!-- Welcome / help (в оригинале уже есть welcome_message; дополнительный пример не дублирую) -->
+    <string name="hint_input">Введите команду</string>
 
     <!-- Errors / usage -->
     <string name="err_empty_input">Пожалуйста, введите текст.</string>
@@ -195,21 +200,21 @@
     <string name="monthly_hour_24">В час (24/сут): %1$s</string>
     <string name="monthly_hour_work">В час (рабочие %1$d): %2$s</string>
 
-    <string name="welcome_messagen">Offline Assistant — режим оффлайн. Введите команду (напр.: "простые проценты 100000 7% 3 года")</string>
+    <string name="welcome_messagen">Финансовый вычислятор. Пожалуйста, введите «справка» для списка доступных команд.</string>
     <string name="cmd_entropy_prefix">энтроп</string>
 
-    <string name="greeting">Good time of day!</string>
-    <string name="question">What do you wish to calculate?</string>
-    <string name="option_digital">&gt; digital data</string>
+    <string name="greeting">Добрый день!</string>
+    <string name="question">Что бы вы хотели вычислить?</string>
+    <string name="option_digital">&gt; Цифровые данные</string>
     <string name="option_finances">&gt; Финансы</string>
-    <string name="option_physics">&gt; Physics</string>
-    <string name="option_other">&gt; Other</string>
-    <string name="note_experimental">Please note that this functionality is completely experimental.</string>
-    <string name="enter_choice">Please enter a choice.</string>
-    <string name="redirect_english_finances">Redirecting to English Finances...</string>
-    <string name="redirect_russian_finances">Перенаправление в Русские Финансы...</string>
-    <string name="redirect_english_physics">Redirecting to English Physics...</string>
-    <string name="redirect_russian_physics">Перенаправление в Русскую Физику...</string>
-    <string name="redirect_main">Redirecting to Main...</string>
-    <string name="unknown_choice">Unknown choice. Please try again.</string>
+    <string name="option_physics">&gt; Физика</string>
+    <string name="option_other">&gt; Другое</string>
+    <string name="note_experimental">Обратите внимание, что эта функция полностью экспериментальная.</string>
+    <string name="enter_choice">Пожалуйста, выберите опцию.</string>
+    <string name="redirect_english_finances">Перенаправление в финансы...</string>
+    <string name="redirect_russian_finances">Перенаправление в финансы...</string>
+    <string name="redirect_english_physics">Перенаправление в физику...</string>
+    <string name="redirect_russian_physics">Перенаправление в физику...</string>
+    <string name="redirect_main">Перенаправление в нужное меню...</string>
+    <string name="unknown_choice">Не понял вас. Пожалуйста, попробуйте конкретнее.</string>
 </resources>
