@@ -1,4 +1,4 @@
-package com.nemesis.droidcrypt
+package app.pawstribe.assistant
 
 import android.content.Intent
 import android.net.Uri
@@ -34,12 +34,10 @@ class SetupActivity : AppCompatActivity() {
                             uri,
                             Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
                         )
-                        // Сохраняем folderUri в SharedPreferences
                         getSharedPreferences("PawsTribePrefs", MODE_PRIVATE)
                             .edit()
                             .putString("folderUri", uri.toString())
                             .apply()
-                        // Копируем файлы
                         copyAssetsToSafFolder(uri, selectedLanguage ?: "ru")
                     } catch (e: SecurityException) {
                         Toast.makeText(this, R.string.error_no_permission, Toast.LENGTH_SHORT).show()
@@ -61,7 +59,6 @@ class SetupActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_setup)
 
-        // Скрытие статус-бара
         window.setFlags(
             android.view.WindowManager.LayoutParams.FLAG_FULLSCREEN,
             android.view.WindowManager.LayoutParams.FLAG_FULLSCREEN
@@ -114,7 +111,6 @@ class SetupActivity : AppCompatActivity() {
                     return@launch
                 }
 
-                // Копируем файлы из assets/<language>/
                 val assetFiles = assets.list(language) ?: emptyArray()
                 if (assetFiles.isEmpty()) {
                     withContext(Dispatchers.Main) {
