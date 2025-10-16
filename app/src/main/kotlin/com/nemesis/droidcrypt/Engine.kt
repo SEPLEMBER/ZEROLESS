@@ -1,4 +1,4 @@
-package com.nemesis.droidcrypt
+package app.pawstribe.assistant
 
 import kotlin.math.abs
 import kotlin.math.min
