@@ -1,4 +1,4 @@
-package com.nemesis.droidcrypt
+package app.pawstribe.assistant
 
 import android.animation.ObjectAnimator
 import android.content.Intent
@@ -32,10 +32,10 @@ import java.util.*
 import kotlin.collections.ArrayList
 import kotlin.collections.HashMap
 import kotlin.math.roundToInt
-import com.nemesis.droidcrypt.Engine
-import com.nemesis.droidcrypt.ChatCore
-import com.nemesis.droidcrypt.MemoryManager
-import com.nemesis.droidcrypt.R
+import app.pawstribe.assistant.Engine
+import app.pawstribe.assistant.ChatCore
+import app.pawstribe.assistant.MemoryManager
+import app.pawstribe.assistant.R
 
 class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
@@ -330,7 +330,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 tryLoadSendIconFromFolder(null)
                 return
             }
-            // Removed loading of lock.png and trash.png per request.
+            // Removed loading of lock.png and trash.png.
             tryLoadSendIconFromFolder(dir)
         } catch (e: Exception) {
         }
@@ -1356,7 +1356,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 }
 
                 val tv = TextView(this).apply {
-                    text = "Loading..." // hardcoded per request
+                    text = "Connecting..." // hardcoded per request
                     textSize = 20f
                     typeface = Typeface.DEFAULT_BOLD
                     gravity = Gravity.CENTER
@@ -1377,10 +1377,10 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 root.addView(overlay)
             }
 
-            // Schedule hide after 5 seconds on the main dispatcher
+            // Schedule hide after 3 seconds on the main dispatcher
             lifecycleScope.launch(Dispatchers.Main) {
                 try {
-                    delay(5000)
+                    delay(3000)
                     // Fade out and then hide/remove
                     startupOverlay?.animate()?.alpha(0f)?.setDuration(300)?.withEndAction {
                         try {
