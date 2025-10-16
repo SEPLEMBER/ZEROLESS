@@ -4,11 +4,11 @@ plugins {
 }
 
 android {
-    namespace = "com.nemesis.droidcrypt"
+    namespace = "app.pawstribe.assistant"
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.nemesis.droidcrypt"
+        applicationId = "app.pawstribe.assistant"
         minSdk = 26
         targetSdk = 34
         versionCode = 2
@@ -24,7 +24,7 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            signingConfig = null // Убрана подпись для неподписанного APK
+            signingConfig = null
         }
     }
 
@@ -51,20 +51,16 @@ dependencies {
     implementation(libs.multidex)
     implementation(libs.recyclerview)
 
-    // --- Kotlin coroutines ---
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.coroutines.android)
 
-    // --- Lifecycle (для lifecycleScope) ---
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.6")
 
-    // --- Preferences ---
     implementation("androidx.preference:preference-ktx:1.2.1")
 
-    // --- Для работы с Uri (AndroidX) ---
+
     implementation("androidx.documentfile:documentfile:1.0.1")
 
-    // --- Activity Result API для ActivityResultLauncher ---
     implementation("androidx.activity:activity-ktx:1.9.3")
 
     testImplementation(libs.junit)
