@@ -55,7 +55,7 @@
         android:id="@+id/versionText"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="VERSION ENGINE 0.04"
+        android:text="VERSION ENGINE 0.4.0"
         android:textColor="@color/neon_cyan"
         android:textSize="14sp"
         android:layout_marginStart="16dp"
