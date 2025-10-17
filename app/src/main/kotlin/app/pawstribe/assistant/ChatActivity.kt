@@ -26,6 +26,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.runBlocking
 import java.io.InputStreamReader
 import java.text.Normalizer
 import java.util.*
@@ -942,24 +943,74 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         invertedIndex.putAll(tempIndex)
     }
 
-      // Новый: синхронное (главный поток) добавление сообщения и аватарки.
-    // Если вызов уже на main, выполняем сразу; иначе — постим на main.
-    private fun addChatMessage(sender: String, text: String) {
-        if (Looper.myLooper() == Looper.getMainLooper()) {
-            addChatMessageOnMain(sender, text)
+    // Загружает Bitmap аватара для заданного sender в блокирующем режиме.
+    // Если вызывается на фоновой нити — выполняет I/O прямо (не блокирует UI).
+    // Если вызывается на main — использует runBlocking(Dispatchers.IO) чтобы выполнить I/O в IO-пуле и дождаться результата.
+    private fun loadAvatarBitmapBlocking(sender: String): android.graphics.Bitmap? {
+        fun loadImpl(): android.graphics.Bitmap? {
+            val uriLocal = folderUri ?: return null
+            try {
+                val dir = DocumentFile.fromTreeUri(this, uriLocal) ?: return null
+                val s = sender.lowercase(Locale.ROOT)
+                val candidates = listOf("${s}_icon.png", "${s}_avatar.png", "${s}.png", currentMascotIcon)
+                for (name in candidates) {
+                    val f = dir.findFile(name) ?: continue
+                    if (f.exists()) {
+                        contentResolver.openInputStream(f.uri)?.use { ins ->
+                            return BitmapFactory.decodeStream(ins)
+                        }
+                    }
+                }
+            } catch (_: Exception) {
+            }
+            return null
+        }
+
+        return if (Looper.myLooper() == Looper.getMainLooper()) {
+            try {
+                runBlocking(Dispatchers.IO) {
+                    loadImpl()
+                }
+            } catch (_: Exception) {
+                null
+            }
         } else {
-            runOnUiThread { addChatMessageOnMain(sender, text) }
+            try {
+                loadImpl()
+            } catch (_: Exception) {
+                null
+            }
         }
     }
 
-    // Вся логика UI — теперь в этой функции, всегда выполняется на main.
-    private fun addChatMessageOnMain(sender: String, text: String) {
+    // Основная точка входа: гарантирует, что аватарка загружена (блокирующе при необходимости),
+    // затем синхронно (на main) вставляет UI-элемент.
+    private fun addChatMessage(sender: String, text: String) {
+        val isUser = sender.equals(getString(R.string.user_label), ignoreCase = true)
+
+        // Для сообщений не от пользователя — заранее загрузим bitmap аватарки.
+        val avatarBitmap: android.graphics.Bitmap? = if (!isUser) {
+            loadAvatarBitmapBlocking(sender)
+        } else {
+            null
+        }
+
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            addChatMessageOnMain(sender, text, avatarBitmap)
+        } else {
+            runOnUiThread { addChatMessageOnMain(sender, text, avatarBitmap) }
+        }
+    }
+
+    // UI-логика — всегда выполняется на main; получает заранее загруженный avatarBitmap (или null).
+    private fun addChatMessageOnMain(sender: String, text: String, avatarBitmap: android.graphics.Bitmap?) {
         val row = LinearLayout(this@ChatActivity).apply {
             orientation = LinearLayout.HORIZONTAL
             val pad = dpToPx(6)
             setPadding(pad, pad / 2, pad, pad / 2)
             layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
         }
+
         val isUser = sender.equals(getString(R.string.user_label), ignoreCase = true)
         if (isUser) {
             val bubble = createMessageBubble(sender, text, isUser)
@@ -974,8 +1025,13 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 layoutParams = LinearLayout.LayoutParams(size, size)
                 scaleType = ImageView.ScaleType.CENTER_CROP
                 adjustViewBounds = true
-                // Синхронная загрузка аватарки (выполняется на main — это требование)
-                loadAvatarInto(this, sender)
+                if (avatarBitmap != null) {
+                    setImageBitmap(avatarBitmap)
+                } else {
+                    // Резервная быстрая попытка (на крайний случай).
+                    try { loadAvatarInto(this, sender) } catch (_: Exception) {}
+                }
+
                 setOnClickListener { view ->
                     view.isEnabled = false
                     val scaleX = ObjectAnimator.ofFloat(view, "scaleX", 1f, 1.08f, 1f)
@@ -984,11 +1040,9 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     scaleY.duration = 250
                     scaleX.start()
                     scaleY.start()
-                    // Для отложенного запуска ouch-сообщения оставляем корутину — она не меняет добавление сообщения.
                     lifecycleScope.launch {
                         delay(260)
                         loadAndSendOuchMessage(sender)
-                        // Возврат в main через runOnUiThread (потому что мы можем быть в фоновом потоке внутри coroutine)
                         runOnUiThread { view.isEnabled = true }
                     }
                 }
@@ -999,6 +1053,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             row.addView(avatarView)
             row.addView(bubble, bubbleLp)
         }
+
         messagesContainer.addView(row)
         messagesContainer.findViewWithTag<View>("typingView")?.let { messagesContainer.removeView(it) }
         if (messagesContainer.childCount > Engine.MAX_MESSAGES) {
