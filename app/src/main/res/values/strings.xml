@@ -138,6 +138,17 @@
         <item>К такому жизнь меня не готовила...</item>
         <item>Ну давай, сынок, рассказывай.</item>     
         <item>Запускаем матрицу...</item>
+        <item>Чувак, я не шучу!</item>
+        <item>Тили-тили бом...</item>
+        <item>Pawstribe incorporated</item>
+        <item>Любите нас? Нет? Тогда мы идём к вам!</item>
+        <item>Эй, я вообще-то вафля!</item>
+        <item>Где я вообще?</item>
+        <item>Чего хотел?</item>
+        <item>Загляни к нам, если что!</item>
+        <item>Поболтаем?</item>
+        <item>Я, конечно, не сова, но языки учу!</item>
+        <item>LLM на минималках!</item>
     </string-array>
 
     <!-- Дополнительные строки (ассистент) -->
@@ -145,7 +156,7 @@
 
     <!-- Errors / usage -->
     <string name="err_empty_input">Пожалуйста, введите текст.</string>
-    <string name="err_invalid_amount">Невалидная сумма: %1$s</string>
+    <string name="err_invalid_amount">Неправильная сумма: %1$s</string>
     <string name="err_processing_command">Ошибка при обработке команды</string>
 
     <string name="usage_entropy">Использование: энтропия &lt;текст&gt;</string>
@@ -153,7 +164,7 @@
     <string name="usage_simple_percent">Использование: простые проценты &lt;сумма&gt; &lt;ставка%&gt; [время]</string>
     <string name="usage_compound_percent">Использование: сложные проценты &lt;сумма&gt; &lt;ставка%&gt; [время] [помесячно/посуточно/годовая]</string>
     <string name="usage_monthly">Использование: месячный доход &lt;сумма&gt; [рабочие &lt;hours&gt;]</string>
-    <string name="fallback_unknown_command">Не распознанная команда. Поддерживаемые: энтропия, трафик, простые проценты, сложные проценты, месячный доход.</string>
+    <string name="fallback_unknown_command">Не распознанная команда.</string>
 
     <!-- Entropy outputs -->
     <string name="entropy_per_symbol_bytes">Энтропия (байт): %1$s бит/символ</string>
