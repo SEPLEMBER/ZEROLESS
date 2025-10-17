@@ -942,66 +942,72 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         invertedIndex.putAll(tempIndex)
     }
 
+      // Новый: синхронное (главный поток) добавление сообщения и аватарки.
+    // Если вызов уже на main, выполняем сразу; иначе — постим на main.
     private fun addChatMessage(sender: String, text: String) {
-        lifecycleScope.launch {
-            withContext(Dispatchers.Main) {
-                val row = LinearLayout(this@ChatActivity).apply {
-                    orientation = LinearLayout.HORIZONTAL
-                    val pad = dpToPx(6)
-                    setPadding(pad, pad / 2, pad, pad / 2)
-                    layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-                }
-                val isUser = sender.equals(getString(R.string.user_label), ignoreCase = true)
-                if (isUser) {
-                    val bubble = createMessageBubble(sender, text, isUser)
-                    val lp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-                    lp.gravity = Gravity.END
-                    lp.marginStart = dpToPx(48)
-                    row.addView(spaceView(), LinearLayout.LayoutParams(0, 0, 1f))
-                    row.addView(bubble, lp)
-                } else {
-                    val avatarView = ImageView(this@ChatActivity).apply {
-                        val size = dpToPx(64)
-                        layoutParams = LinearLayout.LayoutParams(size, size)
-                        scaleType = ImageView.ScaleType.CENTER_CROP
-                        adjustViewBounds = true
-                        // loadAvatarInto теперь асинхронно загружает изображение в фоне
-                        loadAvatarInto(this, sender)
-                        setOnClickListener { view ->
-                            view.isEnabled = false
-                            val scaleX = ObjectAnimator.ofFloat(view, "scaleX", 1f, 1.08f, 1f)
-                            val scaleY = ObjectAnimator.ofFloat(view, "scaleY", 1f, 1.08f, 1f)
-                            scaleX.duration = 250
-                            scaleY.duration = 250
-                            scaleX.start()
-                            scaleY.start()
-                            lifecycleScope.launch {
-                                delay(260)
-                                loadAndSendOuchMessage(sender)
-                                withContext(Dispatchers.Main) {
-                                    view.isEnabled = true
-                                }
-                            }
-                        }
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            addChatMessageOnMain(sender, text)
+        } else {
+            runOnUiThread { addChatMessageOnMain(sender, text) }
+        }
+    }
+
+    // Вся логика UI — теперь в этой функции, всегда выполняется на main.
+    private fun addChatMessageOnMain(sender: String, text: String) {
+        val row = LinearLayout(this@ChatActivity).apply {
+            orientation = LinearLayout.HORIZONTAL
+            val pad = dpToPx(6)
+            setPadding(pad, pad / 2, pad, pad / 2)
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        }
+        val isUser = sender.equals(getString(R.string.user_label), ignoreCase = true)
+        if (isUser) {
+            val bubble = createMessageBubble(sender, text, isUser)
+            val lp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+            lp.gravity = Gravity.END
+            lp.marginStart = dpToPx(48)
+            row.addView(spaceView(), LinearLayout.LayoutParams(0, 0, 1f))
+            row.addView(bubble, lp)
+        } else {
+            val avatarView = ImageView(this@ChatActivity).apply {
+                val size = dpToPx(64)
+                layoutParams = LinearLayout.LayoutParams(size, size)
+                scaleType = ImageView.ScaleType.CENTER_CROP
+                adjustViewBounds = true
+                // Синхронная загрузка аватарки (выполняется на main — это требование)
+                loadAvatarInto(this, sender)
+                setOnClickListener { view ->
+                    view.isEnabled = false
+                    val scaleX = ObjectAnimator.ofFloat(view, "scaleX", 1f, 1.08f, 1f)
+                    val scaleY = ObjectAnimator.ofFloat(view, "scaleY", 1f, 1.08f, 1f)
+                    scaleX.duration = 250
+                    scaleY.duration = 250
+                    scaleX.start()
+                    scaleY.start()
+                    // Для отложенного запуска ouch-сообщения оставляем корутину — она не меняет добавление сообщения.
+                    lifecycleScope.launch {
+                        delay(260)
+                        loadAndSendOuchMessage(sender)
+                        // Возврат в main через runOnUiThread (потому что мы можем быть в фоновом потоке внутри coroutine)
+                        runOnUiThread { view.isEnabled = true }
                     }
-                    val bubble = createMessageBubble(sender, text, isUser)
-                    val bubbleLp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-                    bubbleLp.marginStart = dpToPx(8)
-                    row.addView(avatarView)
-                    row.addView(bubble, bubbleLp)
-                }
-                messagesContainer.addView(row)
-                messagesContainer.findViewWithTag<View>("typingView")?.let { messagesContainer.removeView(it) }
-                if (messagesContainer.childCount > Engine.MAX_MESSAGES) {
-                    val removeCount = messagesContainer.childCount - Engine.MAX_MESSAGES
-                    repeat(removeCount) { messagesContainer.removeViewAt(0) }
-                }
-                scrollView.post { scrollView.smoothScrollTo(0, messagesContainer.bottom) }
-                if (!isUser) {
-                    // playNotificationSound теперь делает IO в фоновом потоке
-                    playNotificationSound()
                 }
             }
+            val bubble = createMessageBubble(sender, text, isUser)
+            val bubbleLp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+            bubbleLp.marginStart = dpToPx(8)
+            row.addView(avatarView)
+            row.addView(bubble, bubbleLp)
+        }
+        messagesContainer.addView(row)
+        messagesContainer.findViewWithTag<View>("typingView")?.let { messagesContainer.removeView(it) }
+        if (messagesContainer.childCount > Engine.MAX_MESSAGES) {
+            val removeCount = messagesContainer.childCount - Engine.MAX_MESSAGES
+            repeat(removeCount) { messagesContainer.removeViewAt(0) }
+        }
+        scrollView.post { scrollView.smoothScrollTo(0, messagesContainer.bottom) }
+        if (!isUser) {
+            playNotificationSound()
         }
     }
 
