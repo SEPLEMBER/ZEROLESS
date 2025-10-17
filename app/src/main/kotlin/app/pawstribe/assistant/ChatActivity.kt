@@ -1592,4 +1592,96 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             dialogHandler.postDelayed(it, 500000)
         }
     }
+// ---------- STARTUP OVERLAY IMPLEMENTATION ----------
+    private fun showStartupOverlay() {
+        try {
+            // Try to find overlay in inflated layout first (preferred)
+            val existingOverlay = try { findViewById<FrameLayout>(R.id.startup_overlay) } catch (_: Exception) { null }
+            val root = findViewById<ViewGroup>(android.R.id.content)
+
+            if (existingOverlay != null) {
+                startupOverlay = existingOverlay
+                // ensure overlay is on top and intercepts touches
+                startupOverlay?.bringToFront()
+                startupOverlay?.isClickable = true
+                startupOverlay?.isFocusable = true
+                startupOverlay?.setOnTouchListener { _, _ -> true }
+                // ensure visible and alpha reset
+                startupOverlay?.alpha = 1f
+                startupOverlay?.visibility = View.VISIBLE
+            } else {
+                // No overlay in layout — create programmatically and add to root
+                val overlay = FrameLayout(this).apply {
+                    layoutParams = FrameLayout.LayoutParams(
+                        FrameLayout.LayoutParams.MATCH_PARENT,
+                        FrameLayout.LayoutParams.MATCH_PARENT
+                    )
+                    setBackgroundColor(Color.parseColor("#0A0A0A"))
+                    isClickable = true
+                    isFocusable = true
+                    setOnTouchListener { _, _ -> true }
+                }
+
+                val tv = TextView(this).apply {
+                    text = "initialization..." // hardcoded per request
+                    textSize = 20f
+                    typeface = Typeface.DEFAULT_BOLD
+                    gravity = Gravity.CENTER
+                    try {
+                        setTextColor(getColor(R.color.neon_cyan))
+                    } catch (_: Exception) {
+                        setTextColor(Color.parseColor("#00E5FF"))
+                    }
+                    layoutParams = FrameLayout.LayoutParams(
+                        FrameLayout.LayoutParams.WRAP_CONTENT,
+                        FrameLayout.LayoutParams.WRAP_CONTENT,
+                        Gravity.CENTER
+                    )
+                }
+
+                overlay.addView(tv)
+                startupOverlay = overlay
+                root.addView(overlay)
+            }
+
+            // Schedule hide after 5 seconds on the main dispatcher
+            lifecycleScope.launch(Dispatchers.Main) {
+                try {
+                    delay(5000)
+                    // Fade out and then hide/remove
+                    startupOverlay?.animate()?.alpha(0f)?.setDuration(300)?.withEndAction {
+                        try {
+                            // If overlay was defined in layout, just hide it (so layout remains stable)
+                            val wasFromLayout = try { findViewById<FrameLayout>(R.id.startup_overlay) != null } catch (_: Exception) { false }
+                            if (wasFromLayout) {
+                                startupOverlay?.visibility = View.GONE
+                                startupOverlay?.alpha = 1f // reset for potential future use
+                            } else {
+                                // programmatically added — remove from root
+                                try {
+                                    (startupOverlay?.parent as? ViewGroup)?.removeView(startupOverlay)
+                                } catch (_: Exception) {}
+                            }
+                        } catch (_: Exception) {
+                        } finally {
+                            startupOverlay = null
+                        }
+                    }
+                } catch (_: Exception) {
+                    // On any error, ensure overlay is hidden so UI isn't blocked
+                    try {
+                        startupOverlay?.visibility = View.GONE
+                    } catch (_: Exception) {}
+                    startupOverlay = null
+                }
+            }
+        } catch (e: Exception) {
+            // If anything fails, ensure app keeps working
+            try {
+                startupOverlay?.visibility = View.GONE
+            } catch (_: Exception) {}
+            startupOverlay = null
+        }
+    }
 }
+    // ---------- END STARTUP OVERLAY IMPLEMENTATION ----------
