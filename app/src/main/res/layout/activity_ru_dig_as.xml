@@ -12,7 +12,7 @@
         android:id="@+id/headerText"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="Offline Assistant — Оффлайн"
+        android:text="Pawstribe Assistant"
         android:textColor="#00F5FF"
         android:textSize="16sp"
         android:padding="8dp"
@@ -39,7 +39,7 @@
         android:id="@+id/inputEditText"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:hint="Введите команду (Enter = отправить)"
+        android:hint="@string/err_empty_input
         android:imeOptions="actionDone"
         android:maxLines="1"
         android:inputType="text"
