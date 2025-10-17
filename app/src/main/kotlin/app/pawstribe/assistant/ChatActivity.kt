@@ -642,15 +642,26 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             val detectedContext = ChatCore.detectContext(qFiltered, contextMapSnapshot, engine)
 
             if (detectedContext != null) {
-                // Переключения контекста / чтение файлов — происходят в IO
-                withContext(Dispatchers.Main) {
-                    if (detectedContext != currentContext) {
+                // Если обнаружен новый контекст — подгружаем его шаблоны (в IO), обновляем индекс/веса,
+                // затем переключаем currentContext и UI на Main
+                if (detectedContext != currentContext) {
+                    // загрузка шаблонов и пересчёт делаем в IO
+                    withContext(Dispatchers.IO) {
+                        try {
+                            loadTemplatesFromFile(detectedContext)
+                            rebuildInvertedIndex()
+                            engine.computeTokenWeights()
+                        } catch (_: Exception) {
+                            // не фатально — дальше попробуем парсить напрямую файл контекста
+                        }
+                    }
+                    withContext(Dispatchers.Main) {
                         currentContext = detectedContext
-                        // loadTemplatesFromFile выполняет heavy IO внутри (вызывается в IO-контексте)
-                        // запускаем в IO и ждём
+                        updateAutoComplete()
                     }
                 }
 
+                // Парсим файл контекста (дополнительно) — это чтение/парсинг (IO)
                 val (localTemplates, localKeywords) = withContext(Dispatchers.IO) {
                     ChatCore.parseTemplatesFromFile(
                         this@ChatActivity, folderUri, detectedContext, HashMap(synonymsMap), HashSet(stopwords)
