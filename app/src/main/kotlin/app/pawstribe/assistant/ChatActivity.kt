@@ -36,12 +36,15 @@ import app.pawstribe.assistant.Engine
 import app.pawstribe.assistant.ChatCore
 import app.pawstribe.assistant.MemoryManager
 import app.pawstribe.assistant.R
+import java.util.Arrays
 
 class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     companion object {
         private const val PREF_KEY_FOLDER_URI = "pref_folder_uri"
         private const val PREF_KEY_DISABLE_SCREENSHOTS = "pref_disable_screenshots"
+        // (Пароль берём из SharedPreferences под этим ключом)
+        const val PREF_KEY_ENCRYPTION_PASSWORD = "pref_encryption_password"
     }
 
     private lateinit var engine: Engine
@@ -487,6 +490,48 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         return null
     }
+
+    // ---------------- NEW HELPER ----------------
+    // Читает текстовый DocumentFile и, если файл в формате Secure (начинается с "v1:"),
+    // пытается расшифровать его используя пароль из SharedPreferences (ключ PREF_KEY_ENCRYPTION_PASSWORD).
+    // Возвращает plaintext или null при ошибке/отсутствии пароля.
+    private fun readDocumentFileTextMaybeDecrypt(file: DocumentFile): String? {
+        try {
+            contentResolver.openInputStream(file.uri)?.use { ins ->
+                val rawBytes = ins.readBytes()
+                val rawText = try {
+                    String(rawBytes, Charsets.UTF_8)
+                } catch (_: Exception) {
+                    return null
+                }
+                val trimmed = rawText.trim()
+                if (trimmed.startsWith("v1:")) {
+                    val prefs = PreferenceManager.getDefaultSharedPreferences(this)
+                    val passwordStr = prefs.getString(PREF_KEY_ENCRYPTION_PASSWORD, null)
+                    if (passwordStr.isNullOrEmpty()) {
+                        // нет пароля — не можем расшифровать
+                        return null
+                    }
+                    val passChars = passwordStr.toCharArray()
+                    try {
+                        return try {
+                            Secure.decrypt(passChars, trimmed)
+                        } catch (_: Exception) {
+                            null
+                        }
+                    } finally {
+                        Arrays.fill(passChars, '\u0000')
+                    }
+                } else {
+                    return rawText
+                }
+            }
+        } catch (_: Exception) {
+            return null
+        }
+        return null
+    }
+    // -------------- END HELPER -----------------
 
     private fun processUserQuery(userInput: String) {
         if (userInput.startsWith("/")) {
@@ -940,15 +985,14 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 val mascotFilename = "${mascot.lowercase(Locale.ROOT)}.txt"
                 val mascotOuch = dir.findFile(mascotFilename) ?: dir.findFile("ouch.txt")
                 if (mascotOuch != null && mascotOuch.exists()) {
-                    contentResolver.openInputStream(mascotOuch.uri)?.use { ins ->
-                        InputStreamReader(ins, Charsets.UTF_8).buffered().use { reader ->
-                            val allText = reader.readText()
-                            val responses = allText.split("|").map { it.trim() }.filter { it.isNotEmpty() }
-                            if (responses.isNotEmpty()) {
-                                val randomResponse = responses.random()
-                                withContext(Dispatchers.Main) {
-                                    addChatMessage(mascot, randomResponse)
-                                }
+                    // <<< CHANGED: read via helper (may decrypt)
+                    val allText = readDocumentFileTextMaybeDecrypt(mascotOuch)
+                    if (allText != null) {
+                        val responses = allText.split("|").map { it.trim() }.filter { it.isNotEmpty() }
+                        if (responses.isNotEmpty()) {
+                            val randomResponse = responses.random()
+                            withContext(Dispatchers.Main) {
+                                addChatMessage(mascot, randomResponse)
                             }
                         }
                     }
@@ -1115,90 +1159,100 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     return@withContext
                 }
                 var firstNonEmptyLineChecked = false
-                contentResolver.openInputStream(file.uri)?.use { ins ->
-                    InputStreamReader(ins, Charsets.UTF_8).buffered().use { reader ->
-                        reader.forEachLine { raw ->
-                            val l = raw.trim()
-                            if (l.isEmpty()) return@forEachLine
-                            if (!firstNonEmptyLineChecked) {
-                                firstNonEmptyLineChecked = true
-                                if (l.equals("#CONTEXT", ignoreCase = true)) {
-                                    isContextLocked = true
-                                    return@forEachLine
-                                }
-                            }
-                            if (filename == "base.txt" && l.startsWith(":" ) && l.endsWith(":")) {
-                                val contextLine = l.substring(1, l.length - 1)
-                                if (contextLine.contains("=")) {
-                                    val parts = contextLine.split("=", limit = 2)
-                                    if (parts.size == 2) {
-                                        val keyword = parts[0].trim()
-                                        val contextFile = parts[1].trim()
-                                        if (keyword.isNotEmpty() && contextFile.isNotEmpty()) {
-                                            val keyCanon = canonicalKeyFromTextStatic(keyword, synonymsMap, stopwords)
-                                            if (keyCanon.isNotEmpty()) contextMap[keyCanon] = contextFile
-                                        }
-                                    }
-                                }
-                                return@forEachLine
-                            }
-                            if (l.startsWith("-")) {
-                                val keywordLine = l.substring(1)
-                                if (keywordLine.contains("=")) {
-                                    val parts = keywordLine.split("=", limit = 2)
-                                    if (parts.size == 2) {
-                                        val keyword = parts[0].trim()
-                                        val responses = parts[1].split("|")
-                                        val responseList = responses.mapNotNull { it.trim().takeIf { s -> s.isNotEmpty() } }.toMutableList()
-                                        if (keyword.isNotEmpty() && responseList.isNotEmpty()) {
-                                            val keyCanon = canonicalKeyFromTextStatic(keyword, synonymsMap, stopwords)
-                                            if (keyCanon.isNotEmpty()) keywordResponses[keyCanon] = responseList
-                                        }
-                                    }
-                                }
-                                return@forEachLine
-                            }
-                            if (!l.contains("=")) return@forEachLine
-                            val parts = l.split("=", limit = 2)
-                            if (parts.size == 2) {
-                                val triggerRaw = parts[0].trim()
-                                val triggerTokens = Engine.filterStopwordsAndMapSynonymsStatic(normalizeForProcessing(triggerRaw), synonymsMap, stopwords).first
-                                val triggerCanonical = triggerTokens.sorted().joinToString(" ")
-                                val responses = parts[1].split("|")
-                                val responseList = responses.mapNotNull { it.trim().takeIf { s -> s.isNotEmpty() } }.toMutableList()
-                                if (triggerCanonical.isNotEmpty() && responseList.isNotEmpty()) templatesMap[triggerCanonical] = responseList
-                            }
+
+                // <<< CHANGED: читаем файл целиком (возможно зашифрованный), затем парсим построчно
+                val fileContent = readDocumentFileTextMaybeDecrypt(file)
+                if (fileContent == null) {
+                    // не удалось прочитать/расшифровать -> fallback аналогично отсутствию файла
+                    ChatCore.loadFallbackTemplates(templatesMap, keywordResponses, mascotList, contextMap)
+                    rebuildInvertedIndex()
+                    engine.computeTokenWeights()
+                    withContext(Dispatchers.Main) {
+                        updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
+                    }
+                    return@withContext
+                }
+                fileContent.lines().forEach { raw ->
+                    val l = raw.trim()
+                    if (l.isEmpty()) return@forEach
+                    if (!firstNonEmptyLineChecked) {
+                        firstNonEmptyLineChecked = true
+                        if (l.equals("#CONTEXT", ignoreCase = true)) {
+                            isContextLocked = true
+                            return@forEach
                         }
                     }
+                    if (filename == "base.txt" && l.startsWith(":" ) && l.endsWith(":")) {
+                        val contextLine = l.substring(1, l.length - 1)
+                        if (contextLine.contains("=")) {
+                            val parts = contextLine.split("=", limit = 2)
+                            if (parts.size == 2) {
+                                val keyword = parts[0].trim()
+                                val contextFile = parts[1].trim()
+                                if (keyword.isNotEmpty() && contextFile.isNotEmpty()) {
+                                    val keyCanon = canonicalKeyFromTextStatic(keyword, synonymsMap, stopwords)
+                                    if (keyCanon.isNotEmpty()) contextMap[keyCanon] = contextFile
+                                }
+                            }
+                        }
+                        return@forEach
+                    }
+                    if (l.startsWith("-")) {
+                        val keywordLine = l.substring(1)
+                        if (keywordLine.contains("=")) {
+                            val parts = keywordLine.split("=", limit = 2)
+                            if (parts.size == 2) {
+                                val keyword = parts[0].trim()
+                                val responses = parts[1].split("|")
+                                val responseList = responses.mapNotNull { it.trim().takeIf { s -> s.isNotEmpty() } }.toMutableList()
+                                if (keyword.isNotEmpty() && responseList.isNotEmpty()) {
+                                    val keyCanon = canonicalKeyFromTextStatic(keyword, synonymsMap, stopwords)
+                                    if (keyCanon.isNotEmpty()) keywordResponses[keyCanon] = responseList
+                                }
+                            }
+                        }
+                        return@forEach
+                    }
+                    if (!l.contains("=")) return@forEach
+                    val parts = l.split("=", limit = 2)
+                    if (parts.size == 2) {
+                        val triggerRaw = parts[0].trim()
+                        val triggerTokens = Engine.filterStopwordsAndMapSynonymsStatic(normalizeForProcessing(triggerRaw), synonymsMap, stopwords).first
+                        val triggerCanonical = triggerTokens.sorted().joinToString(" ")
+                        val responses = parts[1].split("|")
+                        val responseList = responses.mapNotNull { it.trim().takeIf { s -> s.isNotEmpty() } }.toMutableList()
+                        if (triggerCanonical.isNotEmpty() && responseList.isNotEmpty()) templatesMap[triggerCanonical] = responseList
+                    }
                 }
+
                 val metadataFilename = filename.replace(".txt", "_metadata.txt")
                 val metadataFile = dir.findFile(metadataFilename)
                 if (metadataFile != null && metadataFile.exists()) {
-                    contentResolver.openInputStream(metadataFile.uri)?.use { ins ->
-                        InputStreamReader(ins, Charsets.UTF_8).buffered().use { reader ->
-                            reader.forEachLine { raw ->
-                                val line = raw.trim()
-                                when {
-                                    line.startsWith("mascot_list=") -> {
-                                        val mascots = line.substring("mascot_list=".length).split("|")
-                                        for (mascot in mascots) {
-                                            val parts = mascot.split(":")
-                                            if (parts.size == 4) {
-                                                val mascotData = mapOf(
-                                                    "name" to parts[0].trim(),
-                                                    "icon" to parts[1].trim(),
-                                                    "color" to parts[2].trim(),
-                                                    "background" to parts[3].trim()
-                                                )
-                                                mascotList.add(mascotData)
-                                            }
+                    // <<< CHANGED: аналогично читаем метаданные через helper (возможно зашифрованы)
+                    val metadataContent = readDocumentFileTextMaybeDecrypt(metadataFile)
+                    if (metadataContent != null) {
+                        metadataContent.lines().forEach { raw ->
+                            val line = raw.trim()
+                            when {
+                                line.startsWith("mascot_list=") -> {
+                                    val mascots = line.substring("mascot_list=".length).split("|")
+                                    for (mascot in mascots) {
+                                        val parts = mascot.split(":")
+                                        if (parts.size == 4) {
+                                            val mascotData = mapOf(
+                                                "name" to parts[0].trim(),
+                                                "icon" to parts[1].trim(),
+                                                "color" to parts[2].trim(),
+                                                "background" to parts[3].trim()
+                                            )
+                                            mascotList.add(mascotData)
                                         }
                                     }
-                                    line.startsWith("mascot_name=") -> currentMascotName = line.substring("mascot_name=".length).trim()
-                                    line.startsWith("mascot_icon=") -> currentMascotIcon = line.substring("mascot_icon=".length).trim()
-                                    line.startsWith("theme_color=") -> currentThemeColor = line.substring("theme_color=".length).trim()
-                                    line.startsWith("theme_background=") -> currentThemeBackground = line.substring("theme_background=".length).trim()
                                 }
+                                line.startsWith("mascot_name=") -> currentMascotName = line.substring("mascot_name=".length).trim()
+                                line.startsWith("mascot_icon=") -> currentMascotIcon = line.substring("mascot_icon=".length).trim()
+                                line.startsWith("theme_color=") -> currentThemeColor = line.substring("theme_color=".length).trim()
+                                line.startsWith("theme_background=") -> currentThemeBackground = line.substring("theme_background=".length).trim()
                             }
                         }
                     }
@@ -1253,21 +1307,19 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             val metadataFile = dir.findFile(metadataFilename)
             if (metadataFile != null && metadataFile.exists()) {
                 try {
-                    contentResolver.openInputStream(metadataFile.uri)?.use { ins ->
-                        InputStreamReader(ins, Charsets.UTF_8).buffered().use { reader ->
-                            reader.forEachLine { raw ->
-                                val line = raw.trim()
-                                when {
-                                    line.startsWith("mascot_name=") -> currentMascotName = line.substring("mascot_name=".length).trim()
-                                    line.startsWith("mascot_icon=") -> currentMascotIcon = line.substring("mascot_icon=".length).trim()
-                                    line.startsWith("theme_color=") -> currentThemeColor = line.substring("theme_color=".length).trim()
-                                    line.startsWith("theme_background=") -> currentThemeBackground = line.substring("theme_background=".length).trim()
-                                }
-                            }
-                            withContext(Dispatchers.Main) {
-                                updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
-                            }
+                    // <<< CHANGED: читаем возможный зашифрованный metadata файл
+                    val content = readDocumentFileTextMaybeDecrypt(metadataFile) ?: return@withContext
+                    content.lines().forEach { raw ->
+                        val line = raw.trim()
+                        when {
+                            line.startsWith("mascot_name=") -> currentMascotName = line.substring("mascot_name=".length).trim()
+                            line.startsWith("mascot_icon=") -> currentMascotIcon = line.substring("mascot_icon=".length).trim()
+                            line.startsWith("theme_color=") -> currentThemeColor = line.substring("theme_color=".length).trim()
+                            line.startsWith("theme_background=") -> currentThemeBackground = line.substring("theme_background=".length).trim()
                         }
+                    }
+                    withContext(Dispatchers.Main) {
+                        updateUI(currentMascotName, currentMascotIcon, currentThemeColor, currentThemeBackground)
                     }
                 } catch (e: Exception) {
                     withContext(Dispatchers.Main) {
