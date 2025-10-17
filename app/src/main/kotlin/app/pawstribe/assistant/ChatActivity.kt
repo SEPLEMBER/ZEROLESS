@@ -75,6 +75,20 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private var currentContext = "base.txt"
     private var isContextLocked = false
 
+    // *** BEGIN: секциональные данные для контекстных файлов ***
+    /**
+     * Для каждого файла контекста (например, "emotions.txt") храним:
+     * - список секций (каждая секция — Map<triggerCanonical, responses>)
+     * - список keywordResponses для секций (каждая секция — Map<keywordCanonical, responses>)
+     * - map триггер->индекс секции, чтобы быстро установить, из какой секции пришёл ответ
+     * - индекс последней активной секции (если из неё недавно отвечали)
+     */
+    private val contextSections = HashMap<String, MutableList<HashMap<String, MutableList<String>>>>()
+    private val contextSectionKeywordResponses = HashMap<String, MutableList<HashMap<String, MutableList<String>>>>()
+    private val contextTriggerToSection = HashMap<String, HashMap<String, Int>>()
+    private val contextLastSectionIndex = HashMap<String, Int>()
+    // *** END ***
+
     // Overlay view shown on startup
     private var startupOverlay: FrameLayout? = null
 
@@ -662,16 +676,33 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     }
                 }
 
-                // Парсим файл контекста (дополнительно) — это чтение/парсинг (IO)
+                // ---- Получаем локальные шаблоны: сначала пробуем секцию (если есть и есть сохранённый индекс),
+                // ---- иначе делаем прежний парсинг (ChatCore.parseTemplatesFromFile).
                 val (localTemplates, localKeywords) = withContext(Dispatchers.IO) {
-                    ChatCore.parseTemplatesFromFile(
-                        this@ChatActivity, folderUri, detectedContext, HashMap(synonymsMap), HashSet(stopwords)
-                    )
+                    val sectionsForContext = contextSections[detectedContext]
+                    val sectionKwForContext = contextSectionKeywordResponses[detectedContext]
+                    val lastIdx = contextLastSectionIndex[detectedContext] ?: 0
+                    if (sectionsForContext != null && sectionsForContext.size > lastIdx) {
+                        val chosenTemplates = HashMap<String, MutableList<String>>()
+                        val chosenKeywords = HashMap<String, MutableList<String>>()
+                        // shallow copy
+                        chosenTemplates.putAll(sectionsForContext[lastIdx])
+                        if (sectionKwForContext != null && sectionKwForContext.size > lastIdx) {
+                            chosenKeywords.putAll(sectionKwForContext[lastIdx])
+                        }
+                        Pair(chosenTemplates, chosenKeywords)
+                    } else {
+                        ChatCore.parseTemplatesFromFile(
+                            this@ChatActivity, folderUri, detectedContext, HashMap(synonymsMap), HashSet(stopwords)
+                        )
+                    }
                 }
 
                 localTemplates[qCanonical]?.let { possible ->
                     if (possible.isNotEmpty()) {
                         val resp = possible.random()
+                        // Запомнить секцию (если возможно)
+                        recordContextSectionHit(detectedContext, qCanonical)
                         withContext(Dispatchers.Main) {
                             addChatMessage(currentMascotName, resp)
                             recordMemorySideEffect(qOrigRaw)
@@ -688,6 +719,8 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     val qTokenSetLocal = if (qTokensFiltered.isNotEmpty()) qTokensFiltered.toSet() else Engine.tokenizeStatic(qFiltered).toSet()
                     if (qTokenSetLocal.intersect(kwTokens).isNotEmpty()) {
                         val resp = responses.random()
+                        // Запомнить секцию (если возможно)
+                        recordContextSectionHit(detectedContext, keyword)
                         withContext(Dispatchers.Main) {
                             addChatMessage(currentMascotName, resp)
                             recordMemorySideEffect(qOrigRaw)
@@ -744,6 +777,8 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                         val possible = localTemplates[bestLocal]
                         if (!possible.isNullOrEmpty()) {
                             val resp = possible.random()
+                            // Запомнить секцию
+                            recordContextSectionHit(detectedContext, bestLocal)
                             withContext(Dispatchers.Main) {
                                 addChatMessage(currentMascotName, resp)
                                 recordMemorySideEffect(qOrigRaw)
@@ -770,6 +805,8 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                         val possible = localTemplates[bestLocalKey]
                         if (!possible.isNullOrEmpty()) {
                             val resp = possible.random()
+                            // Запомнить секцию
+                            recordContextSectionHit(detectedContext, bestLocalKey)
                             withContext(Dispatchers.Main) {
                                 addChatMessage(currentMascotName, resp)
                                 recordMemorySideEffect(qOrigRaw)
@@ -855,6 +892,16 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private fun cacheResponse(qKey: String, response: String) {
         queryCache[qKey] = response
+    }
+
+    // Записываем, из какой секции (в контексте contextFile) пришёл триггер key (если возможно)
+    private fun recordContextSectionHit(contextFile: String, triggerKey: String?) {
+        if (triggerKey == null) return
+        try {
+            val map = contextTriggerToSection[contextFile] ?: return
+            val idx = map[triggerKey] ?: return
+            contextLastSectionIndex[contextFile] = idx
+        } catch (_: Exception) {}
     }
 
     private fun handleCommand(cmdRaw: String) {
@@ -1217,11 +1264,18 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         return (dp * density).roundToInt()
     }
 
+    // ----------------- REPLACED: loadTemplatesFromFile (с поддержкой секций) -----------------
     private suspend fun loadTemplatesFromFile(filename: String) {
         withContext(Dispatchers.IO) {
             templatesMap.clear()
             keywordResponses.clear()
             mascotList.clear()
+            // Очистим секционные структуры для этого файла (будут заполнены ниже, если файл — не base)
+            contextSections.remove(filename)
+            contextSectionKeywordResponses.remove(filename)
+            contextTriggerToSection.remove(filename)
+            contextLastSectionIndex.remove(filename)
+
             if (filename == "base.txt") {
                 contextMap.clear()
             }
@@ -1262,12 +1316,11 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     }
                     return@withContext
                 }
-                var firstNonEmptyLineChecked = false
 
-                // <<< CHANGED: читаем файл целиком (возможно зашифрованный), затем парсим построчно
+                // Читаем файл (возможно зашифрованный) целиком
                 val fileContent = readDocumentFileTextMaybeDecrypt(file)
                 if (fileContent == null) {
-                    // не удалось прочитать/расшифровать -> fallback аналогично отсутствию файла
+                    // не удалось прочитать/расшифровать -> fallback
                     ChatCore.loadFallbackTemplates(templatesMap, keywordResponses, mascotList, contextMap)
                     rebuildInvertedIndex()
                     engine.computeTokenWeights()
@@ -1276,63 +1329,131 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     }
                     return@withContext
                 }
-                fileContent.lines().forEach { raw ->
+
+                // Разбивка на секции: разделители — строки, состоящие из трёх или более дефисов/длинных тире
+                val lines = fileContent.lines()
+                val sections: MutableList<MutableList<String>> = mutableListOf()
+                var currentSectionLines = mutableListOf<String>()
+                val delimRegex = Regex("""^[\-\—]{3,}\s*$""") // --- или —— или ——— и т.д.
+                for (raw in lines) {
                     val l = raw.trim()
-                    if (l.isEmpty()) return@forEach
-                    if (!firstNonEmptyLineChecked) {
-                        firstNonEmptyLineChecked = true
-                        if (l.equals("#CONTEXT", ignoreCase = true)) {
-                            isContextLocked = true
-                            return@forEach
-                        }
+                    if (l.isEmpty()) {
+                        // пустые строки внутри секции игнорируем
+                        continue
                     }
-                    if (filename == "base.txt" && l.startsWith(":" ) && l.endsWith(":")) {
-                        val contextLine = l.substring(1, l.length - 1)
-                        if (contextLine.contains("=")) {
-                            val parts = contextLine.split("=", limit = 2)
-                            if (parts.size == 2) {
-                                val keyword = parts[0].trim()
-                                val contextFile = parts[1].trim()
-                                if (keyword.isNotEmpty() && contextFile.isNotEmpty()) {
-                                    val keyCanon = canonicalKeyFromTextStatic(keyword, synonymsMap, stopwords)
-                                    if (keyCanon.isNotEmpty()) contextMap[keyCanon] = contextFile
-                                }
+                    if (delimRegex.matches(l)) {
+                        // завершаем текущую секцию, если есть
+                        if (currentSectionLines.isNotEmpty()) {
+                            sections.add(currentSectionLines)
+                            currentSectionLines = mutableListOf()
+                        } else {
+                            // если были подряд разделители — пропускаем
+                            continue
+                        }
+                    } else {
+                        currentSectionLines.add(l)
+                    }
+                }
+                if (currentSectionLines.isNotEmpty() || sections.isEmpty()) {
+                    // добавим последний набор (или весь файл как одна секция)
+                    sections.add(currentSectionLines)
+                }
+
+                // Для хранения секций этого файла
+                val sectionMaps: MutableList<HashMap<String, MutableList<String>>> = mutableListOf()
+                val sectionKeywordMaps: MutableList<HashMap<String, MutableList<String>>> = mutableListOf()
+                val triggerToSectionLocal = HashMap<String, Int>()
+
+                // Парсим каждую секцию в отдельный map
+                for ((idx, sectLines) in sections.withIndex()) {
+                    val sectTemplates = HashMap<String, MutableList<String>>()
+                    val sectKeywords = HashMap<String, MutableList<String>>()
+                    var firstNonEmptyChecked = false
+                    for (raw in sectLines) {
+                        val l = raw.trim()
+                        if (l.isEmpty()) continue
+                        if (!firstNonEmptyChecked) {
+                            firstNonEmptyChecked = true
+                            if (l.equals("#CONTEXT", ignoreCase = true)) {
+                                // Если секция начинается с #CONTEXT — помечаем как заблокированную секцию (не используем тут)
+                                // Но сохраним её — поведение прежнее: если в начале файла есть #CONTEXT — мы ставим isContextLocked
+                                isContextLocked = true
+                                continue
                             }
                         }
-                        return@forEach
-                    }
-                    if (l.startsWith("-")) {
-                        val keywordLine = l.substring(1)
-                        if (keywordLine.contains("=")) {
-                            val parts = keywordLine.split("=", limit = 2)
-                            if (parts.size == 2) {
-                                val keyword = parts[0].trim()
-                                val responses = parts[1].split("|")
-                                val responseList = responses.mapNotNull { it.trim().takeIf { s -> s.isNotEmpty() } }.toMutableList()
-                                if (keyword.isNotEmpty() && responseList.isNotEmpty()) {
-                                    val keyCanon = canonicalKeyFromTextStatic(keyword, synonymsMap, stopwords)
-                                    if (keyCanon.isNotEmpty()) keywordResponses[keyCanon] = responseList
+                        // Локальные keyword-строки, которые начинаются с '-' (как раньше для файла в целом)
+                        if (l.startsWith("-")) {
+                            val keywordLine = l.substring(1)
+                            if (keywordLine.contains("=")) {
+                                val parts = keywordLine.split("=", limit = 2)
+                                if (parts.size == 2) {
+                                    val keyword = parts[0].trim()
+                                    val responses = parts[1].split("|")
+                                    val responseList = responses.mapNotNull { it.trim().takeIf { s -> s.isNotEmpty() } }.toMutableList()
+                                    if (keyword.isNotEmpty() && responseList.isNotEmpty()) {
+                                        val keyCanon = canonicalKeyFromTextStatic(keyword, synonymsMap, stopwords)
+                                        if (keyCanon.isNotEmpty()) sectKeywords[keyCanon] = responseList
+                                    }
                                 }
                             }
+                            continue
                         }
-                        return@forEach
+
+                        if (!l.contains("=")) continue
+                        val parts = l.split("=", limit = 2)
+                        if (parts.size == 2) {
+                            val triggerRaw = parts[0].trim()
+                            val triggerTokens = Engine.filterStopwordsAndMapSynonymsStatic(normalizeForProcessing(triggerRaw), synonymsMap, stopwords).first
+                            val triggerCanonical = triggerTokens.sorted().joinToString(" ")
+                            val responses = parts[1].split("|")
+                            val responseList = responses.mapNotNull { it.trim().takeIf { s -> s.isNotEmpty() } }.toMutableList()
+                            if (triggerCanonical.isNotEmpty() && responseList.isNotEmpty()) {
+                                sectTemplates[triggerCanonical] = responseList
+                                // register trigger->section
+                                triggerToSectionLocal[triggerCanonical] = idx
+                            }
+                        }
+                    } // end sectLines loop
+
+                    sectionMaps.add(sectTemplates)
+                    sectionKeywordMaps.add(sectKeywords)
+                } // end sections loop
+
+                // Merge всех секций в глобальные maps (чтобы fallback работал как раньше)
+                for (sect in sectionMaps) {
+                    for ((k, v) in sect) {
+                        if (templatesMap.containsKey(k)) {
+                            // добавим ответы в существующий список (не перезаписывая)
+                            val existing = templatesMap[k]!!
+                            for (r in v) if (!existing.contains(r)) existing.add(r)
+                        } else {
+                            templatesMap[k] = ArrayList(v)
+                        }
                     }
-                    if (!l.contains("=")) return@forEach
-                    val parts = l.split("=", limit = 2)
-                    if (parts.size == 2) {
-                        val triggerRaw = parts[0].trim()
-                        val triggerTokens = Engine.filterStopwordsAndMapSynonymsStatic(normalizeForProcessing(triggerRaw), synonymsMap, stopwords).first
-                        val triggerCanonical = triggerTokens.sorted().joinToString(" ")
-                        val responses = parts[1].split("|")
-                        val responseList = responses.mapNotNull { it.trim().takeIf { s -> s.isNotEmpty() } }.toMutableList()
-                        if (triggerCanonical.isNotEmpty() && responseList.isNotEmpty()) templatesMap[triggerCanonical] = responseList
+                }
+                for (sectKw in sectionKeywordMaps) {
+                    for ((k, v) in sectKw) {
+                        if (keywordResponses.containsKey(k)) {
+                            val existing = keywordResponses[k]!!
+                            for (r in v) if (!existing.contains(r)) existing.add(r)
+                        } else {
+                            keywordResponses[k] = ArrayList(v)
+                        }
                     }
                 }
 
+                // Сохраняем секционные структуры для дальнейшего быстрого доступа
+                if (sectionMaps.isNotEmpty()) {
+                    contextSections[filename] = sectionMaps
+                    contextSectionKeywordResponses[filename] = sectionKeywordMaps
+                    contextTriggerToSection[filename] = triggerToSectionLocal
+                    contextLastSectionIndex[filename] = 0 // начальный индекс
+                }
+
+                // Попытка прочитать метаданные (как раньше) — тоже через helper
                 val metadataFilename = filename.replace(".txt", "_metadata.txt")
                 val metadataFile = dir.findFile(metadataFilename)
                 if (metadataFile != null && metadataFile.exists()) {
-                    // <<< CHANGED: аналогично читаем метаданные через helper (возможно зашифрованы)
                     val metadataContent = readDocumentFileTextMaybeDecrypt(metadataFile)
                     if (metadataContent != null) {
                         metadataContent.lines().forEach { raw ->
@@ -1361,6 +1482,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                         }
                     }
                 }
+
                 if (filename == "base.txt" && mascotList.isNotEmpty()) {
                     val selected = mascotList.random()
                     selected["name"]?.let { currentMascotName = it }
@@ -1368,6 +1490,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     selected["color"]?.let { currentThemeColor = it }
                     selected["background"]?.let { currentThemeBackground = it }
                 }
+
                 rebuildInvertedIndex()
                 engine.computeTokenWeights()
                 withContext(Dispatchers.Main) {
@@ -1386,6 +1509,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             }
         }
     }
+    // ----------------- END loadTemplatesFromFile -----------------
 
     private fun updateAutoComplete() {
         // Autocomplete / dropdown suggestions disabled per request.
@@ -1468,97 +1592,4 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             dialogHandler.postDelayed(it, 500000)
         }
     }
-
-    // ---------- STARTUP OVERLAY IMPLEMENTATION ----------
-    private fun showStartupOverlay() {
-        try {
-            // Try to find overlay in inflated layout first (preferred)
-            val existingOverlay = try { findViewById<FrameLayout>(R.id.startup_overlay) } catch (_: Exception) { null }
-            val root = findViewById<ViewGroup>(android.R.id.content)
-
-            if (existingOverlay != null) {
-                startupOverlay = existingOverlay
-                // ensure overlay is on top and intercepts touches
-                startupOverlay?.bringToFront()
-                startupOverlay?.isClickable = true
-                startupOverlay?.isFocusable = true
-                startupOverlay?.setOnTouchListener { _, _ -> true }
-                // ensure visible and alpha reset
-                startupOverlay?.alpha = 1f
-                startupOverlay?.visibility = View.VISIBLE
-            } else {
-                // No overlay in layout — create programmatically and add to root
-                val overlay = FrameLayout(this).apply {
-                    layoutParams = FrameLayout.LayoutParams(
-                        FrameLayout.LayoutParams.MATCH_PARENT,
-                        FrameLayout.LayoutParams.MATCH_PARENT
-                    )
-                    setBackgroundColor(Color.parseColor("#0A0A0A"))
-                    isClickable = true
-                    isFocusable = true
-                    setOnTouchListener { _, _ -> true }
-                }
-
-                val tv = TextView(this).apply {
-                    text = "initialization..." // hardcoded per request
-                    textSize = 20f
-                    typeface = Typeface.DEFAULT_BOLD
-                    gravity = Gravity.CENTER
-                    try {
-                        setTextColor(getColor(R.color.neon_cyan))
-                    } catch (_: Exception) {
-                        setTextColor(Color.parseColor("#00E5FF"))
-                    }
-                    layoutParams = FrameLayout.LayoutParams(
-                        FrameLayout.LayoutParams.WRAP_CONTENT,
-                        FrameLayout.LayoutParams.WRAP_CONTENT,
-                        Gravity.CENTER
-                    )
-                }
-
-                overlay.addView(tv)
-                startupOverlay = overlay
-                root.addView(overlay)
-            }
-
-            // Schedule hide after 5 seconds on the main dispatcher
-            lifecycleScope.launch(Dispatchers.Main) {
-                try {
-                    delay(5000)
-                    // Fade out and then hide/remove
-                    startupOverlay?.animate()?.alpha(0f)?.setDuration(300)?.withEndAction {
-                        try {
-                            // If overlay was defined in layout, just hide it (so layout remains stable)
-                            val wasFromLayout = try { findViewById<FrameLayout>(R.id.startup_overlay) != null } catch (_: Exception) { false }
-                            if (wasFromLayout) {
-                                startupOverlay?.visibility = View.GONE
-                                startupOverlay?.alpha = 1f // reset for potential future use
-                            } else {
-                                // programmatically added — remove from root
-                                try {
-                                    (startupOverlay?.parent as? ViewGroup)?.removeView(startupOverlay)
-                                } catch (_: Exception) {}
-                            }
-                        } catch (_: Exception) {
-                        } finally {
-                            startupOverlay = null
-                        }
-                    }
-                } catch (_: Exception) {
-                    // On any error, ensure overlay is hidden so UI isn't blocked
-                    try {
-                        startupOverlay?.visibility = View.GONE
-                    } catch (_: Exception) {}
-                    startupOverlay = null
-                }
-            }
-        } catch (e: Exception) {
-            // If anything fails, ensure app keeps working
-            try {
-                startupOverlay?.visibility = View.GONE
-            } catch (_: Exception) {}
-            startupOverlay = null
-        }
-    }
 }
-    // ---------- END STARTUP OVERLAY IMPLEMENTATION ----------
