@@ -8,6 +8,8 @@ import app.pawstribe.assistant.MemoryManager
 import java.io.InputStreamReader
 import app.pawstribe.assistant.R
 import java.util.Locale
+import java.util.Arrays
+import androidx.preference.PreferenceManager
 
 object ChatCore {
 
@@ -109,6 +111,53 @@ object ChatCore {
         }
     }
 
+    // ----------------- NEW: helper for reading and optional decryption -----------------
+    // If file content starts with the Secure FORMAT_VERSION ("v1:"), try to decrypt using
+    // password read from SharedPreferences under key "pref_encryption_password".
+    // Returns plaintext (possibly decrypted) or null if reading/decryption failed.
+    private fun readDocumentFileTextMaybeDecrypt(context: Context, file: DocumentFile): String? {
+        try {
+            context.contentResolver.openInputStream(file.uri)?.use { ins ->
+                val rawBytes = ins.readBytes()
+                val rawText = try {
+                    String(rawBytes, Charsets.UTF_8)
+                } catch (_: Exception) {
+                    return null
+                }
+                val trimmed = rawText.trim()
+                // Recognize Secure format by prefix "v1:"
+                if (trimmed.startsWith("v1:")) {
+                    // Get password from SharedPreferences (open/plain per spec)
+                    val prefs = PreferenceManager.getDefaultSharedPreferences(context)
+                    val passwordStr = prefs.getString("pref_encryption_password", null)
+                    if (passwordStr.isNullOrEmpty()) {
+                        // No password available -> cannot decrypt
+                        return null
+                    }
+                    val passChars = passwordStr.toCharArray()
+                    try {
+                        return try {
+                            Secure.decrypt(passChars, trimmed)
+                        } catch (_: Exception) {
+                            // decryption failed
+                            null
+                        }
+                    } finally {
+                        Arrays.fill(passChars, '\u0000')
+                    }
+                } else {
+                    // Plaintext file
+                    return rawText
+                }
+            }
+        } catch (_: Exception) {
+            // silent failure (no logs)
+            return null
+        }
+        return null
+    }
+    // ----------------- END NEW helper -----------------
+
     private fun loadContextTemplatesFromFolder(
         context: Context,
         folderUri: Uri?,
@@ -122,35 +171,34 @@ object ChatCore {
             val dir = DocumentFile.fromTreeUri(context, uri) ?: return
             val file = dir.findFile("context.txt") ?: return
             if (!file.exists()) return
-            context.contentResolver.openInputStream(file.uri)?.use { ins ->
-                InputStreamReader(ins, Charsets.UTF_8).buffered().useLines { lines ->
-                    lines.forEach { raw ->
-                        val l = raw.trim()
-                        if (l.isEmpty()) return@forEach
-                        try {
-                            if (l.startsWith("$")) {
-                                val parts = l.substring(1).split("=", limit = 2).map { it.trim() }
-                                if (parts.size == 2) {
-                                    val keyNorm = Engine.normalizeText(parts[0])
-                                    val keyTokens = Engine.filterStopwordsAndMapSynonymsStatic(keyNorm, synonymsSnapshot, stopwordsSnapshot).first
-                                    val keyCanon = keyTokens.sorted().joinToString(" ")
-                                    if (keyCanon.isNotEmpty()) contextRecallMap[keyCanon] = parts[1]
-                                }
-                            } else {
-                                val parts = l.split("=", limit = 2).map { it.trim() }
-                                val patternRaw = parts[0]
-                                val response = parts.getOrNull(1)
-                                if (!patternRaw.contains("{}")) return@forEach
-                                val segs = patternRaw.split("{}", limit = 2)
-                                val leftNorm = Engine.normalizeText(segs[0])
-                                val rightNorm = Engine.normalizeText(segs.getOrNull(1) ?: "")
-                                val leftTokens = Engine.filterStopwordsAndMapSynonymsStatic(leftNorm, synonymsSnapshot, stopwordsSnapshot).first
-                                val rightTokens = Engine.filterStopwordsAndMapSynonymsStatic(rightNorm, synonymsSnapshot, stopwordsSnapshot).first
-                                contextPatterns.add(ContextPattern(leftTokens, rightTokens, response))
-                            }
-                        } catch (_: Exception) {
+
+            // <<< CHANGED: read whole file (possibly decrypted) into memory, then iterate lines
+            val content = readDocumentFileTextMaybeDecrypt(context, file) ?: return
+            content.lines().forEach { raw ->
+                val l = raw.trim()
+                if (l.isEmpty()) return@forEach
+                try {
+                    if (l.startsWith("$")) {
+                        val parts = l.substring(1).split("=", limit = 2).map { it.trim() }
+                        if (parts.size == 2) {
+                            val keyNorm = Engine.normalizeText(parts[0])
+                            val keyTokens = Engine.filterStopwordsAndMapSynonymsStatic(keyNorm, synonymsSnapshot, stopwordsSnapshot).first
+                            val keyCanon = keyTokens.sorted().joinToString(" ")
+                            if (keyCanon.isNotEmpty()) contextRecallMap[keyCanon] = parts[1]
                         }
+                    } else {
+                        val parts = l.split("=", limit = 2).map { it.trim() }
+                        val patternRaw = parts[0]
+                        val response = parts.getOrNull(1)
+                        if (!patternRaw.contains("{}")) return@forEach
+                        val segs = patternRaw.split("{}", limit = 2)
+                        val leftNorm = Engine.normalizeText(segs[0])
+                        val rightNorm = Engine.normalizeText(segs.getOrNull(1) ?: "")
+                        val leftTokens = Engine.filterStopwordsAndMapSynonymsStatic(leftNorm, synonymsSnapshot, stopwordsSnapshot).first
+                        val rightTokens = Engine.filterStopwordsAndMapSynonymsStatic(rightNorm, synonymsSnapshot, stopwordsSnapshot).first
+                        contextPatterns.add(ContextPattern(leftTokens, rightTokens, response))
                     }
+                } catch (_: Exception) {
                 }
             }
         } catch (_: Exception) {
@@ -169,31 +217,33 @@ object ChatCore {
         try {
             val dir = DocumentFile.fromTreeUri(context, uri) ?: return
             dir.findFile("synonims.txt")?.takeIf { it.exists() }?.let { synFile ->
-                context.contentResolver.openInputStream(synFile.uri)?.use { ins ->
-                    InputStreamReader(ins, Charsets.UTF_8).buffered().useLines { lines ->
-                        lines.forEach { raw ->
-                            var l = raw.trim()
-                            if (l.isEmpty()) return@forEach
-                            if (l.startsWith("*") && l.endsWith("*") && l.length > 1) {
-                                l = l.substring(1, l.length - 1)
-                            }
-                            val parts = l.split(";").map { Engine.normalizeText(it) }.filter { it.isNotEmpty() }
-                            if (parts.isNotEmpty()) {
-                                val canonical = parts.last()
-                                parts.forEach { p -> synonymsMap[p] = canonical }
-                            }
+                try {
+                    val content = readDocumentFileTextMaybeDecrypt(context, synFile) ?: return@let
+                    content.lines().forEach { raw ->
+                        var l = raw.trim()
+                        if (l.isEmpty()) return@forEach
+                        if (l.startsWith("*") && l.endsWith("*") && l.length > 1) {
+                            l = l.substring(1, l.length - 1)
+                        }
+                        val parts = l.split(";").map { Engine.normalizeText(it) }.filter { it.isNotEmpty() }
+                        if (parts.isNotEmpty()) {
+                            val canonical = parts.last()
+                            parts.forEach { p -> synonymsMap[p] = canonical }
                         }
                     }
+                } catch (_: Exception) {
+                    // silent
                 }
             }
             dir.findFile("stopwords.txt")?.takeIf { it.exists() }?.let { stopFile ->
-                context.contentResolver.openInputStream(stopFile.uri)?.use { ins ->
-                    InputStreamReader(ins, Charsets.UTF_8).buffered().use { reader ->
-                        val parts = reader.readText().split(Regex("[\\r\\n\\t,|^;]+"))
-                            .map { Engine.normalizeText(it) }
-                            .filter { it.isNotEmpty() }
-                        stopwords.addAll(parts)
-                    }
+                try {
+                    val content = readDocumentFileTextMaybeDecrypt(context, stopFile) ?: return@let
+                    val parts = content.split(Regex("[\\r\\n\\t,|^;]+"))
+                        .map { Engine.normalizeText(it) }
+                        .filter { it.isNotEmpty() }
+                    stopwords.addAll(parts)
+                } catch (_: Exception) {
+                    // silent
                 }
             }
         } catch (_: Exception) {
@@ -214,32 +264,31 @@ object ChatCore {
             val dir = DocumentFile.fromTreeUri(context, uriLocal) ?: return Pair(templates, keywords)
             val file = dir.findFile(filename) ?: return Pair(templates, keywords)
             if (!file.exists()) return Pair(templates, keywords)
-            context.contentResolver.openInputStream(file.uri)?.use { ins ->
-                InputStreamReader(ins, Charsets.UTF_8).buffered().useLines { lines ->
-                    lines.forEach { raw ->
-                        val l = raw.trim()
-                        if (l.isEmpty()) return@forEach
-                        try {
-                            if (l.startsWith("-")) {
-                                val (key, respRaw) = l.substring(1).split("=", limit = 2).map { it.trim() }
-                                val keyTokens = Engine.filterStopwordsAndMapSynonymsStatic(key, synonymsSnapshot, stopwordsSnapshot).first
-                                val keyMapped = keyTokens.sorted().joinToString(" ")
-                                val responses = respRaw.split("|").map { it.trim() }.filter { it.isNotEmpty() }
-                                if (keyMapped.isNotEmpty() && responses.isNotEmpty()) {
-                                    keywords[keyMapped] = responses.toMutableList()
-                                }
-                            } else if (l.contains("=")) {
-                                val (trigger, respRaw) = l.split("=", limit = 2).map { it.trim() }
-                                val triggerTokens = Engine.filterStopwordsAndMapSynonymsStatic(trigger, synonymsSnapshot, stopwordsSnapshot).first
-                                val triggerMapped = triggerTokens.sorted().joinToString(" ")
-                                val responses = respRaw.split("|").map { it.trim() }.filter { it.isNotEmpty() }
-                                if (triggerMapped.isNotEmpty() && responses.isNotEmpty()) {
-                                    templates[triggerMapped] = responses.toMutableList()
-                                }
-                            }
-                        } catch (_: Exception) {
+
+            // <<< CHANGED: read whole file (possibly decrypted) into memory, then iterate lines
+            val content = readDocumentFileTextMaybeDecrypt(context, file) ?: return Pair(templates, keywords)
+            content.lines().forEach { raw ->
+                val l = raw.trim()
+                if (l.isEmpty()) return@forEach
+                try {
+                    if (l.startsWith("-")) {
+                        val (key, respRaw) = l.substring(1).split("=", limit = 2).map { it.trim() }
+                        val keyTokens = Engine.filterStopwordsAndMapSynonymsStatic(key, synonymsSnapshot, stopwordsSnapshot).first
+                        val keyMapped = keyTokens.sorted().joinToString(" ")
+                        val responses = respRaw.split("|").map { it.trim() }.filter { it.isNotEmpty() }
+                        if (keyMapped.isNotEmpty() && responses.isNotEmpty()) {
+                            keywords[keyMapped] = responses.toMutableList()
+                        }
+                    } else if (l.contains("=")) {
+                        val (trigger, respRaw) = l.split("=", limit = 2).map { it.trim() }
+                        val triggerTokens = Engine.filterStopwordsAndMapSynonymsStatic(trigger, synonymsSnapshot, stopwordsSnapshot).first
+                        val triggerMapped = triggerTokens.sorted().joinToString(" ")
+                        val responses = respRaw.split("|").map { it.trim() }.filter { it.isNotEmpty() }
+                        if (triggerMapped.isNotEmpty() && responses.isNotEmpty()) {
+                            templates[triggerMapped] = responses.toMutableList()
                         }
                     }
+                } catch (_: Exception) {
                 }
             }
         } catch (_: Exception) {
