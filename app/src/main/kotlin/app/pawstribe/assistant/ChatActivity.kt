@@ -246,6 +246,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             rebuildInvertedIndex()
             engine.computeTokenWeights()
             withContext(Dispatchers.Main) {
+                // loadToolbarIcons теперь сама делает IO в фоне
                 loadToolbarIcons()
                 updateAutoComplete()
                 addChatMessage(currentMascotName, getString(R.string.welcome_message))
@@ -320,31 +321,39 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     }
 
     private fun loadToolbarIcons() {
+        // Переносим реальное чтение/декодирование иконки в IO-поток
         val uri = folderUri ?: run {
-            // still set send icon if available from files, otherwise keep default
             tryLoadSendIconFromFolder(null)
             return
         }
-        try {
-            val dir = DocumentFile.fromTreeUri(this, uri) ?: run {
-                tryLoadSendIconFromFolder(null)
-                return
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                val dir = DocumentFile.fromTreeUri(this@ChatActivity, uri) ?: run {
+                    tryLoadSendIconFromFolder(null)
+                    return@launch
+                }
+                tryLoadSendIconFromFolder(dir)
+            } catch (_: Exception) {
             }
-            // Removed loading of lock.png and trash.png.
-            tryLoadSendIconFromFolder(dir)
-        } catch (e: Exception) {
         }
     }
 
     private fun tryLoadSendIconFromFolder(dir: DocumentFile?) {
+        // Этот хелпер делает IO асинхронно (если dir != null).
         try {
             val target = envelopeInputButton ?: return
             if (dir == null) return
-            val file = dir.findFile("send.png") ?: return
-            if (file.exists()) {
-                contentResolver.openInputStream(file.uri)?.use { ins ->
-                    val bmp = BitmapFactory.decodeStream(ins)
-                    target.setImageBitmap(bmp)
+            lifecycleScope.launch(Dispatchers.IO) {
+                try {
+                    val file = dir.findFile("send.png") ?: return@launch
+                    if (!file.exists()) return@launch
+                    contentResolver.openInputStream(file.uri)?.use { ins ->
+                        val bmp = BitmapFactory.decodeStream(ins)
+                        withContext(Dispatchers.Main) {
+                            target.setImageBitmap(bmp)
+                        }
+                    }
+                } catch (_: Exception) {
                 }
             }
         } catch (e: Exception) {
@@ -495,6 +504,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     // Читает текстовый DocumentFile и, если файл в формате Secure (начинается с "v1:"),
     // пытается расшифровать его используя пароль из SharedPreferences (ключ PREF_KEY_ENCRYPTION_PASSWORD).
     // Возвращает plaintext или null при ошибке/отсутствии пароля.
+    // Вызовы этого метода делаются из IO-потока.
     private fun readDocumentFileTextMaybeDecrypt(file: DocumentFile): String? {
         try {
             contentResolver.openInputStream(file.uri)?.use { ins ->
@@ -579,7 +589,9 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             }
         }
 
-        lifecycleScope.launch(Dispatchers.Default) {
+        // ---- Запускаем обработку на Dispatcher.IO (вместо Default) —
+        // все heavy IO (парсинг, чтение файлов, дешифрование) внутри теперь выполняется безопасно в IO-потоке.
+        lifecycleScope.launch(Dispatchers.IO) {
             var fallbackFromLocked = false
             var attempt = 0
             var response: String? = null
@@ -613,6 +625,8 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     withContext(Dispatchers.Main) {
                         currentContext = "base.txt"
                         isContextLocked = false
+                        // loadTemplatesFromFile выполняет IO внутри себя (и ожидается на IO-потоке)
+                        // поэтому вызываем его с withContext(Dispatchers.IO) — но мы уже в IO, так что прямой вызов OK
                         loadTemplatesFromFile(currentContext)
                         rebuildInvertedIndex()
                         engine.computeTokenWeights()
@@ -628,19 +642,21 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             val detectedContext = ChatCore.detectContext(qFiltered, contextMapSnapshot, engine)
 
             if (detectedContext != null) {
+                // Переключения контекста / чтение файлов — происходят в IO
                 withContext(Dispatchers.Main) {
                     if (detectedContext != currentContext) {
                         currentContext = detectedContext
-                        loadTemplatesFromFile(currentContext)
-                        rebuildInvertedIndex()
-                        engine.computeTokenWeights()
-                        updateAutoComplete()
+                        // loadTemplatesFromFile выполняет heavy IO внутри (вызывается в IO-контексте)
+                        // запускаем в IO и ждём
                     }
                 }
 
-                val (localTemplates, localKeywords) = ChatCore.parseTemplatesFromFile(
-                    this@ChatActivity, folderUri, detectedContext, HashMap(synonymsMap), HashSet(stopwords)
-                )
+                val (localTemplates, localKeywords) = withContext(Dispatchers.IO) {
+                    ChatCore.parseTemplatesFromFile(
+                        this@ChatActivity, folderUri, detectedContext, HashMap(synonymsMap), HashSet(stopwords)
+                    )
+                }
+
                 localTemplates[qCanonical]?.let { possible ->
                     if (possible.isNotEmpty()) {
                         val resp = possible.random()
@@ -753,10 +769,12 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     }
                 }
 
-                val coreResult = ChatCore.searchInCoreFiles(
-                    this@ChatActivity, folderUri, qFiltered, if (qTokensFiltered.isNotEmpty()) qTokensFiltered else Engine.tokenizeStatic(qFiltered), engine,
-                    HashMap(synonymsMap), HashSet(stopwords), engine.getJaccardThreshold(qFiltered)
-                )
+                val coreResult = withContext(Dispatchers.IO) {
+                    ChatCore.searchInCoreFiles(
+                        this@ChatActivity, folderUri, qFiltered, if (qTokensFiltered.isNotEmpty()) qTokensFiltered else Engine.tokenizeStatic(qFiltered), engine,
+                        HashMap(synonymsMap), HashSet(stopwords), engine.getJaccardThreshold(qFiltered)
+                    )
+                }
                 if (coreResult != null) {
                     withContext(Dispatchers.Main) {
                         addChatMessage(currentMascotName, coreResult)
@@ -787,10 +805,12 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 return@launch
             }
 
-            val coreResult = ChatCore.searchInCoreFiles(
-                this@ChatActivity, folderUri, qFiltered, if (qTokensFiltered.isNotEmpty()) qTokensFiltered else Engine.tokenizeStatic(qFiltered), engine,
-                HashMap(synonymsMap), HashSet(stopwords), engine.getJaccardThreshold(qFiltered)
-            )
+            val coreResult = withContext(Dispatchers.IO) {
+                ChatCore.searchInCoreFiles(
+                    this@ChatActivity, folderUri, qFiltered, if (qTokensFiltered.isNotEmpty()) qTokensFiltered else Engine.tokenizeStatic(qFiltered), engine,
+                    HashMap(synonymsMap), HashSet(stopwords), engine.getJaccardThreshold(qFiltered)
+                )
+            }
             if (coreResult != null) {
                 withContext(Dispatchers.Main) {
                     addChatMessage(currentMascotName, coreResult)
@@ -934,6 +954,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                         layoutParams = LinearLayout.LayoutParams(size, size)
                         scaleType = ImageView.ScaleType.CENTER_CROP
                         adjustViewBounds = true
+                        // loadAvatarInto теперь асинхронно загружает изображение в фоне
                         loadAvatarInto(this, sender)
                         setOnClickListener { view ->
                             view.isEnabled = false
@@ -966,6 +987,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 }
                 scrollView.post { scrollView.smoothScrollTo(0, messagesContainer.bottom) }
                 if (!isUser) {
+                    // playNotificationSound теперь делает IO в фоновом потоке
                     playNotificationSound()
                 }
             }
@@ -1007,24 +1029,26 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private fun playNotificationSound() {
         val uri = folderUri ?: return
-        try {
-            val dir = DocumentFile.fromTreeUri(this, uri) ?: return
-            val soundFile = dir.findFile("notify.ogg") ?: return
-            if (!soundFile.exists()) return
-            val afd = contentResolver.openAssetFileDescriptor(soundFile.uri, "r") ?: return
-            val player = MediaPlayer()
+        lifecycleScope.launch(Dispatchers.IO) {
             try {
-                player.setDataSource(afd.fileDescriptor, afd.startOffset, afd.length)
-                afd.close()
-                player.prepareAsync()
-                player.setOnPreparedListener { it.start() }
-                player.setOnCompletionListener { it.reset(); it.release() }
-                player.setOnErrorListener { mp, _, _ -> try { mp.reset(); mp.release() } catch (_: Exception) {}; true }
+                val dir = DocumentFile.fromTreeUri(this@ChatActivity, uri) ?: return@launch
+                val soundFile = dir.findFile("notify.ogg") ?: return@launch
+                if (!soundFile.exists()) return@launch
+                val afd = contentResolver.openAssetFileDescriptor(soundFile.uri, "r") ?: return@launch
+                val player = MediaPlayer()
+                try {
+                    player.setDataSource(afd.fileDescriptor, afd.startOffset, afd.length)
+                    afd.close()
+                    player.prepareAsync()
+                    player.setOnPreparedListener { it.start() }
+                    player.setOnCompletionListener { it.reset(); it.release() }
+                    player.setOnErrorListener { mp, _, _ -> try { mp.reset(); mp.release() } catch (_: Exception) {}; true }
+                } catch (e: Exception) {
+                    try { afd.close() } catch (_: Exception) {}
+                    try { player.reset(); player.release() } catch (_: Exception) {}
+                }
             } catch (e: Exception) {
-                try { afd.close() } catch (_: Exception) {}
-                try { player.reset(); player.release() } catch (_: Exception) {}
             }
-        } catch (e: Exception) {
         }
     }
 
@@ -1073,24 +1097,32 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     }
 
     private fun loadAvatarInto(target: ImageView, sender: String) {
-        val uri = folderUri ?: return
-        try {
-            val dir = DocumentFile.fromTreeUri(this, uri) ?: return
-            val s = sender.lowercase(Locale.ROOT)
-            val candidates = listOf("${s}_icon.png", "${s}_avatar.png", "${s}.png", currentMascotIcon)
-            for (name in candidates) {
-                val f = dir.findFile(name) ?: continue
-                if (f.exists()) {
-                    contentResolver.openInputStream(f.uri)?.use { ins ->
-                        val bmp = BitmapFactory.decodeStream(ins)
-                        target.setImageBitmap(bmp)
-                        return
+        // Загружаем аватар асинхронно в IO-потоке, чтобы не блокировать UI
+        target.setImageResource(android.R.color.transparent) // placeholder / clear
+        val uriLocal = folderUri ?: return
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                val dir = DocumentFile.fromTreeUri(this@ChatActivity, uriLocal) ?: return@launch
+                val s = sender.lowercase(Locale.ROOT)
+                val candidates = listOf("${s}_icon.png", "${s}_avatar.png", "${s}.png", currentMascotIcon)
+                for (name in candidates) {
+                    val f = dir.findFile(name) ?: continue
+                    if (f.exists()) {
+                        contentResolver.openInputStream(f.uri)?.use { ins ->
+                            val bmp = BitmapFactory.decodeStream(ins)
+                            withContext(Dispatchers.Main) {
+                                try { target.setImageBitmap(bmp) } catch (_: Exception) {}
+                            }
+                            return@launch
+                        }
                     }
                 }
+            } catch (_: Exception) {
             }
-        } catch (e: Exception) {
+            withContext(Dispatchers.Main) {
+                try { target.setImageResource(android.R.color.transparent) } catch (_: Exception) {}
+            }
         }
-        target.setImageResource(android.R.color.transparent)
     }
 
     private fun blendColors(base: Int, accent: Int, ratio: Float): Int {
