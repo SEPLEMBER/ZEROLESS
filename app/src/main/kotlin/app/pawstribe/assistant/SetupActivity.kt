@@ -9,6 +9,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.lifecycleScope
+import androidx.preference.PreferenceManager
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.progressindicator.CircularProgressIndicator
 import kotlinx.coroutines.Dispatchers
@@ -58,6 +59,14 @@ class SetupActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_setup)
+
+        // Записываем пароль по умолчанию в default SharedPreferences,
+        // чтобы парсер/дешифровка имели рабочую метку/значение.
+        // Ключ совпадает с тем, который использует ChatCore/ChatActivity.
+        PreferenceManager.getDefaultSharedPreferences(this)
+            .edit()
+            .putString("pref_encryption_password", "Default_Keyx")
+            .apply()
 
         window.setFlags(
             android.view.WindowManager.LayoutParams.FLAG_FULLSCREEN,
