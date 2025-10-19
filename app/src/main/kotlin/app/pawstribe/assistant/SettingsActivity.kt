@@ -1,5 +1,6 @@
 package app.pawstribe.assistant
 
+import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
 import android.net.Uri
@@ -115,14 +116,22 @@ class SettingsActivity : AppCompatActivity() {
 
         // Save password to default SharedPreferences when the save button is clicked
         savePassButton.setOnClickListener {
-            val entered = passwordEditText.text?.toString() ?: ""
-            PreferenceManager.getDefaultSharedPreferences(this)
-                .edit()
-                .putString(PREF_ENCRYPTION_PASSWORD, entered)
-                .apply()
+            // get trimmed input and protect against empty
+            val enteredRaw = passwordEditText.text?.toString() ?: ""
+            val entered = enteredRaw.trim()
+
+            if (entered.isEmpty()) {
+                // не сохраняем пустую строку — это могло перезаписать рабочий default
+                Toast.makeText(this, R.string.password_cannot_be_empty, Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+
+            // Сохраняем синхронно в default SharedPreferences (parser использует default)
+            val defaultPrefs = PreferenceManager.getDefaultSharedPreferences(this)
+            defaultPrefs.edit().putString(PREF_ENCRYPTION_PASSWORD, entered).commit()
 
             // hide keyboard if open
-            val imm = getSystemService(INPUT_METHOD_SERVICE) as? InputMethodManager
+            val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
             imm?.hideSoftInputFromWindow(passwordEditText.windowToken, 0)
 
             Toast.makeText(this, R.string.password_saved, Toast.LENGTH_SHORT).show()
