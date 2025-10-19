@@ -212,50 +212,42 @@ object MemoryManager {
         return res
     }
 
-    /**
-     * Попытка восстановить исходную капитализацию:
-     * - токенизируем оригинальный текст,
-     * - нормализуем каждый токен,
-     * - ищем последовательность нормализованных токенов, равную нормализованной захваченной группе,
-     * - если нашли — возвращаем соответствующую последовательность оригинальных токенов.
-     */
-    private fun restoreOriginalCasing(originalText: String, normalizedCaptured: String): String {
-        try {
-            val origTokens = Engine.tokenizeStatic(originalText)
-            if (origTokens.isEmpty()) return normalizedCaptured
+/**
+ * Попытка восстановить исходную капитализацию:
+ * - токенизируем оригинальный текст,
+ * - нормализуем каждый токен,
+ * - ищем последовательность нормализованных токенов, равную нормализованной захваченной группе,
+ * - если нашли — возвращаем соответствующую последовательность оригинальных токенов.
+ */
+private fun restoreOriginalCasing(originalText: String, normalizedCaptured: String): String {
+    try {
+        val origTokens = Engine.tokenizeStatic(originalText)
+        if (origTokens.isEmpty()) return normalizedCaptured
 
-            val normOrigTokens = origTokens.map { Engine.normalizeText(it) }
-            val targetTokens = normalizedCaptured.split(Regex("\\s+")).map { Engine.normalizeText(it) }
+        val normOrigTokens = origTokens.map { Engine.normalizeText(it) }
+        val targetTokens = normalizedCaptured.split(Regex("\\s+")).map { Engine.normalizeText(it) }
 
-            if (targetTokens.isEmpty()) return normalizedCaptured
+        if (targetTokens.isEmpty()) return normalizedCaptured
+        if (targetTokens.size > normOrigTokens.size) return normalizedCaptured
 
-            // ищем подряд идущую последовательность
-            outer@ for (i in 0..(normOrigTokens.size - targetTokens.size)) {
-                for (j in targetTokens.indices) {
-                    if (normOrigTokens[i + j] != targetTokens[j]) continue@outerElse
-                }
-                // если цикл дошёл до конца — найдено (реализуем continue@outerElse выше)
-                // but Kotlin doesn't have labelled continue for inner; implement differently below
-            }
-
-            // Реализация поиска без goto/labels:
-            for (i in 0..(normOrigTokens.size - targetTokens.size)) {
-                var ok = true
-                for (j in targetTokens.indices) {
-                    if (normOrigTokens[i + j] != targetTokens[j]) {
-                        ok = false
-                        break
-                    }
-                }
-                if (ok) {
-                    // вернуть соответствующие оригинальные токены
-                    return origTokens.subList(i, i + targetTokens.size).joinToString(" ").trim()
+        for (i in 0..(normOrigTokens.size - targetTokens.size)) {
+            var ok = true
+            for (j in targetTokens.indices) {
+                if (normOrigTokens[i + j] != targetTokens[j]) {
+                    ok = false
+                    break
                 }
             }
-        } catch (_: Exception) {
+            if (ok) {
+                // вернуть соответствующие оригинальные токены
+                return origTokens.subList(i, i + targetTokens.size).joinToString(" ").trim()
+            }
         }
-        return normalizedCaptured
+    } catch (_: Exception) {
+        // fallback ниже
     }
+    return normalizedCaptured
+}
 
     /**
      * Получить значение захваченной группы.
