@@ -339,34 +339,43 @@ object MemoryManager {
             }
         }
 
-        for (tpl in vospominaniaTemplates) {
-            val m = tpl.regex.find(correctedMapped)
-            if (m != null) {
-                for (ph in tpl.placeholders) {
-                    val captured = getCapturedValue(m, tpl.placeholders, ph, text)
-                    if (!captured.isNullOrBlank()) {
-                        saveSlot(ph, captured)
-                    }
-                }
-
-                val placeholders = tpl.placeholders
-                val mainCaptured = if (placeholders.isNotEmpty()) getCapturedValue(m, placeholders, placeholders[0], text) else m.groupValues.getOrNull(1)
-                val obj = if (placeholders.size > 1) getCapturedValue(m, placeholders, placeholders[1], text) else null
-
-                val entry = MemoryEntry(
-                    type = "event",
-                    predicate = mainCaptured?.takeIf { it.isNotBlank() } ?: tpl.raw,
-                    obj = obj,
-                    rawText = text
-                )
-                pushMemory(entry)
-                val resp = tpl.responseTemplate?.let { renderResponseWithPlaceholders(it, m, tpl.placeholders, text) } ?: "Понял, запомню."
+// Замените существующий блок обработки zapominanieTemplates на этот:
+for (tpl in zapominanieTemplates) {
+    val m = tpl.regex.find(correctedMapped)
+    if (m != null) {
+        // Если шаблон имеет targetSlot (один слотовый плейсхолдер), обработаем его одинаково:
+        if (tpl.targetSlot != null) {
+            val slotValue = getCapturedValue(m, tpl.placeholders, tpl.targetSlot, text)
+            if (!slotValue.isNullOrBlank()) {
+                saveSlot(tpl.targetSlot, slotValue)
+                val resp = tpl.responseTemplate?.let { renderResponseWithPlaceholders(it, m, tpl.placeholders, text) }
+                    ?: "Запомнил."
                 return resp
             }
-        }
+        } else {
+            // Для общего случая: пройдём по всем плейсхолдерам и сохраним те, которые есть.
+            var anySaved = false
+            for (ph in tpl.placeholders) {
+                val captured = getCapturedValue(m, tpl.placeholders, ph, text)
+                if (!captured.isNullOrBlank()) {
+                    saveSlot(ph, captured)
+                    anySaved = true
+                }
+            }
 
-        return null
+            // Если что-то сохранили — вернём ответ шаблона (или дефолт)
+            if (anySaved) {
+                val resp = tpl.responseTemplate?.let { renderResponseWithPlaceholders(it, m, tpl.placeholders, text) }
+                    ?: "Запомнил."
+                return resp
+            } else {
+                // fallback: если ничего не сохранилось (маловероятно), попробуем старое поведение — рендер ответа без сохранения
+                val resp = tpl.responseTemplate?.let { renderResponseWithPlaceholders(it, m, tpl.placeholders, text) }
+                if (!resp.isNullOrBlank()) return resp
+            }
+        }
     }
+}
 
     private fun addRecentMessage(original: String, normalized: String) {
         recentMessages.addFirst(UserMessage(original, normalized))
