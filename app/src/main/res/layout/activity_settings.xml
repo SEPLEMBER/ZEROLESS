@@ -5,6 +5,32 @@
     android:layout_height="match_parent"
     android:background="@color/matte_black">
 
+    <!-- NEW: Password input placed at top and visually above other controls -->
+    <com.google.android.material.textfield.TextInputLayout
+        android:id="@+id/encryptionPasswordLayout"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:hint="Пароль"
+        app:endIconMode="password_toggle"
+        app:boxBackgroundMode="none"
+        android:layout_marginTop="16dp"
+        android:layout_marginStart="16dp"
+        android:layout_marginEnd="16dp"
+        android:translationZ="8dp"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent">
+
+        <com.google.android.material.textfield.TextInputEditText
+            android:id="@+id/encryptionPasswordInput"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:inputType="textPassword"
+            android:imeOptions="actionDone"
+            android:textColor="@android:color/white" />
+
+    </com.google.android.material.textfield.TextInputLayout>
+
     <com.google.android.material.switchmaterial.SwitchMaterial
         android:id="@+id/disableScreenshotsSwitch"
         android:layout_width="wrap_content"
