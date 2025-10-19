@@ -222,6 +222,7 @@
     <string name="option_other">&gt; Другое</string>
     <string name="note_experimental">Обратите внимание, что эта функция полностью экспериментальная.</string>
     <string name="enter_choice">Пожалуйста, выберите опцию.</string>
+        <string name="password_saved">Пароль сохранён.</string>
     <string name="redirect_english_finances">Перенаправление в финансы...</string>
     <string name="redirect_russian_finances">Перенаправление в финансы...</string>
     <string name="redirect_english_physics">Перенаправление в физику...</string>
