@@ -7,7 +7,6 @@ import android.util.Log
 import androidx.documentfile.provider.DocumentFile
 import java.io.InputStreamReader
 import java.util.ArrayDeque
-import java.util.Locale
 import java.util.regex.Pattern
 
 private const val TAG = "MemoryManager"
@@ -212,42 +211,42 @@ object MemoryManager {
         return res
     }
 
-/**
- * Попытка восстановить исходную капитализацию:
- * - токенизируем оригинальный текст,
- * - нормализуем каждый токен,
- * - ищем последовательность нормализованных токенов, равную нормализованной захваченной группе,
- * - если нашли — возвращаем соответствующую последовательность оригинальных токенов.
- */
-private fun restoreOriginalCasing(originalText: String, normalizedCaptured: String): String {
-    try {
-        val origTokens = Engine.tokenizeStatic(originalText)
-        if (origTokens.isEmpty()) return normalizedCaptured
+    /**
+     * Попытка восстановить исходную капитализацию:
+     * - токенизируем оригинальный текст,
+     * - нормализуем каждый токен,
+     * - ищем последовательность нормализованных токенов, равную нормализованной захваченной группе,
+     * - если нашли — возвращаем соответствующую последовательность оригинальных токенов.
+     */
+    private fun restoreOriginalCasing(originalText: String, normalizedCaptured: String): String {
+        try {
+            val origTokens = Engine.tokenizeStatic(originalText)
+            if (origTokens.isEmpty()) return normalizedCaptured
 
-        val normOrigTokens = origTokens.map { Engine.normalizeText(it) }
-        val targetTokens = normalizedCaptured.split(Regex("\\s+")).map { Engine.normalizeText(it) }
+            val normOrigTokens = origTokens.map { Engine.normalizeText(it) }
+            val targetTokens = normalizedCaptured.split(Regex("\\s+")).map { Engine.normalizeText(it) }
 
-        if (targetTokens.isEmpty()) return normalizedCaptured
-        if (targetTokens.size > normOrigTokens.size) return normalizedCaptured
+            if (targetTokens.isEmpty()) return normalizedCaptured
+            if (targetTokens.size > normOrigTokens.size) return normalizedCaptured
 
-        for (i in 0..(normOrigTokens.size - targetTokens.size)) {
-            var ok = true
-            for (j in targetTokens.indices) {
-                if (normOrigTokens[i + j] != targetTokens[j]) {
-                    ok = false
-                    break
+            for (i in 0..(normOrigTokens.size - targetTokens.size)) {
+                var ok = true
+                for (j in targetTokens.indices) {
+                    if (normOrigTokens[i + j] != targetTokens[j]) {
+                        ok = false
+                        break
+                    }
+                }
+                if (ok) {
+                    // вернуть соответствующие оригинальные токены
+                    return origTokens.subList(i, i + targetTokens.size).joinToString(" ").trim()
                 }
             }
-            if (ok) {
-                // вернуть соответствующие оригинальные токены
-                return origTokens.subList(i, i + targetTokens.size).joinToString(" ").trim()
-            }
+        } catch (_: Exception) {
+            // fallback ниже
         }
-    } catch (_: Exception) {
-        // fallback ниже
+        return normalizedCaptured
     }
-    return normalizedCaptured
-}
 
     /**
      * Получить значение захваченной группы.
@@ -312,11 +311,17 @@ private fun restoreOriginalCasing(originalText: String, normalizedCaptured: Stri
                         return resp
                     }
                 } else {
-                    // старый код использовал raw group; теперь берём через getCapturedValue чтобы восстановить капитализацию для name
-                    val val0 = getCapturedValue(m, tpl.placeholders, "name", text)
-                    if (!val0.isNullOrBlank()) {
+                    // получаем значение (с восстановлением капитализации для меток с "name")
+                    val maybeName = if (tpl.placeholders.contains("name")) {
+                        getCapturedValue(m, tpl.placeholders, "name", text)
+                    } else {
+                        // стандартный поведение: первая группа
+                        getCapturedValue(m, tpl.placeholders, tpl.placeholders.firstOrNull() ?: "", text)
+                    }
+
+                    if (!maybeName.isNullOrBlank()) {
                         if (tpl.placeholders.contains("name")) {
-                            saveSlot("name", val0)
+                            saveSlot("name", maybeName)
                             val resp = tpl.responseTemplate?.let { renderResponseWithPlaceholders(it, m, tpl.placeholders, text) } ?: "Запомню это."
                             return resp
                         } else {
@@ -324,7 +329,6 @@ private fun restoreOriginalCasing(originalText: String, normalizedCaptured: Stri
                             if (!resp.isNullOrBlank()) return resp
                         }
                     } else {
-                        // если getCapturedValue вернул null, пытаемся старым способом
                         val valOld = m.groupValues.getOrNull(1)?.trim()
                         if (!valOld.isNullOrBlank()) {
                             val resp = tpl.responseTemplate?.let { renderResponseWithPlaceholders(it, m, tpl.placeholders, text) }
