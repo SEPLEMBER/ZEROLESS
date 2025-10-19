@@ -122,7 +122,7 @@ class SettingsActivity : AppCompatActivity() {
                 .apply()
 
             // hide keyboard if open
-            val imm = getSystemService(INPUT_METHOD_MANAGER) as? InputMethodManager
+            val imm = getSystemService(INPUT_METHOD_SERVICE) as? InputMethodManager
             imm?.hideSoftInputFromWindow(passwordEditText.windowToken, 0)
 
             Toast.makeText(this, R.string.password_saved, Toast.LENGTH_SHORT).show()
