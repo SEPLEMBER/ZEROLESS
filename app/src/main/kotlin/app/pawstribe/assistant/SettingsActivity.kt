@@ -9,8 +9,10 @@ import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
+import androidx.preference.PreferenceManager
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.switchmaterial.SwitchMaterial
+import com.google.android.material.textfield.TextInputEditText
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -71,6 +73,14 @@ class SettingsActivity : AppCompatActivity() {
         backButton = findViewById(R.id.backButton)
         disableScreenshotsSwitch = findViewById(R.id.disableScreenshotsSwitch)
 
+        // --- NEW: password input view (Material) ---
+        val encryptionPasswordInput = findViewById<TextInputEditText>(R.id.encryptionPasswordInput)
+        // load existing password from default SharedPreferences (if any)
+        PreferenceManager.getDefaultSharedPreferences(this)
+            .getString("pref_encryption_password", null)
+            ?.let { encryptionPasswordInput.setText(it) }
+        // ------------------------------------------------
+
         if (prefs.getBoolean(PREF_KEY_DISABLE_SCREENSHOTS, false)) {
             window.setFlags(
                 WindowManager.LayoutParams.FLAG_SECURE,
@@ -114,6 +124,14 @@ class SettingsActivity : AppCompatActivity() {
         }
 
         backButton.setOnClickListener {
+            // --- NEW: save password into default SharedPreferences under required key ---
+            val pwd = encryptionPasswordInput.text?.toString() ?: ""
+            PreferenceManager.getDefaultSharedPreferences(this)
+                .edit()
+                .putString("pref_encryption_password", pwd)
+                .apply()
+            // ------------------------------------------------
+
             val intent = Intent(this, MainActivity::class.java)
             intent.putExtra("folderUri", folderUri)
             intent.putExtra("disableScreenshots", disableScreenshotsSwitch.isChecked)
