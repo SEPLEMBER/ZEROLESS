@@ -212,15 +212,75 @@ object MemoryManager {
         return res
     }
 
-    private fun getCapturedValue(match: MatchResult, placeholders: List<String>, name: String): String? {
-        val idx = placeholders.indexOf(name)
-        if (idx >= 0) {
-            return match.groupValues.getOrNull(idx + 1)?.trim()?.takeIf { it.isNotBlank() }
+    /**
+     * Попытка восстановить исходную капитализацию:
+     * - токенизируем оригинальный текст,
+     * - нормализуем каждый токен,
+     * - ищем последовательность нормализованных токенов, равную нормализованной захваченной группе,
+     * - если нашли — возвращаем соответствующую последовательность оригинальных токенов.
+     */
+    private fun restoreOriginalCasing(originalText: String, normalizedCaptured: String): String {
+        try {
+            val origTokens = Engine.tokenizeStatic(originalText)
+            if (origTokens.isEmpty()) return normalizedCaptured
+
+            val normOrigTokens = origTokens.map { Engine.normalizeText(it) }
+            val targetTokens = normalizedCaptured.split(Regex("\\s+")).map { Engine.normalizeText(it) }
+
+            if (targetTokens.isEmpty()) return normalizedCaptured
+
+            // ищем подряд идущую последовательность
+            outer@ for (i in 0..(normOrigTokens.size - targetTokens.size)) {
+                for (j in targetTokens.indices) {
+                    if (normOrigTokens[i + j] != targetTokens[j]) continue@outerElse
+                }
+                // если цикл дошёл до конца — найдено (реализуем continue@outerElse выше)
+                // but Kotlin doesn't have labelled continue for inner; implement differently below
+            }
+
+            // Реализация поиска без goto/labels:
+            for (i in 0..(normOrigTokens.size - targetTokens.size)) {
+                var ok = true
+                for (j in targetTokens.indices) {
+                    if (normOrigTokens[i + j] != targetTokens[j]) {
+                        ok = false
+                        break
+                    }
+                }
+                if (ok) {
+                    // вернуть соответствующие оригинальные токены
+                    return origTokens.subList(i, i + targetTokens.size).joinToString(" ").trim()
+                }
+            }
+        } catch (_: Exception) {
         }
-        return match.groupValues.getOrNull(1)?.trim()?.takeIf { it.isNotBlank() }
+        return normalizedCaptured
     }
 
-    private fun renderResponseWithPlaceholders(template: String, match: MatchResult, placeholders: List<String>): String {
+    /**
+     * Получить значение захваченной группы.
+     * Если originalText задан и метка похожа на имя (contains "name"), пытаемся восстановить оригинальную капитализацию.
+     */
+    private fun getCapturedValue(match: MatchResult, placeholders: List<String>, name: String, originalText: String? = null): String? {
+        val idx = placeholders.indexOf(name)
+        val rawCaptured = if (idx >= 0) {
+            match.groupValues.getOrNull(idx + 1)?.trim()
+        } else {
+            match.groupValues.getOrNull(1)?.trim()
+        } ?: return null
+
+        if (rawCaptured.isBlank()) return null
+
+        // Если метка содержит "name" — пробуем восстановить оригинальную капитализацию из originalText
+        if (name.contains("name", ignoreCase = true) && !originalText.isNullOrBlank()) {
+            val restored = restoreOriginalCasing(originalText, rawCaptured)
+            return restored
+        }
+
+        return rawCaptured
+    }
+
+    private fun renderResponseWithPlaceholders(template: String, match: MatchResult, placeholders: List<String>, originalText: String? = null): String {
         val chosen = if (template.contains("|")) {
             val parts = template.split("|").map { it.trim() }.filter { it.isNotEmpty() }
             if (parts.isEmpty()) template else parts.random()
@@ -229,7 +289,7 @@ object MemoryManager {
         var out = chosen
         placeholderRegex.findAll(chosen).forEach { m ->
             val name = m.groupValues[1]
-            val valFromMatch = getCapturedValue(match, placeholders, name)
+            val valFromMatch = getCapturedValue(match, placeholders, name, originalText)
             val replacement = when {
                 !valFromMatch.isNullOrBlank() -> valFromMatch
                 else -> readSlot(name) ?: ""
@@ -252,22 +312,30 @@ object MemoryManager {
             val m = tpl.regex.find(correctedMapped)
             if (m != null) {
                 if (tpl.targetSlot != null) {
-                    val slotValue = getCapturedValue(m, tpl.placeholders, tpl.targetSlot)
+                    val slotValue = getCapturedValue(m, tpl.placeholders, tpl.targetSlot, text)
                     if (!slotValue.isNullOrBlank()) {
                         saveSlot(tpl.targetSlot, slotValue)
-                        val resp = tpl.responseTemplate?.let { renderResponseWithPlaceholders(it, m, tpl.placeholders) }
+                        val resp = tpl.responseTemplate?.let { renderResponseWithPlaceholders(it, m, tpl.placeholders, text) }
                             ?: "Запомнил."
                         return resp
                     }
                 } else {
-                    val val0 = m.groupValues.getOrNull(1)?.trim()
+                    // старый код использовал raw group; теперь берём через getCapturedValue чтобы восстановить капитализацию для name
+                    val val0 = getCapturedValue(m, tpl.placeholders, "name", text)
                     if (!val0.isNullOrBlank()) {
                         if (tpl.placeholders.contains("name")) {
                             saveSlot("name", val0)
-                            val resp = tpl.responseTemplate?.let { renderResponseWithPlaceholders(it, m, tpl.placeholders) } ?: "Запомню это."
+                            val resp = tpl.responseTemplate?.let { renderResponseWithPlaceholders(it, m, tpl.placeholders, text) } ?: "Запомню это."
                             return resp
                         } else {
-                            val resp = tpl.responseTemplate?.let { renderResponseWithPlaceholders(it, m, tpl.placeholders) }
+                            val resp = tpl.responseTemplate?.let { renderResponseWithPlaceholders(it, m, tpl.placeholders, text) }
+                            if (!resp.isNullOrBlank()) return resp
+                        }
+                    } else {
+                        // если getCapturedValue вернул null, пытаемся старым способом
+                        val valOld = m.groupValues.getOrNull(1)?.trim()
+                        if (!valOld.isNullOrBlank()) {
+                            val resp = tpl.responseTemplate?.let { renderResponseWithPlaceholders(it, m, tpl.placeholders, text) }
                             if (!resp.isNullOrBlank()) return resp
                         }
                     }
@@ -279,15 +347,15 @@ object MemoryManager {
             val m = tpl.regex.find(correctedMapped)
             if (m != null) {
                 for (ph in tpl.placeholders) {
-                    val captured = getCapturedValue(m, tpl.placeholders, ph)
+                    val captured = getCapturedValue(m, tpl.placeholders, ph, text)
                     if (!captured.isNullOrBlank()) {
                         saveSlot(ph, captured)
                     }
                 }
 
                 val placeholders = tpl.placeholders
-                val mainCaptured = if (placeholders.isNotEmpty()) getCapturedValue(m, placeholders, placeholders[0]) else m.groupValues.getOrNull(1)
-                val obj = if (placeholders.size > 1) getCapturedValue(m, placeholders, placeholders[1]) else null
+                val mainCaptured = if (placeholders.isNotEmpty()) getCapturedValue(m, placeholders, placeholders[0], text) else m.groupValues.getOrNull(1)
+                val obj = if (placeholders.size > 1) getCapturedValue(m, placeholders, placeholders[1], text) else null
 
                 val entry = MemoryEntry(
                     type = "event",
@@ -296,7 +364,7 @@ object MemoryManager {
                     rawText = text
                 )
                 pushMemory(entry)
-                val resp = tpl.responseTemplate?.let { renderResponseWithPlaceholders(it, m, tpl.placeholders) } ?: "Понял, запомню."
+                val resp = tpl.responseTemplate?.let { renderResponseWithPlaceholders(it, m, tpl.placeholders, text) } ?: "Понял, запомню."
                 return resp
             }
         }
