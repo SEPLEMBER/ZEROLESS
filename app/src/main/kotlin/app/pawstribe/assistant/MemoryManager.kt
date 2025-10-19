@@ -7,6 +7,7 @@ import android.util.Log
 import androidx.documentfile.provider.DocumentFile
 import java.io.InputStreamReader
 import java.util.ArrayDeque
+import java.util.Locale
 import java.util.regex.Pattern
 
 private const val TAG = "MemoryManager"
@@ -211,67 +212,27 @@ object MemoryManager {
         return res
     }
 
-    /**
-     * Попытка восстановить исходную капитализацию:
-     * - токенизируем оригинальный текст,
-     * - нормализуем каждый токен,
-     * - ищем последовательность нормализованных токенов, равную нормализованной захваченной группе,
-     * - если нашли — возвращаем соответствующую последовательность оригинальных токенов.
-     */
-    private fun restoreOriginalCasing(originalText: String, normalizedCaptured: String): String {
-        try {
-            val origTokens = Engine.tokenizeStatic(originalText)
-            if (origTokens.isEmpty()) return normalizedCaptured
-
-            val normOrigTokens = origTokens.map { Engine.normalizeText(it) }
-            val targetTokens = normalizedCaptured.split(Regex("\\s+")).map { Engine.normalizeText(it) }
-
-            if (targetTokens.isEmpty()) return normalizedCaptured
-            if (targetTokens.size > normOrigTokens.size) return normalizedCaptured
-
-            for (i in 0..(normOrigTokens.size - targetTokens.size)) {
-                var ok = true
-                for (j in targetTokens.indices) {
-                    if (normOrigTokens[i + j] != targetTokens[j]) {
-                        ok = false
-                        break
-                    }
-                }
-                if (ok) {
-                    // вернуть соответствующие оригинальные токены
-                    return origTokens.subList(i, i + targetTokens.size).joinToString(" ").trim()
-                }
-            }
-        } catch (_: Exception) {
-            // fallback ниже
-        }
-        return normalizedCaptured
-    }
-
-    /**
-     * Получить значение захваченной группы.
-     * Если originalText задан и метка похожа на имя (contains "name"), пытаемся восстановить оригинальную капитализацию.
-     */
-    private fun getCapturedValue(match: MatchResult, placeholders: List<String>, name: String, originalText: String? = null): String? {
+    private fun getCapturedValue(match: MatchResult, placeholders: List<String>, name: String): String? {
         val idx = placeholders.indexOf(name)
-        val rawCaptured = if (idx >= 0) {
-            match.groupValues.getOrNull(idx + 1)?.trim()
-        } else {
-            match.groupValues.getOrNull(1)?.trim()
-        } ?: return null
-
-        if (rawCaptured.isBlank()) return null
-
-        // Если метка содержит "name" — пробуем восстановить оригинальную капитализацию из originalText
-        if (name.contains("name", ignoreCase = true) && !originalText.isNullOrBlank()) {
-            val restored = restoreOriginalCasing(originalText, rawCaptured)
-            return restored
+        if (idx >= 0) {
+            val value = match.groupValues.getOrNull(idx + 1)?.trim()?.takeIf { it.isNotBlank() }
+            // Если метка содержит "name", возвращаем значение без нормализации
+            return if (name.contains("name", ignoreCase = true)) {
+                value
+            } else {
+                value?.let { Engine.normalizeText(it) }
+            }
         }
-
-        return rawCaptured
+        val value = match.groupValues.getOrNull(1)?.trim()?.takeIf { it.isNotBlank() }
+        // Аналогично для случая без явной метки
+        return if (name.contains("name", ignoreCase = true)) {
+            value
+        } else {
+            value?.let { Engine.normalizeText(it) }
+        }
     }
 
-    private fun renderResponseWithPlaceholders(template: String, match: MatchResult, placeholders: List<String>, originalText: String? = null): String {
+    private fun renderResponseWithPlaceholders(template: String, match: MatchResult, placeholders: List<String>): String {
         val chosen = if (template.contains("|")) {
             val parts = template.split("|").map { it.trim() }.filter { it.isNotEmpty() }
             if (parts.isEmpty()) template else parts.random()
@@ -280,7 +241,7 @@ object MemoryManager {
         var out = chosen
         placeholderRegex.findAll(chosen).forEach { m ->
             val name = m.groupValues[1]
-            val valFromMatch = getCapturedValue(match, placeholders, name, originalText)
+            val valFromMatch = getCapturedValue(match, placeholders, name)
             val replacement = when {
                 !valFromMatch.isNullOrBlank() -> valFromMatch
                 else -> readSlot(name) ?: ""
@@ -303,35 +264,22 @@ object MemoryManager {
             val m = tpl.regex.find(correctedMapped)
             if (m != null) {
                 if (tpl.targetSlot != null) {
-                    val slotValue = getCapturedValue(m, tpl.placeholders, tpl.targetSlot, text)
+                    val slotValue = getCapturedValue(m, tpl.placeholders, tpl.targetSlot)
                     if (!slotValue.isNullOrBlank()) {
                         saveSlot(tpl.targetSlot, slotValue)
-                        val resp = tpl.responseTemplate?.let { renderResponseWithPlaceholders(it, m, tpl.placeholders, text) }
+                        val resp = tpl.responseTemplate?.let { renderResponseWithPlaceholders(it, m, tpl.placeholders) }
                             ?: "Запомнил."
                         return resp
                     }
                 } else {
-                    // получаем значение (с восстановлением капитализации для меток с "name")
-                    val maybeName = if (tpl.placeholders.contains("name")) {
-                        getCapturedValue(m, tpl.placeholders, "name", text)
-                    } else {
-                        // стандартный поведение: первая группа
-                        getCapturedValue(m, tpl.placeholders, tpl.placeholders.firstOrNull() ?: "", text)
-                    }
-
-                    if (!maybeName.isNullOrBlank()) {
+                    val val0 = m.groupValues.getOrNull(1)?.trim()
+                    if (!val0.isNullOrBlank()) {
                         if (tpl.placeholders.contains("name")) {
-                            saveSlot("name", maybeName)
-                            val resp = tpl.responseTemplate?.let { renderResponseWithPlaceholders(it, m, tpl.placeholders, text) } ?: "Запомню это."
+                            saveSlot("name", val0)
+                            val resp = tpl.responseTemplate?.let { renderResponseWithPlaceholders(it, m, tpl.placeholders) } ?: "Запомню это."
                             return resp
                         } else {
-                            val resp = tpl.responseTemplate?.let { renderResponseWithPlaceholders(it, m, tpl.placeholders, text) }
-                            if (!resp.isNullOrBlank()) return resp
-                        }
-                    } else {
-                        val valOld = m.groupValues.getOrNull(1)?.trim()
-                        if (!valOld.isNullOrBlank()) {
-                            val resp = tpl.responseTemplate?.let { renderResponseWithPlaceholders(it, m, tpl.placeholders, text) }
+                            val resp = tpl.responseTemplate?.let { renderResponseWithPlaceholders(it, m, tpl.placeholders) }
                             if (!resp.isNullOrBlank()) return resp
                         }
                     }
@@ -339,43 +287,34 @@ object MemoryManager {
             }
         }
 
-// Замените существующий блок обработки zapominanieTemplates на этот:
-for (tpl in zapominanieTemplates) {
-    val m = tpl.regex.find(correctedMapped)
-    if (m != null) {
-        // Если шаблон имеет targetSlot (один слотовый плейсхолдер), обработаем его одинаково:
-        if (tpl.targetSlot != null) {
-            val slotValue = getCapturedValue(m, tpl.placeholders, tpl.targetSlot, text)
-            if (!slotValue.isNullOrBlank()) {
-                saveSlot(tpl.targetSlot, slotValue)
-                val resp = tpl.responseTemplate?.let { renderResponseWithPlaceholders(it, m, tpl.placeholders, text) }
-                    ?: "Запомнил."
-                return resp
-            }
-        } else {
-            // Для общего случая: пройдём по всем плейсхолдерам и сохраним те, которые есть.
-            var anySaved = false
-            for (ph in tpl.placeholders) {
-                val captured = getCapturedValue(m, tpl.placeholders, ph, text)
-                if (!captured.isNullOrBlank()) {
-                    saveSlot(ph, captured)
-                    anySaved = true
+        for (tpl in vospominaniaTemplates) {
+            val m = tpl.regex.find(correctedMapped)
+            if (m != null) {
+                for (ph in tpl.placeholders) {
+                    val captured = getCapturedValue(m, tpl.placeholders, ph)
+                    if (!captured.isNullOrBlank()) {
+                        saveSlot(ph, captured)
+                    }
                 }
-            }
 
-            // Если что-то сохранили — вернём ответ шаблона (или дефолт)
-            if (anySaved) {
-                val resp = tpl.responseTemplate?.let { renderResponseWithPlaceholders(it, m, tpl.placeholders, text) }
-                    ?: "Запомнил."
+                val placeholders = tpl.placeholders
+                val mainCaptured = if (placeholders.isNotEmpty()) getCapturedValue(m, placeholders, placeholders[0]) else m.groupValues.getOrNull(1)
+                val obj = if (placeholders.size > 1) getCapturedValue(m, placeholders, placeholders[1]) else null
+
+                val entry = MemoryEntry(
+                    type = "event",
+                    predicate = mainCaptured?.takeIf { it.isNotBlank() } ?: tpl.raw,
+                    obj = obj,
+                    rawText = text
+                )
+                pushMemory(entry)
+                val resp = tpl.responseTemplate?.let { renderResponseWithPlaceholders(it, m, tpl.placeholders) } ?: "Понял, запомню."
                 return resp
-            } else {
-                // fallback: если ничего не сохранилось (маловероятно), попробуем старое поведение — рендер ответа без сохранения
-                val resp = tpl.responseTemplate?.let { renderResponseWithPlaceholders(it, m, tpl.placeholders, text) }
-                if (!resp.isNullOrBlank()) return resp
             }
         }
+
+        return null
     }
-}
 
     private fun addRecentMessage(original: String, normalized: String) {
         recentMessages.addFirst(UserMessage(original, normalized))
@@ -390,7 +329,12 @@ for (tpl in zapominanieTemplates) {
     private fun saveSlot(slot: String, value: String) {
         if (!this::prefs.isInitialized) return
         val key = slot.trim()
-        val v = value.trim()
+        // Сохраняем значение без нормализации, если слот содержит "name"
+        val v = if (key.contains("name", ignoreCase = true)) {
+            value.trim()
+        } else {
+            Engine.normalizeText(value.trim())
+        }
         if (key.isEmpty() || v.isEmpty()) return
         prefs.edit().putString(key, v).apply()
         Log.d(TAG, "Saved slot: $key = $v")
