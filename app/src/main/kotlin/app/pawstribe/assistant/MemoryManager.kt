@@ -234,7 +234,7 @@ object MemoryManager {
                 !valFromMatch.isNullOrBlank() -> valFromMatch
                 else -> readSlot(name) ?: ""
             }
-            out = out.replace("<${name}>", replacement)
+            out = out.replace("<${'$'}{name}>", replacement)
         }
         return out
     }
@@ -314,11 +314,77 @@ object MemoryManager {
         while (memories.size > MEMORIES_LIMIT) memories.removeLast()
     }
 
+    // --- helpers for name-slot casing preservation ---
+
+    private fun isNameSlot(slot: String): Boolean {
+        return slot.contains("name", ignoreCase = true)
+    }
+
+    // Попытка восстановить оригинальную регистровую форму value, взяв подстроку из originalText при совпадении нормализованных токенов.
+    private fun recoverOriginalCasing(value: String, originalText: String): String {
+        if (originalText.isBlank()) return capitalizeWords(value)
+
+        val normTarget = Engine.normalizeText(value).trim()
+        if (normTarget.isEmpty()) return capitalizeWords(value)
+
+        // Найдём «словесные» фрагменты в оригинальном тексте (с позициями)
+        val wordRegex = Regex("\\p{L}[\\p{L}\\p{N}'-]*")
+        val matches = wordRegex.findAll(originalText).toList()
+        if (matches.isEmpty()) return capitalizeWords(value)
+
+        // Собираем нормализованные токены для сравнения
+        val normTokens = matches.map { Engine.normalizeText(it.value) }
+
+        // Попробуем все подпоследовательности
+        for (start in normTokens.indices) {
+            val sb = StringBuilder()
+            for (end in start until normTokens.size) {
+                if (sb.isNotEmpty()) sb.append(" ")
+                sb.append(normTokens[end])
+                if (sb.toString() == normTarget) {
+                    // нашли соответствие — вернём подстроку с оригинальным регистром
+                    val startIdx = matches[start].range.first
+                    val endIdx = matches[end].range.last + 1
+                    return originalText.substring(startIdx, endIdx).trim()
+                }
+                // если длина превышает цель — можно прервать внутренний цикл
+                if (sb.length > normTarget.length + 10) break
+            }
+        }
+
+        // fallback: если явного вхождения нет — попробуем простую капитализацию
+        return capitalizeWords(value)
+    }
+
+    private fun capitalizeWords(s: String): String {
+        return s.split(Regex("\\s+")).filter { it.isNotEmpty() }.joinToString(" ") { part ->
+            part.replaceFirstChar {
+                if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString()
+            }
+        }
+    }
+
+    // Изменённая saveSlot: сохраняем оригинальную капитализацию для слотов, содержащих "name"
     private fun saveSlot(slot: String, value: String) {
         if (!this::prefs.isInitialized) return
         val key = slot.trim()
-        val v = value.trim()
+        var v = value.trim()
         if (key.isEmpty() || v.isEmpty()) return
+
+        if (isNameSlot(key)) {
+            // Берём последнее пользовательское сообщение (оригинал) — addRecentMessage вызывается ранее в processIncoming
+            val recentOriginal = recentMessages.firstOrNull()?.text ?: ""
+            val recovered = try {
+                recoverOriginalCasing(v, recentOriginal)
+            } catch (_: Exception) {
+                capitalizeWords(v)
+            }
+            v = recovered
+        } else {
+            // Для остальных слотов оставляем текущее поведение.
+            // при желании можно нормализовать: v = Engine.normalizeText(v)
+        }
+
         prefs.edit().putString(key, v).apply()
         Log.d(TAG, "Saved slot: $key = $v")
     }
