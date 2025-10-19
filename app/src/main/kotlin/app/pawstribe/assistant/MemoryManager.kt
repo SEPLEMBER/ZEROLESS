@@ -215,21 +215,9 @@ object MemoryManager {
     private fun getCapturedValue(match: MatchResult, placeholders: List<String>, name: String): String? {
         val idx = placeholders.indexOf(name)
         if (idx >= 0) {
-            val value = match.groupValues.getOrNull(idx + 1)?.trim()?.takeIf { it.isNotBlank() }
-            // Если метка содержит "name", возвращаем значение без нормализации
-            return if (name.contains("name", ignoreCase = true)) {
-                value
-            } else {
-                value?.let { Engine.normalizeText(it) }
-            }
+            return match.groupValues.getOrNull(idx + 1)?.trim()?.takeIf { it.isNotBlank() }
         }
-        val value = match.groupValues.getOrNull(1)?.trim()?.takeIf { it.isNotBlank() }
-        // Аналогично для случая без явной метки
-        return if (name.contains("name", ignoreCase = true)) {
-            value
-        } else {
-            value?.let { Engine.normalizeText(it) }
-        }
+        return match.groupValues.getOrNull(1)?.trim()?.takeIf { it.isNotBlank() }
     }
 
     private fun renderResponseWithPlaceholders(template: String, match: MatchResult, placeholders: List<String>): String {
@@ -329,12 +317,7 @@ object MemoryManager {
     private fun saveSlot(slot: String, value: String) {
         if (!this::prefs.isInitialized) return
         val key = slot.trim()
-        // Сохраняем значение без нормализации, если слот содержит "name"
-        val v = if (key.contains("name", ignoreCase = true)) {
-            value.trim()
-        } else {
-            Engine.normalizeText(value.trim())
-        }
+        val v = value.trim()
         if (key.isEmpty() || v.isEmpty()) return
         prefs.edit().putString(key, v).apply()
         Log.d(TAG, "Saved slot: $key = $v")
