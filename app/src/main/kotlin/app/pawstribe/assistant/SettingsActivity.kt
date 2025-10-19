@@ -5,6 +5,7 @@ import android.content.SharedPreferences
 import android.net.Uri
 import android.os.Bundle
 import android.view.WindowManager
+import android.view.inputmethod.InputMethodManager
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
@@ -21,6 +22,7 @@ class SettingsActivity : AppCompatActivity() {
     companion object {
         private const val PREF_KEY_FOLDER_URI = "folderUri"
         private const val PREF_KEY_DISABLE_SCREENSHOTS = "disableScreenshots"
+        private const val PREF_ENCRYPTION_PASSWORD = "pref_encryption_password"
     }
 
     private var folderUri: Uri? = null
@@ -29,6 +31,10 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var backButton: MaterialButton
     private lateinit var disableScreenshotsSwitch: SwitchMaterial
     private lateinit var prefs: SharedPreferences
+
+    // New UI elements
+    private lateinit var passwordEditText: TextInputEditText
+    private lateinit var savePassButton: MaterialButton
 
     private val folderPickerLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -68,18 +74,22 @@ class SettingsActivity : AppCompatActivity() {
         )
 
         prefs = getSharedPreferences("PawsTribePrefs", MODE_PRIVATE)
+
+        // find views
+        disableScreenshotsSwitch = findViewById(R.id.disableScreenshotsSwitch)
+
+        // NEW: password field and save button
+        passwordEditText = findViewById(R.id.passwordEditText)
+        savePassButton = findViewById(R.id.savePassButton)
+
         selectFolderButton = findViewById(R.id.selectFolderButton)
         setupButton = findViewById(R.id.setupButton)
         backButton = findViewById(R.id.backButton)
-        disableScreenshotsSwitch = findViewById(R.id.disableScreenshotsSwitch)
 
-        // --- NEW: password input view (Material) ---
-        val encryptionPasswordInput = findViewById<TextInputEditText>(R.id.encryptionPasswordInput)
-        // load existing password from default SharedPreferences (if any)
-        PreferenceManager.getDefaultSharedPreferences(this)
-            .getString("pref_encryption_password", null)
-            ?.let { encryptionPasswordInput.setText(it) }
-        // ------------------------------------------------
+        // Load default shared prefs password (if any) into field
+        val defaultPrefs = PreferenceManager.getDefaultSharedPreferences(this)
+        val savedPass = defaultPrefs.getString(PREF_ENCRYPTION_PASSWORD, "")
+        passwordEditText.setText(savedPass)
 
         if (prefs.getBoolean(PREF_KEY_DISABLE_SCREENSHOTS, false)) {
             window.setFlags(
@@ -103,6 +113,21 @@ class SettingsActivity : AppCompatActivity() {
 
         selectFolderButton.setOnClickListener { openFolderPicker() }
 
+        // Save password to default SharedPreferences when the save button is clicked
+        savePassButton.setOnClickListener {
+            val entered = passwordEditText.text?.toString() ?: ""
+            PreferenceManager.getDefaultSharedPreferences(this)
+                .edit()
+                .putString(PREF_ENCRYPTION_PASSWORD, entered)
+                .apply()
+
+            // hide keyboard if open
+            val imm = getSystemService(INPUT_METHOD_MANAGER) as? InputMethodManager
+            imm?.hideSoftInputFromWindow(passwordEditText.windowToken, 0)
+
+            Toast.makeText(this, R.string.password_saved, Toast.LENGTH_SHORT).show()
+        }
+
         // launch SetupActivity
         setupButton.setOnClickListener {
             val intent = Intent(this, SetupActivity::class.java)
@@ -124,14 +149,6 @@ class SettingsActivity : AppCompatActivity() {
         }
 
         backButton.setOnClickListener {
-            // --- NEW: save password into default SharedPreferences under required key ---
-            val pwd = encryptionPasswordInput.text?.toString() ?: ""
-            PreferenceManager.getDefaultSharedPreferences(this)
-                .edit()
-                .putString("pref_encryption_password", pwd)
-                .apply()
-            // ------------------------------------------------
-
             val intent = Intent(this, MainActivity::class.java)
             intent.putExtra("folderUri", folderUri)
             intent.putExtra("disableScreenshots", disableScreenshotsSwitch.isChecked)
