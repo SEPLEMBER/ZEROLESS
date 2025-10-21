@@ -544,6 +544,57 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     }
     // -------------- END HELPER -----------------
 
+    /**
+     * Находит DocumentFile внутри дерева `root` по относительному пути `pathRaw`.
+     * Поддерживает пути вида "sub/folder/file.txt" или "/sub/folder/file.txt".
+     * Возвращает null если не найдено.
+     *
+     * NOTE: не делает никаких разрешений — ожидается, что у приложения есть доступ к root.
+     */
+    private fun findDocumentFileByPath(root: DocumentFile, pathRaw: String?): DocumentFile? {
+        if (pathRaw == null) return null
+        var path = pathRaw.trim()
+        if (path.startsWith("/")) path = path.substring(1)
+        if (path.isEmpty()) return null
+
+        val segments = path.split("/").mapNotNull { seg ->
+            val s = seg.trim()
+            if (s.isEmpty()) null
+            else {
+                try {
+                    java.net.URLDecoder.decode(s, "UTF-8")
+                } catch (_: Exception) {
+                    s
+                }
+            }
+        }
+        if (segments.isEmpty()) return null
+
+        var cursor: DocumentFile? = root
+        try {
+            for (seg in segments) {
+                if (cursor == null) return null
+                val next = cursor.findFile(seg)
+                if (next != null) {
+                    cursor = next
+                    continue
+                }
+                // fallback: case-insensitive match among children (может быть медленнее, но надёжнее)
+                val children = cursor.listFiles()
+                val matched = children.firstOrNull { it.name != null && it.name.equals(seg, ignoreCase = true) }
+                if (matched != null) {
+                    cursor = matched
+                    continue
+                }
+                // not found
+                return null
+            }
+            return cursor
+        } catch (_: Exception) {
+            return null
+        }
+    }
+
     private fun processUserQuery(userInput: String) {
         if (userInput.startsWith("/")) {
             handleCommand(userInput.trim())
@@ -1077,7 +1128,8 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             try {
                 val dir = DocumentFile.fromTreeUri(this@ChatActivity, uri) ?: return@withContext
                 val mascotFilename = "${mascot.lowercase(Locale.ROOT)}.txt"
-                val mascotOuch = dir.findFile(mascotFilename) ?: dir.findFile("ouch.txt")
+                // support nested path for mascot files
+                val mascotOuch = findDocumentFileByPath(dir, mascotFilename) ?: findDocumentFileByPath(dir, "ouch.txt")
                 if (mascotOuch != null && mascotOuch.exists()) {
                     // <<< CHANGED: read via helper (may decrypt)
                     val allText = readDocumentFileTextMaybeDecrypt(mascotOuch)
@@ -1252,7 +1304,8 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     }
                     return@withContext
                 }
-                val file = dir.findFile(filename)
+                // SUPPORT nested paths for the filename
+                val file = findDocumentFileByPath(dir, filename)
                 if (file == null || !file.exists()) {
                     ChatCore.loadFallbackTemplates(templatesMap, keywordResponses, mascotList, contextMap)
                     rebuildInvertedIndex()
@@ -1330,7 +1383,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 }
 
                 val metadataFilename = filename.replace(".txt", "_metadata.txt")
-                val metadataFile = dir.findFile(metadataFilename)
+                val metadataFile = findDocumentFileByPath(dir, metadataFilename)
                 if (metadataFile != null && metadataFile.exists()) {
                     // <<< CHANGED: аналогично читаем метаданные через helper (возможно зашифрованы)
                     val metadataContent = readDocumentFileTextMaybeDecrypt(metadataFile)
@@ -1408,7 +1461,7 @@ class ChatActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             if (folderUri == null) return@withContext
             val metadataFilename = "${mascotName.lowercase(Locale.ROOT)}_metadata.txt"
             val dir = DocumentFile.fromTreeUri(this@ChatActivity, folderUri!!) ?: return@withContext
-            val metadataFile = dir.findFile(metadataFilename)
+            val metadataFile = findDocumentFileByPath(dir, metadataFilename)
             if (metadataFile != null && metadataFile.exists()) {
                 try {
                     // <<< CHANGED: читаем возможный зашифрованный metadata файл
