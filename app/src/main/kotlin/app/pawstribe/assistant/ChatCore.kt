@@ -158,6 +158,58 @@ object ChatCore {
     }
     // ----------------- END NEW helper -----------------
 
+    /**
+     * Найти DocumentFile внутри дерева `root` по относительному пути `pathRaw`.
+     * Поддерживает пути вида "sub/folder/file.txt" или "/sub/folder/file.txt".
+     * Возвращает null если не найдено.
+     *
+     * Работает быстро в большинстве случаев, и использует case-insensitive fallback
+     * (перебор детей) если прямой findFile не находит сегмент.
+     */
+    private fun findDocumentFileByPath(root: DocumentFile, pathRaw: String?): DocumentFile? {
+        if (pathRaw == null) return null
+        var path = pathRaw.trim()
+        if (path.startsWith("/")) path = path.substring(1)
+        if (path.isEmpty()) return null
+
+        val segments = path.split("/").mapNotNull { seg ->
+            val s = seg.trim()
+            if (s.isEmpty()) null
+            else {
+                try {
+                    java.net.URLDecoder.decode(s, "UTF-8")
+                } catch (_: Exception) {
+                    s
+                }
+            }
+        }
+        if (segments.isEmpty()) return null
+
+        var cursor: DocumentFile? = root
+        try {
+            for (seg in segments) {
+                if (cursor == null) return null
+                val next = cursor.findFile(seg)
+                if (next != null) {
+                    cursor = next
+                    continue
+                }
+                // fallback: case-insensitive match among children (может быть медленнее, но надёжнее)
+                val children = cursor.listFiles()
+                val matched = children.firstOrNull { it.name != null && it.name.equals(seg, ignoreCase = true) }
+                if (matched != null) {
+                    cursor = matched
+                    continue
+                }
+                // not found
+                return null
+            }
+            return cursor
+        } catch (_: Exception) {
+            return null
+        }
+    }
+
     private fun loadContextTemplatesFromFolder(
         context: Context,
         folderUri: Uri?,
@@ -169,7 +221,8 @@ object ChatCore {
         val uri = folderUri ?: return
         try {
             val dir = DocumentFile.fromTreeUri(context, uri) ?: return
-            val file = dir.findFile("context.txt") ?: return
+            // support nested path resolution
+            val file = findDocumentFileByPath(dir, "context.txt") ?: return
             if (!file.exists()) return
 
             // <<< CHANGED: read whole file (possibly decrypted) into memory, then iterate lines
@@ -216,7 +269,8 @@ object ChatCore {
         val uri = folderUri ?: return
         try {
             val dir = DocumentFile.fromTreeUri(context, uri) ?: return
-            dir.findFile("synonims.txt")?.takeIf { it.exists() }?.let { synFile ->
+            // support nested paths
+            findDocumentFileByPath(dir, "synonims.txt")?.takeIf { it.exists() }?.let { synFile ->
                 try {
                     val content = readDocumentFileTextMaybeDecrypt(context, synFile) ?: return@let
                     content.lines().forEach { raw ->
@@ -235,7 +289,7 @@ object ChatCore {
                     // silent
                 }
             }
-            dir.findFile("stopwords.txt")?.takeIf { it.exists() }?.let { stopFile ->
+            findDocumentFileByPath(dir, "stopwords.txt")?.takeIf { it.exists() }?.let { stopFile ->
                 try {
                     val content = readDocumentFileTextMaybeDecrypt(context, stopFile) ?: return@let
                     val parts = content.split(Regex("[\\r\\n\\t,|^;]+"))
@@ -262,7 +316,8 @@ object ChatCore {
         val uriLocal = folderUri ?: return Pair(templates, keywords)
         try {
             val dir = DocumentFile.fromTreeUri(context, uriLocal) ?: return Pair(templates, keywords)
-            val file = dir.findFile(filename) ?: return Pair(templates, keywords)
+            // support nested path for filename
+            val file = findDocumentFileByPath(dir, filename) ?: return Pair(templates, keywords)
             if (!file.exists()) return Pair(templates, keywords)
 
             // <<< CHANGED: read whole file (possibly decrypted) into memory, then iterate lines
@@ -342,7 +397,7 @@ object ChatCore {
             fun resolvePotentialFileResponse(respRaw: String, qSetLocal: Set<String>, qCanonicalLocal: String): String {
                 val respTrim = respRaw.trim()
                 val resp = respTrim.trim(':', ' ', '\t')
-                val fileRegex = Regex("""([\p{L}\p{N}\-._]+\.txt)""", RegexOption.IGNORE_CASE)
+                val fileRegex = Regex("""([\p{L}\p{N}\-._/\\]+\.txt)""", RegexOption.IGNORE_CASE)
                 val match = fileRegex.find(resp)
                 if (match != null) {
                     val filename = match.groupValues[1].trim()
@@ -403,7 +458,7 @@ object ChatCore {
 
             for (i in 1..9) {
                 val filename = "core$i.txt"
-                val file = dir.findFile(filename) ?: continue
+                val file = findDocumentFileByPath(dir, filename) ?: continue
                 if (!file.exists()) continue
                 val (templates, keywords) = parseTemplatesFromFile(context, folderUri, filename, synonymsSnapshot, stopwordsSnapshot)
 
