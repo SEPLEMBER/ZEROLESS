@@ -110,6 +110,11 @@ class ArrivalActivity : AppCompatActivity() {
                 finish()
                 return listOf(getString(R.string.redirect_russian_physics))
             }
+            cmd.contains("chat") || cmd.contains("олталк") || cmd.contains("talk") || cmd.contains("чат") -> {
+                startActivity(Intent(this, app.pawstribe.assistant.ChatActivity::class.java))
+                finish()
+                return listOf(getString(R.string.redirect_russian_physics))
+            }
             cmd.contains("other") || cmd.contains("другое") -> {
                 startActivity(Intent(this, PostsActivity::class.java))
                 finish()
