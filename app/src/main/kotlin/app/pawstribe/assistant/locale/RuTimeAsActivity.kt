@@ -1,4 +1,4 @@
-package app.pawstribe.assistant
+package app.pawstribe.assistant.locale
 
 import android.graphics.Typeface
 import android.os.Bundle
