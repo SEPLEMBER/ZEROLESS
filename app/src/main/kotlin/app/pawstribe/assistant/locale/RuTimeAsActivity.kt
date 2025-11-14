@@ -854,6 +854,29 @@ private object RuTimeUtils {
         return ruMonthsGenitive.keys.any { lower.contains(it) } || ruMonthsNominative.keys.any { lower.contains(it) }
     }
 
+    // extract two date/time-like substrings from text, return list of up to two items
+    fun extractTwoDateTimes(s: String): List<String> {
+        val parts = mutableListOf<String>()
+
+        val ruGenRe = Regex("""\b\d{1,2}\s+(?:января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)\s+\d{4}(?:\s+\d{1,2}:\d{2})?""", RegexOption.IGNORE_CASE)
+        ruGenRe.findAll(s).forEach { parts.add(it.value) }
+
+        val altRe = Regex("""\b\d{1,2}[\.\/-]\d{1,2}[\.\/-]\d{2,4}(?:\s+\d{1,2}:\d{2})?""")
+        altRe.findAll(s).forEach { parts.add(it.value) }
+
+        val isoRe = Regex("""\b\d{4}-\d{1,2}-\d{1,2}(?:[T\s]\d{1,2}:\d{2})?""")
+        isoRe.findAll(s).forEach { parts.add(it.value) }
+
+        if (parts.size >= 2) return listOf(parts[0], parts[1])
+
+        // fallback: split on common separators and try to parse tokens
+        val tokens = s.split(Regex("""\s+(?:и|and|to|—|-)\s+"""))
+        val parsed = tokens.mapNotNull { t -> if (parseDateTimeFlexible(t) != null) t.trim() else null }
+        if (parsed.size >= 2) return parsed.take(2)
+
+        return emptyList()
+    }
+
     // expand dow token like "1-5" or "Mon-Fri" into set of DayOfWeek
     fun expandDowRange(token: String): Set<DayOfWeek> {
         val t = token.trim().lowercase(Locale.getDefault())
