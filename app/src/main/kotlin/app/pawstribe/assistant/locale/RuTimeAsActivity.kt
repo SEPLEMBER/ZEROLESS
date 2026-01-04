@@ -208,7 +208,7 @@ private object RuTimeAsCommandsMain {
         }
 
         // timezone conversion: "<datetime> <zone> в <zone>"
-        val tzRe = Regex("""(.+?)\s+([A-Za-z_\/+-]+)\s+(?:в|to)\s+([A-Za-z_\/+-]+)\b""", RegexOption.IGNORE_CASE)
+        val tzRe = Regex("""(.+?)\s+([A-Za-z0-9_\/:+-]+)\s+(?:в|to)\s+([A-Za-z0-9_\/:+-]+)\b""", RegexOption.IGNORE_CASE)
         val tzMatch = tzRe.find(cmdRaw)
         if (tzMatch != null) {
             val dtRaw = tzMatch.groupValues[1].trim()
@@ -226,15 +226,28 @@ private object RuTimeAsCommandsMain {
             }
         }
 
-        // progress: "прогресс <start> <end> на <now|date>"
-        val progRe = Regex("""прогресс\s+(.+?)\s+[-–]\s+(.+?)(?:\s+на\s+(.+))?$""", RegexOption.IGNORE_CASE)
-        val progMatch = progRe.find(cmdRaw)
-        if (progMatch != null) {
-            val startRaw = progMatch.groupValues[1].trim()
-            val endRaw = progMatch.groupValues[2].trim()
-            val atRaw = progMatch.groupValues.getOrNull(3)?.trim()
-            val start = RuTimeUtils.parseDateTimeFlexible(startRaw) ?: return listOf("Не распознать start")
-            val end = RuTimeUtils.parseDateTimeFlexible(endRaw) ?: return listOf("Не распознать end")
+        // progress: "прогресс <start> <end> на <now|date>" — более гибкий парсинг
+        if (lower.startsWith("прогресс")) {
+            // Извлекаем тело после ключевого слова
+            val body = cmdRaw.substringAfter("прогресс").trim()
+            // Разделяем на основную часть (start/end) и optional 'на <moment>'
+            val parts = body.split(Regex("""\s+на\s+""), 2)
+            val periodPart = parts.getOrNull(0)?.trim() ?: ""
+            val atRaw = parts.getOrNull(1)?.trim()
+            // Пытаемся извлечь две даты: сначала через helper, иначе пробуем разделить по разделителям
+            val dateCandidates = RuTimeUtils.extractTwoDateTimes(periodPart).toMutableList()
+            if (dateCandidates.size < 2) {
+                // пробуем простое разделение по common separators
+                val sepCandidates = periodPart.split(Regex("""\s+(?:-|–|—|и|and|to)\s+"""))
+                if (sepCandidates.size >= 2) {
+                    dateCandidates.clear()
+                    dateCandidates.add(sepCandidates[0].trim())
+                    dateCandidates.add(sepCandidates[1].trim())
+                }
+            }
+            if (dateCandidates.size < 2) return listOf("Не удалось распознать период (start и end). Пример: 'прогресс 01.11.2025 00:00 - 01.12.2025 00:00 на 13.11.2025'")
+            val start = RuTimeUtils.parseDateTimeFlexible(dateCandidates[0]) ?: return listOf("Не распознать start")
+            val end = RuTimeUtils.parseDateTimeFlexible(dateCandidates[1]) ?: return listOf("Не распознать end")
             val at = if (atRaw.isNullOrBlank()) LocalDateTime.now() else RuTimeUtils.parseDateTimeFlexible(atRaw) ?: return listOf("Не распознать момент 'на'")
             val totalSec = ChronoUnit.SECONDS.between(start, end).toDouble()
             val passedSec = ChronoUnit.SECONDS.between(start, at).toDouble()
@@ -303,7 +316,7 @@ private object RuTimeAsCommandsV2 {
         val lower = cmdRaw.lowercase(Locale.getDefault())
 
         // difference
-        if (lower.startsWith("разница") || lower.contains("между") && (RuTimeUtils.containsMonthName(lower) || Regex("""\d{1,2}[\.\/-]\d{1,2}[\.\/-]\d{2,4}""").containsMatchIn(lower))) {
+        if (lower.startsWith("разница") || (lower.contains("между") && (RuTimeUtils.containsMonthName(lower) || Regex("""\d{1,2}[\.\/-]\d{1,2}[\.\/-]\d{2,4}""").containsMatchIn(lower)))) {
             return handleDifference(cmdRaw)
         }
 
@@ -312,7 +325,6 @@ private object RuTimeAsCommandsV2 {
             return handleBusinessDaysBetween(cmdRaw)
         }
 
-        // add working days? V3 handles add; here only between.
         // overlap intervals
         if (lower.contains("перекрытие") || lower.contains("overlap")) {
             return handleOverlap(cmdRaw)
@@ -347,7 +359,6 @@ private object RuTimeAsCommandsV2 {
         val from = if (dt1.isBefore(dt2)) dt1 else dt2
         val to = if (dt1.isBefore(dt2)) dt2 else dt1
 
-        // Use ZonedDateTime in system zone to account DST if zones supplied previously (fallback)
         val days = ChronoUnit.DAYS.between(from, to)
         val hoursTotal = ChronoUnit.HOURS.between(from, to)
         val minutesTotal = ChronoUnit.MINUTES.between(from, to)
@@ -423,7 +434,7 @@ private object RuTimeAsCommandsV2 {
 
     private fun handleNextOccurrence(cmdRaw: String): List<String> {
         // parse "every Mon,Wed at 09:00" or russian "каждый пн, ср в 09:00"
-        val re = Regex("""(?:every|кажд(?:ый|ые|ая)?)\s+([A-Za-z,а-яё\s]+)\s+(?:at|в)\s+(\d{1,2}:\d{2})""", RegexOption.IGNORE_CASE)
+        val re = Regex("""(?:every|кажд(?:ый|ые|ая)?)\s+([\p{L},\s]+)\s+(?:at|в)\s+(\d{1,2}:\d{2})""", RegexOption.IGNORE_CASE)
         val m = re.find(cmdRaw)
         if (m != null) {
             val daysRaw = m.groupValues[1]
@@ -556,7 +567,6 @@ private object RuTimeAsCommandsV3 {
         val hourTok = m.groupValues[2]
         val dowTok = m.groupValues[3]
         val n = m.groupValues[4].toIntOrNull() ?: 5
-        // parse simple numeric hour/min or '*'
         val minute = if (minuteTok == "*") null else minuteTok.toIntOrNull()
         val hour = if (hourTok == "*") null else hourTok.toIntOrNull()
         val dowSet = RuTimeUtils.expandDowRange(dowTok)
@@ -565,7 +575,6 @@ private object RuTimeAsCommandsV3 {
         val results = mutableListOf<LocalDateTime>()
         var cursor = now.plusMinutes(1)
         while (results.size < n && results.size < 5000) {
-            val dow = cursor.dayOfWeek.value % 7 // Mon=1..Sun=7 -> convert to 0..6? We'll use 1..7 mapping below
             val dayOk = dowSet.contains(cursor.dayOfWeek)
             val hourOk = hour == null || cursor.hour == hour
             val minOk = minute == null || cursor.minute == minute
@@ -602,8 +611,8 @@ private object RuTimeUtils {
         DateTimeFormatter.ofPattern("yyyy-MM-dd", Locale.ENGLISH),
         DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm", Locale.ENGLISH),
         DateTimeFormatter.ofPattern("dd.MM.yyyy", Locale.ENGLISH),
-        DateTimeFormatter.ofPattern("d MMM uuuu HH:mm", Locale.ENGLISH),
-        DateTimeFormatter.ofPattern("d MMM uuuu", Locale.ENGLISH),
+        DateTimeFormatter.ofPattern("d MMMM uuuu HH:mm", Locale("ru")), // Russian month full name
+        DateTimeFormatter.ofPattern("d MMMM uuuu", Locale("ru")),
         DateTimeFormatter.ISO_LOCAL_DATE_TIME,
         DateTimeFormatter.ISO_LOCAL_DATE
     )
@@ -647,6 +656,19 @@ private object RuTimeUtils {
             val year = g.groupValues[3].toIntOrNull() ?: return null
             val hour = g.groupValues.getOrNull(4)?.toIntOrNull() ?: 0
             val minute = g.groupValues.getOrNull(5)?.toIntOrNull() ?: 0
+            return try { LocalDateTime.of(year, month, day, hour, minute) } catch (_: Exception) { null }
+        }
+
+        // 1.5) russian nominative "13 январь 2025" / variations
+        val ruNomRe = Regex("""\b(\d{1,2})\s+(январь|февраль|март|апрель|май|июнь|июль|август|сентябрь|октябрь|ноябрь|декабрь)\s+(\d{4})(?:\s+(\d{1,2}):(\d{2}))?""", RegexOption.IGNORE_CASE)
+        val n = ruNomRe.find(s)
+        if (n != null) {
+            val day = n.groupValues[1].toIntOrNull() ?: return null
+            val monthName = n.groupValues[2].lowercase(Locale.getDefault())
+            val month = ruMonthsNominative[monthName] ?: return null
+            val year = n.groupValues[3].toIntOrNull() ?: return null
+            val hour = n.groupValues.getOrNull(4)?.toIntOrNull() ?: 0
+            val minute = n.groupValues.getOrNull(5)?.toIntOrNull() ?: 0
             return try { LocalDateTime.of(year, month, day, hour, minute) } catch (_: Exception) { null }
         }
 
@@ -700,7 +722,7 @@ private object RuTimeUtils {
         return dt.format(fmt)
     }
 
-    // business days between two LocalDate (exclusive/inclusive behaviour: inclusive start->end? We'll count business days inclusively between start and end subtracting weekends)
+    // business days between two LocalDate (inclusive)
     fun businessDaysBetween(start: LocalDate, end: LocalDate): Int {
         var s = if (start.isBefore(end)) start else end
         val e = if (start.isBefore(end)) end else start
@@ -899,22 +921,13 @@ private object RuTimeUtils {
             }
             return set
         }
-        // textual like mon-fri
-        val txtRange = Regex("""([a-zа-яё]+)-([a-zа-яё]+)""").find(t)
+        // textual like mon-fri or пон-пят
+        val txtRange = Regex("""([^\s\-]+)-([^\s\-]+)""").find(t)
         if (txtRange != null) {
-            val a = txtRange.groupValues[1]
-            val b = txtRange.groupValues[2]
-            val map = mapOf(
-                "mon" to DayOfWeek.MONDAY, "monday" to DayOfWeek.MONDAY, "пн" to DayOfWeek.MONDAY,
-                "tue" to DayOfWeek.TUESDAY, "tuesday" to DayOfWeek.TUESDAY, "вт" to DayOfWeek.TUESDAY,
-                "wed" to DayOfWeek.WEDNESDAY, "wednesday" to DayOfWeek.WEDNESDAY, "ср" to DayOfWeek.WEDNESDAY,
-                "thu" to DayOfWeek.THURSDAY, "thursday" to DayOfWeek.THURSDAY, "чт" to DayOfWeek.THURSDAY,
-                "fri" to DayOfWeek.FRIDAY, "friday" to DayOfWeek.FRIDAY, "пт" to DayOfWeek.FRIDAY,
-                "sat" to DayOfWeek.SATURDAY, "сб" to DayOfWeek.SATURDAY,
-                "sun" to DayOfWeek.SUNDAY, "вс" to DayOfWeek.SUNDAY
-            )
-            val start = map[a.take(3)] ?: map[a] ?: return emptySet()
-            val end = map[b.take(3)] ?: map[b] ?: return emptySet()
+            val aRaw = txtRange.groupValues[1]
+            val bRaw = txtRange.groupValues[2]
+            val start = weekdayFromToken(aRaw) ?: return emptySet()
+            val end = weekdayFromToken(bRaw) ?: return emptySet()
             var cur = start.value
             while (true) {
                 set.add(DayOfWeek.of(cur))
@@ -926,27 +939,31 @@ private object RuTimeUtils {
         // single names separated by commas
         val items = t.split(Regex("[,\\s]+")).map { it.trim() }.filter { it.isNotBlank() }
         for (it in items) {
-            when (it.take(3)) {
-                "mon", "пон" -> set.add(DayOfWeek.MONDAY)
-                "tue", "вто" -> set.add(DayOfWeek.TUESDAY)
-                "wed", "сре" -> set.add(DayOfWeek.WEDNESDAY)
-                "thu", "чет" -> set.add(DayOfWeek.THURSDAY)
-                "fri", "пят" -> set.add(DayOfWeek.FRIDAY)
-                "sat", "суб" -> set.add(DayOfWeek.SATURDAY)
-                "sun", "вос" -> set.add(DayOfWeek.SUNDAY)
-                else -> {
-                    val num = it.toIntOrNull()
-                    if (num != null) {
-                        val dow = when (num) {
-                            0 -> DayOfWeek.SUNDAY
-                            7 -> DayOfWeek.SUNDAY
-                            else -> DayOfWeek.of(((num - 1) % 7) + 1)
-                        }
-                        set.add(dow)
-                    }
-                }
-            }
+            val dow = weekdayFromToken(it)
+            if (dow != null) set.add(dow)
         }
         return set
+    }
+
+    private fun weekdayFromToken(tok: String): DayOfWeek? {
+        val t = tok.lowercase(Locale.getDefault())
+        return when {
+            t.matches(Regex("""^\d+$""")) -> {
+                val num = t.toInt()
+                when (num) {
+                    0 -> DayOfWeek.SUNDAY
+                    7 -> DayOfWeek.SUNDAY
+                    else -> DayOfWeek.of(((num - 1) % 7) + 1)
+                }
+            }
+            t.startsWith("пн") || t.startsWith("pon") || t.startsWith("mon") -> DayOfWeek.MONDAY
+            t.startsWith("вт") || t.startsWith("vto") || t.startsWith("tue") -> DayOfWeek.TUESDAY
+            t.startsWith("ср") || t.startsWith("sre") || t.startsWith("wed") -> DayOfWeek.WEDNESDAY
+            t.startsWith("чт") || t.startsWith("chet") || t.startsWith("thu") -> DayOfWeek.THURSDAY
+            t.startsWith("пт") || t.startsWith("pt") || t.startsWith("fri") -> DayOfWeek.FRIDAY
+            t.startsWith("сб") || t.startsWith("sat") -> DayOfWeek.SATURDAY
+            t.startsWith("вс") || t.startsWith("vos") || t.startsWith("sun") -> DayOfWeek.SUNDAY
+            else -> null
+        }
     }
 }
