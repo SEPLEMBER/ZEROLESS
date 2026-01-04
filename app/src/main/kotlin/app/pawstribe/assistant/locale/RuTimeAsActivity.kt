@@ -149,7 +149,7 @@ class RuTimeAsActivity : AppCompatActivity() {
 }
 
 // --------------------
-// RuTimeAsCommandsMain:
+// RuTimeAsCommandsMain
 // --------------------
 private object RuTimeAsCommandsMain {
 
@@ -172,7 +172,7 @@ private object RuTimeAsCommandsMain {
             )
         }
 
-        // division "поделить на" or slash "/"
+        // division
         val divRe = Regex("(-?\\d+(?:[.,]\\d+)?)\\s*(\\p{L}+)\\s*(?:/|поделить\\s+на)\\s*(-?\\d+(?:[.,]\\d+)?)\\s*(\\p{L}+)\\b", RegexOption.IGNORE_CASE)
         val divMatch = divRe.find(cmdRaw)
         if (divMatch != null) {
@@ -206,7 +206,8 @@ private object RuTimeAsCommandsMain {
         }
 
         // timezone conversion: "<datetime> <zone> в <zone>"
-        val tzRe = Regex("(.+?)\\s+([A-Za-z0-9_\\\\/:+-]+)\\s+(?:в|to)\\s+([A-Za-z0-9_\\\\/:+-]+)\\b", RegexOption.IGNORE_CASE)
+        // zone token allows letters, numbers, underscore, slash, colon, plus, minus
+        val tzRe = Regex("(.+?)\\s+([A-Za-z0-9_/:+\\-]+)\\s+(?:в|to)\\s+([A-Za-z0-9_/:+\\-]+)\\b", RegexOption.IGNORE_CASE)
         val tzMatch = tzRe.find(cmdRaw)
         if (tzMatch != null) {
             val dtRaw = tzMatch.groupValues[1].trim()
@@ -218,7 +219,10 @@ private object RuTimeAsCommandsMain {
                 val zTo = ZoneId.of(toZone)
                 val zdt = ZonedDateTime.of(dt, zFrom)
                 val converted = zdt.withZoneSameInstant(zTo)
-                listOf("В $fromZone: ${RuTimeUtils.formatDateTimeNice(dt)}", "В $toZone: ${converted.format(DateTimeFormatter.ofPattern(\"d MMMM uuuu HH:mm\", Locale(\"ru\")))}")
+                listOf(
+                    "В $fromZone: ${RuTimeUtils.formatDateTimeNice(dt)}",
+                    "В $toZone: ${converted.format(DateTimeFormatter.ofPattern("d MMMM uuuu HH:mm", Locale("ru")))}"
+                )
             } catch (e: Exception) {
                 listOf("Ошибка зоны: ${e.message}")
             }
@@ -248,7 +252,7 @@ private object RuTimeAsCommandsMain {
             if (totalSec == 0.0) return listOf("Start и end совпадают.")
             val pct = (passedSec / totalSec * 100.0).coerceIn(0.0, 100.0)
             val remain = totalSec - passedSec
-            return listOf("Прогресс: ${\"%.2f\".format(pct)}% (прошло: ${RuTimeUtils.humanizeDurationSeconds(passedSec.toLong())}, осталось: ${RuTimeUtils.humanizeDurationSeconds(remain.toLong())})")
+            return listOf("Прогресс: ${"%.2f".format(pct)}% (прошло: ${RuTimeUtils.humanizeDurationSeconds(passedSec.toLong())}, осталось: ${RuTimeUtils.humanizeDurationSeconds(remain.toLong())})")
         }
 
         // humanize
@@ -272,7 +276,7 @@ private object RuTimeAsCommandsMain {
             return listOf("Оригинал: ${RuTimeUtils.formatDateTimeNice(dt)}", "Результат: ${RuTimeUtils.formatDateTimeNice(res)}")
         }
 
-        // NL "через N ..."
+        // "через N ..."
         val inRe = Regex("(?:через|in)\\s+(\\d+)\\s*(дней|дня|дн|д|hours|часов|час|h|weeks|нед|недели)?(?:\\s+в\\s+(\\d{1,2}:\\d{2}))?", RegexOption.IGNORE_CASE)
         val inMatch = inRe.find(cmdRaw)
         if (inMatch != null) {
@@ -301,7 +305,7 @@ private object RuTimeAsCommandsMain {
 }
 
 // --------------------
-// RuTimeAsCommandsV2:
+// RuTimeAsCommandsV2
 // --------------------
 private object RuTimeAsCommandsV2 {
 
@@ -369,7 +373,7 @@ private object RuTimeAsCommandsV2 {
         val start = dt1.toLocalDate()
         val end = dt2.toLocalDate()
         val count = RuTimeUtils.businessDaysBetween(start, end)
-        return listOf("Рабочих дней между ${start} и ${end}: $count (без праздников, только Sat/Sun пропускаются)")
+        return listOf("Рабочих дней между $start и $end: $count (без праздников, только Sat/Sun пропускаются)")
     }
 
     private fun handleOverlap(cmdRaw: String): List<String> {
@@ -437,7 +441,7 @@ private object RuTimeAsCommandsV2 {
 }
 
 // --------------------
-// RuTimeAsCommandsV3:
+// RuTimeAsCommandsV3
 // --------------------
 private object RuTimeAsCommandsV3 {
 
@@ -496,7 +500,7 @@ private object RuTimeAsCommandsV3 {
     private fun handleNextEvent(cmdRaw: String): List<String> {
         val re = Regex("(?:next|следующее|ближайшее)\\s+(.+)$", RegexOption.IGNORE_CASE)
         val body = re.find(cmdRaw)?.groupValues?.get(1) ?: cmdRaw.substringAfter("next", "").trim()
-        val tokens = body.split(Regex("[,;\\\\s]+")).map { it.trim() }.filter { it.isNotBlank() }
+        val tokens = body.split(Regex("[,;\\s]+")).map { it.trim() }.filter { it.isNotBlank() }
         val parsed = tokens.mapNotNull { t -> RuTimeUtils.parseDateTimeFlexible(t) }.filter { it.isAfter(LocalDateTime.now()) }
         if (parsed.isEmpty()) return listOf("Нет будущих событий в списке или не распознано.")
         val next = parsed.minByOrNull { it }!!
@@ -563,7 +567,7 @@ private object RuTimeAsCommandsV3 {
 }
 
 // --------------------
-// RuTimeUtils:
+// RuTimeUtils
 // --------------------
 private object RuTimeUtils {
 
@@ -616,7 +620,6 @@ private object RuTimeUtils {
         val s = raw.trim()
         if (s.isBlank()) return null
 
-        // genitive months
         val ruGenRe = Regex("\\b(\\d{1,2})\\s+(января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)\\s+(\\d{4})(?:\\s+(\\d{1,2}):(\\d{2}))?", RegexOption.IGNORE_CASE)
         val g = ruGenRe.find(s)
         if (g != null) {
@@ -629,7 +632,6 @@ private object RuTimeUtils {
             return try { LocalDateTime.of(year, month, day, hour, minute) } catch (_: Exception) { null }
         }
 
-        // nominative months like "13 январь 2025"
         val ruNomRe = Regex("\\b(\\d{1,2})\\s+(январь|февраль|март|апрель|май|июнь|июль|август|сентябрь|октябрь|ноябрь|декабрь)\\s+(\\d{4})(?:\\s+(\\d{1,2}):(\\d{2}))?", RegexOption.IGNORE_CASE)
         val n = ruNomRe.find(s)
         if (n != null) {
