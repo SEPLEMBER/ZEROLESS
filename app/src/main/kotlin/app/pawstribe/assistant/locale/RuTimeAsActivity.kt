@@ -23,7 +23,6 @@ import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
 import java.util.Locale
 import kotlin.math.abs
-import kotlin.math.floor
 import app.pawstribe.assistant.R
 
 class RuTimeAsActivity : AppCompatActivity() {
@@ -151,7 +150,6 @@ class RuTimeAsActivity : AppCompatActivity() {
 
 // --------------------
 // RuTimeAsCommandsMain:
-// конверсия/деление, timezone conversion, progress, humanize, round, simple NL "через N ..."
 // --------------------
 private object RuTimeAsCommandsMain {
 
@@ -175,7 +173,7 @@ private object RuTimeAsCommandsMain {
         }
 
         // division "поделить на" or slash "/"
-        val divRe = Regex("""(-?\d+(?:[.,]\d+)?)\s*(\p{L}+)\s*(?:/|поделить\s+на)\s*(-?\d+(?:[.,]\d+)?)\s*(\p{L}+)\b""", RegexOption.IGNORE_CASE)
+        val divRe = Regex("(-?\\d+(?:[.,]\\d+)?)\\s*(\\p{L}+)\\s*(?:/|поделить\\s+на)\\s*(-?\\d+(?:[.,]\\d+)?)\\s*(\\p{L}+)\\b", RegexOption.IGNORE_CASE)
         val divMatch = divRe.find(cmdRaw)
         if (divMatch != null) {
             val a = divMatch.groupValues[1].replace(',', '.').toDoubleOrNull() ?: return listOf("Неверное число.")
@@ -194,8 +192,8 @@ private object RuTimeAsCommandsMain {
             )
         }
 
-        // conversion: "X unit1 в unit2" or "X unit1 to unit2"
-        val convRe = Regex("""(-?\d+(?:[.,]\d+)?)\s*(\p{L}+)\s*(?:в|to|->)\s*(\p{L}+)\b""", RegexOption.IGNORE_CASE)
+        // conversion
+        val convRe = Regex("(-?\\d+(?:[.,]\\d+)?)\\s*(\\p{L}+)\\s*(?:в|to|->)\\s*(\\p{L}+)\\b", RegexOption.IGNORE_CASE)
         val convMatch = convRe.find(cmdRaw)
         if (convMatch != null) {
             val valNum = convMatch.groupValues[1].replace(',', '.').toDoubleOrNull() ?: return listOf("Неверное число.")
@@ -208,7 +206,7 @@ private object RuTimeAsCommandsMain {
         }
 
         // timezone conversion: "<datetime> <zone> в <zone>"
-        val tzRe = Regex("""(.+?)\s+([A-Za-z0-9_\/:+-]+)\s+(?:в|to)\s+([A-Za-z0-9_\/:+-]+)\b""", RegexOption.IGNORE_CASE)
+        val tzRe = Regex("(.+?)\\s+([A-Za-z0-9_\\\\/:+-]+)\\s+(?:в|to)\\s+([A-Za-z0-9_\\\\/:+-]+)\\b", RegexOption.IGNORE_CASE)
         val tzMatch = tzRe.find(cmdRaw)
         if (tzMatch != null) {
             val dtRaw = tzMatch.groupValues[1].trim()
@@ -220,25 +218,21 @@ private object RuTimeAsCommandsMain {
                 val zTo = ZoneId.of(toZone)
                 val zdt = ZonedDateTime.of(dt, zFrom)
                 val converted = zdt.withZoneSameInstant(zTo)
-                listOf("В $fromZone: ${RuTimeUtils.formatDateTimeNice(dt)}", "В $toZone: ${converted.format(DateTimeFormatter.ofPattern("d MMMM uuuu HH:mm", Locale("ru")))}")
+                listOf("В $fromZone: ${RuTimeUtils.formatDateTimeNice(dt)}", "В $toZone: ${converted.format(DateTimeFormatter.ofPattern(\"d MMMM uuuu HH:mm\", Locale(\"ru\")))}")
             } catch (e: Exception) {
                 listOf("Ошибка зоны: ${e.message}")
             }
         }
 
-        // progress: "прогресс <start> <end> на <now|date>" — более гибкий парсинг
+        // progress: "прогресс <start> <end> на <now|date>"
         if (lower.startsWith("прогресс")) {
-            // Извлекаем тело после ключевого слова
             val body = cmdRaw.substringAfter("прогресс").trim()
-            // Разделяем на основную часть (start/end) и optional 'на <moment>'
-            val parts = body.split(Regex("""\s+на\s+""), 2)
+            val parts = body.split(Regex("\\s+на\\s+"), 2)
             val periodPart = parts.getOrNull(0)?.trim() ?: ""
             val atRaw = parts.getOrNull(1)?.trim()
-            // Пытаемся извлечь две даты: сначала через helper, иначе пробуем разделить по разделителям
             val dateCandidates = RuTimeUtils.extractTwoDateTimes(periodPart).toMutableList()
             if (dateCandidates.size < 2) {
-                // пробуем простое разделение по common separators
-                val sepCandidates = periodPart.split(Regex("""\s+(?:-|–|—|и|and|to)\s+"""))
+                val sepCandidates = periodPart.split(Regex("\\s+(?:-|–|—|и|and|to)\\s+"))
                 if (sepCandidates.size >= 2) {
                     dateCandidates.clear()
                     dateCandidates.add(sepCandidates[0].trim())
@@ -254,11 +248,11 @@ private object RuTimeAsCommandsMain {
             if (totalSec == 0.0) return listOf("Start и end совпадают.")
             val pct = (passedSec / totalSec * 100.0).coerceIn(0.0, 100.0)
             val remain = totalSec - passedSec
-            return listOf("Прогресс: ${"%.2f".format(pct)}% (прошло: ${RuTimeUtils.humanizeDurationSeconds(passedSec.toLong())}, осталось: ${RuTimeUtils.humanizeDurationSeconds(remain.toLong())})")
+            return listOf("Прогресс: ${\"%.2f\".format(pct)}% (прошло: ${RuTimeUtils.humanizeDurationSeconds(passedSec.toLong())}, осталось: ${RuTimeUtils.humanizeDurationSeconds(remain.toLong())})")
         }
 
-        // humanize: "humanize 90061s" or "humanize 1d 2h"
-        val humRe = Regex("""humanize\s+(.+)$""", RegexOption.IGNORE_CASE)
+        // humanize
+        val humRe = Regex("humanize\\s+(.+)$", RegexOption.IGNORE_CASE)
         val humMatch = humRe.find(cmdRaw)
         if (humMatch != null) {
             val token = humMatch.groupValues[1].trim()
@@ -266,8 +260,8 @@ private object RuTimeAsCommandsMain {
             return listOf(RuTimeUtils.humanizeDurationSeconds(seconds.toLong()))
         }
 
-        // round time: "округлить <dt> до 15мин up|down|nearest"
-        val roundRe = Regex("""округлить\s+(.+?)\s+до\s+(\d+)\s*мин\s*(up|down|nearest)?""", RegexOption.IGNORE_CASE)
+        // round time
+        val roundRe = Regex("округлить\\s+(.+?)\\s+до\\s+(\\d+)\\s*мин\\s*(up|down|nearest)?", RegexOption.IGNORE_CASE)
         val roundMatch = roundRe.find(cmdRaw)
         if (roundMatch != null) {
             val dtRaw = roundMatch.groupValues[1].trim()
@@ -278,15 +272,15 @@ private object RuTimeAsCommandsMain {
             return listOf("Оригинал: ${RuTimeUtils.formatDateTimeNice(dt)}", "Результат: ${RuTimeUtils.formatDateTimeNice(res)}")
         }
 
-        // NL: "через N дней/часов/недель в HH:MM" or "in N days at 09:00"
-        val inRe = Regex("""(?:через|in)\s+(\d+)\s*(дней|дня|дн|д|hours|часов|час|h|weeks|нед|недели)?(?:\s+в\s+(\d{1,2}:\d{2}))?""", RegexOption.IGNORE_CASE)
+        // NL "через N ..."
+        val inRe = Regex("(?:через|in)\\s+(\\d+)\\s*(дней|дня|дн|д|hours|часов|час|h|weeks|нед|недели)?(?:\\s+в\\s+(\\d{1,2}:\\d{2}))?", RegexOption.IGNORE_CASE)
         val inMatch = inRe.find(cmdRaw)
         if (inMatch != null) {
             val num = inMatch.groupValues[1].toLongOrNull() ?: return listOf("Неверное число.")
             val unitRaw = inMatch.groupValues[2]
             val timePart = inMatch.groupValues.getOrNull(3)
             val base = LocalDateTime.now()
-            val unit = RuTimeUtils.normalizeUnit(unitRaw.ifBlank { "days" })
+            val unit = RuTimeUtils.normalizeUnit(if (unitRaw.isNullOrBlank()) "days" else unitRaw)
             val res = when (unit) {
                 "hours" -> base.plusHours(num)
                 "weeks" -> base.plusWeeks(num)
@@ -308,34 +302,28 @@ private object RuTimeAsCommandsMain {
 
 // --------------------
 // RuTimeAsCommandsV2:
-// разница дат, рабочие дни между датами, overlap, shifts, next occurrence, rounding helpers
 // --------------------
 private object RuTimeAsCommandsV2 {
 
     fun handleCommand(cmdRaw: String): List<String> {
         val lower = cmdRaw.lowercase(Locale.getDefault())
 
-        // difference
-        if (lower.startsWith("разница") || (lower.contains("между") && (RuTimeUtils.containsMonthName(lower) || Regex("""\d{1,2}[\.\/-]\d{1,2}[\.\/-]\d{2,4}""").containsMatchIn(lower)))) {
+        if (lower.startsWith("разница") || (lower.contains("между") && (RuTimeUtils.containsMonthName(lower) || Regex("\\d{1,2}[\\.\\/\\-]\\d{1,2}[\\.\\/\\-]\\d{2,4}").containsMatchIn(lower)))) {
             return handleDifference(cmdRaw)
         }
 
-        // working days between (рабочие дни)
         if (lower.contains("рабочих") && lower.contains("дн")) {
             return handleBusinessDaysBetween(cmdRaw)
         }
 
-        // overlap intervals
         if (lower.contains("перекрытие") || lower.contains("overlap")) {
             return handleOverlap(cmdRaw)
         }
 
-        // shifts calculation
         if (lower.contains("смены") || lower.contains("shifts")) {
             return handleShifts(cmdRaw)
         }
 
-        // next occurrence simple rules "next every Mon,Wed at 09:00"
         if (lower.startsWith("next") || lower.startsWith("следующ") || lower.startsWith("следующий") || lower.contains("every")) {
             return handleNextOccurrence(cmdRaw)
         }
@@ -344,7 +332,7 @@ private object RuTimeAsCommandsV2 {
     }
 
     private fun handleDifference(cmdRaw: String): List<String> {
-        val andRe = Regex("""(разница\s+)?(.+?)\s+(?:и|and|-|—|to)\s+(.+)""", RegexOption.IGNORE_CASE)
+        val andRe = Regex("(разница\\s+)?(.+?)\\s+(?:и|and|-|—|to)\\s+(.+)", RegexOption.IGNORE_CASE)
         val m = andRe.find(cmdRaw)
         val candidates = if (m != null) {
             listOf(m.groupValues[2].trim(), m.groupValues[3].trim())
@@ -374,7 +362,6 @@ private object RuTimeAsCommandsV2 {
     }
 
     private fun handleBusinessDaysBetween(cmdRaw: String): List<String> {
-        // attempt to extract two dates
         val two = RuTimeUtils.extractTwoDateTimes(cmdRaw)
         if (two.size < 2) return listOf("Укажите две даты. Пример: 'рабочие дни 13.11.2025 и 30.11.2025'")
         val dt1 = RuTimeUtils.parseDateTimeFlexible(two[0]) ?: return listOf("Не распознать первую дату.")
@@ -386,8 +373,7 @@ private object RuTimeAsCommandsV2 {
     }
 
     private fun handleOverlap(cmdRaw: String): List<String> {
-        // expecting: "перекрытие 13.11.2025 10:00-12:00 и 13.11.2025 11:00-13:00"
-        val re = Regex("""(\d{1,2}[\.\/-]\d{1,2}[\.\/-]\d{2,4}.*?)\s+(\d{1,2}:\d{2})-(\d{1,2}:\d{2}).*?(?:и|and)\s+(\d{1,2}[\.\/-]\d{1,2}[\.\/-]\d{2,4}.*?)\s+(\d{1,2}:\d{2})-(\d{1,2}:\d{2})""", RegexOption.IGNORE_CASE)
+        val re = Regex("(\\d{1,2}[\\.\\/\\-]\\d{1,2}[\\.\\/\\-]\\d{2,4}.*?)\\s+(\\d{1,2}:\\d{2})-(\\d{1,2}:\\d{2}).*?(?:и|and)\\s+(\\d{1,2}[\\.\\/\\-]\\d{1,2}[\\.\\/\\-]\\d{2,4}.*?)\\s+(\\d{1,2}:\\d{2})-(\\d{1,2}:\\d{2})", RegexOption.IGNORE_CASE)
         val m = re.find(cmdRaw)
         if (m != null) {
             val d1 = m.groupValues[1].trim()
@@ -407,14 +393,13 @@ private object RuTimeAsCommandsV2 {
     }
 
     private fun handleShifts(cmdRaw: String): List<String> {
-        // parse shifts like "смены 09:00-17:00,18:00-22:00"
-        val re = Regex("""смены\s+(.+)$""", RegexOption.IGNORE_CASE)
+        val re = Regex("смены\\s+(.+)$", RegexOption.IGNORE_CASE)
         val m = re.find(cmdRaw)
         val body = m?.groupValues?.get(1) ?: cmdRaw
         val ranges = body.split(Regex("[,;]")).map { it.trim() }.filter { it.isNotBlank() }
         val pairs = mutableListOf<Pair<LocalTime, LocalTime>>()
         for (r in ranges) {
-            val mm = Regex("""(\d{1,2}:\d{2})-(\d{1,2}:\d{2})""").find(r)
+            val mm = Regex("(\\d{1,2}:\\d{2})-(\\d{1,2}:\\d{2})").find(r)
             if (mm != null) {
                 val s = LocalTime.parse(mm.groupValues[1])
                 val e = LocalTime.parse(mm.groupValues[2])
@@ -433,8 +418,7 @@ private object RuTimeAsCommandsV2 {
     }
 
     private fun handleNextOccurrence(cmdRaw: String): List<String> {
-        // parse "every Mon,Wed at 09:00" or russian "каждый пн, ср в 09:00"
-        val re = Regex("""(?:every|кажд(?:ый|ые|ая)?)\s+([\p{L},\s]+)\s+(?:at|в)\s+(\d{1,2}:\d{2})""", RegexOption.IGNORE_CASE)
+        val re = Regex("(?:every|кажд(?:ый|ые|ая)?)\\s+([\\p{L},\\s]+)\\s+(?:at|в)\\s+(\\d{1,2}:\\d{2})", RegexOption.IGNORE_CASE)
         val m = re.find(cmdRaw)
         if (m != null) {
             val daysRaw = m.groupValues[1]
@@ -454,14 +438,12 @@ private object RuTimeAsCommandsV2 {
 
 // --------------------
 // RuTimeAsCommandsV3:
-// add/sub business days, next event from list, countdown, split period, cron next N runs (упрощённо)
 // --------------------
 private object RuTimeAsCommandsV3 {
 
     fun handleCommand(cmdRaw: String): List<String> {
         val lower = cmdRaw.lowercase(Locale.getDefault())
 
-        // add/sub business days: "add 5 business days to 13.11.2025" or "13.11.2025 + 5 рабочих дней"
         if (lower.contains("рабочих") && (lower.contains("+") || lower.contains("add") || lower.contains("прибав"))) {
             return handleAddBusinessDays(cmdRaw)
         }
@@ -470,22 +452,18 @@ private object RuTimeAsCommandsV3 {
             return handleAddBusinessDays(cmdRaw)
         }
 
-        // next event from list: "next 01.12.2025, 20.11.2025, 15.12.2025"
         if (lower.startsWith("next ") || lower.startsWith("следующее ") || lower.startsWith("ближайшее ")) {
             return handleNextEvent(cmdRaw)
         }
 
-        // countdown: "countdown 25.12.2025 00:00"
         if (lower.startsWith("countdown") || lower.contains("обратн")) {
             return handleCountdown(cmdRaw)
         }
 
-        // split: "split 01.11.2025 01.12.2025 into 4"
         if (lower.startsWith("split ") || lower.contains("разбить")) {
             return handleSplit(cmdRaw)
         }
 
-        // cron next N: "cron 0 9 * * 1-5 next 5"
         if (lower.startsWith("cron ")) {
             return handleCronNext(cmdRaw)
         }
@@ -494,8 +472,7 @@ private object RuTimeAsCommandsV3 {
     }
 
     private fun handleAddBusinessDays(cmdRaw: String): List<String> {
-        // patterns: "<date> + N рабочих дней" or "add N business days to <date>" or "today + N рабочих дней"
-        val explicit = Regex("""(.+?)\s*([+-])\s*(\d+)\s*(рабочих|рабочих\s+дней|рабочихдней|business)\b""", RegexOption.IGNORE_CASE).find(cmdRaw)
+        val explicit = Regex("(.+?)\\s*([+-])\\s*(\\d+)\\s*(рабочих|рабочих\\s+дней|рабочихдней|business)\\b", RegexOption.IGNORE_CASE).find(cmdRaw)
         if (explicit != null) {
             val baseRaw = explicit.groupValues[1].trim()
             val sign = explicit.groupValues[2]
@@ -504,7 +481,7 @@ private object RuTimeAsCommandsV3 {
             val result = if (sign == "+") RuTimeUtils.addBusinessDays(base, num) else RuTimeUtils.addBusinessDays(base, -num)
             return listOf("База: $base", "Результат: $result")
         }
-        val addToRe = Regex("""add\s+(\d+)\s+business(?:-|\s)?days\s+to\s+(.+)""", RegexOption.IGNORE_CASE).find(cmdRaw)
+        val addToRe = Regex("add\\s+(\\d+)\\s+business(?:-|\\s)?days\\s+to\\s+(.+)", RegexOption.IGNORE_CASE).find(cmdRaw)
         if (addToRe != null) {
             val num = addToRe.groupValues[1].toIntOrNull() ?: return listOf("Неверное число.")
             val baseRaw = addToRe.groupValues[2].trim()
@@ -517,10 +494,9 @@ private object RuTimeAsCommandsV3 {
     }
 
     private fun handleNextEvent(cmdRaw: String): List<String> {
-        // extract comma-separated dates
-        val re = Regex("""(?:next|следующее|ближайшее)\s+(.+)$""", RegexOption.IGNORE_CASE)
+        val re = Regex("(?:next|следующее|ближайшее)\\s+(.+)$", RegexOption.IGNORE_CASE)
         val body = re.find(cmdRaw)?.groupValues?.get(1) ?: cmdRaw.substringAfter("next", "").trim()
-        val tokens = body.split(Regex("[,;\\s]+")).map { it.trim() }.filter { it.isNotBlank() }
+        val tokens = body.split(Regex("[,;\\\\s]+")).map { it.trim() }.filter { it.isNotBlank() }
         val parsed = tokens.mapNotNull { t -> RuTimeUtils.parseDateTimeFlexible(t) }.filter { it.isAfter(LocalDateTime.now()) }
         if (parsed.isEmpty()) return listOf("Нет будущих событий в списке или не распознано.")
         val next = parsed.minByOrNull { it }!!
@@ -528,7 +504,7 @@ private object RuTimeAsCommandsV3 {
     }
 
     private fun handleCountdown(cmdRaw: String): List<String> {
-        val re = Regex("""countdown\s+(.+)$""", RegexOption.IGNORE_CASE)
+        val re = Regex("countdown\\s+(.+)$", RegexOption.IGNORE_CASE)
         val body = re.find(cmdRaw)?.groupValues?.get(1) ?: cmdRaw.substringAfter("countdown", "").trim()
         val dt = RuTimeUtils.parseDateTimeFlexible(body) ?: return listOf("Не распознать дату.")
         val now = LocalDateTime.now()
@@ -538,8 +514,7 @@ private object RuTimeAsCommandsV3 {
     }
 
     private fun handleSplit(cmdRaw: String): List<String> {
-        // "split <start> <end> into N"
-        val re = Regex("""split\s+(.+?)\s+(.+?)\s+into\s+(\d+)""", RegexOption.IGNORE_CASE)
+        val re = Regex("split\\s+(.+?)\\s+(.+?)\\s+into\\s+(\\d+)", RegexOption.IGNORE_CASE)
         val m = re.find(cmdRaw)
         if (m != null) {
             val sraw = m.groupValues[1].trim()
@@ -559,8 +534,7 @@ private object RuTimeAsCommandsV3 {
     }
 
     private fun handleCronNext(cmdRaw: String): List<String> {
-        // extremely simplified: expect format "cron <minute> <hour> * * <dow> next N"
-        val re = Regex("""cron\s+(\S+)\s+(\S+)\s+\*\s+\*\s+(\S+)\s+next\s+(\d+)""", RegexOption.IGNORE_CASE)
+        val re = Regex("cron\\s+(\\S+)\\s+(\\S+)\\s+\\*\\s+\\*\\s+(\\S+)\\s+next\\s+(\\d+)", RegexOption.IGNORE_CASE)
         val m = re.find(cmdRaw)
         if (m == null) return listOf("Не распознать cron. Пример: 'cron 0 9 * * 1-5 next 5'")
         val minuteTok = m.groupValues[1]
@@ -589,7 +563,7 @@ private object RuTimeAsCommandsV3 {
 }
 
 // --------------------
-// RuTimeUtils: вспомогательные функции
+// RuTimeUtils:
 // --------------------
 private object RuTimeUtils {
 
@@ -606,18 +580,16 @@ private object RuTimeUtils {
     )
 
     private val dtPatterns = listOf(
-        DateTimeFormatter.ofPattern("yyyy-MM-dd['T'HH:mm[:ss]]", Locale.ENGLISH),
         DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm", Locale.ENGLISH),
         DateTimeFormatter.ofPattern("yyyy-MM-dd", Locale.ENGLISH),
         DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm", Locale.ENGLISH),
         DateTimeFormatter.ofPattern("dd.MM.yyyy", Locale.ENGLISH),
-        DateTimeFormatter.ofPattern("d MMMM uuuu HH:mm", Locale("ru")), // Russian month full name
+        DateTimeFormatter.ofPattern("d MMMM uuuu HH:mm", Locale("ru")),
         DateTimeFormatter.ofPattern("d MMMM uuuu", Locale("ru")),
         DateTimeFormatter.ISO_LOCAL_DATE_TIME,
         DateTimeFormatter.ISO_LOCAL_DATE
     )
 
-    // Normalize common unit tokens to canonical English keys: hours, days, weeks, months
     fun normalizeUnit(raw: String?): String? {
         if (raw == null) return null
         val r = raw.lowercase(Locale.getDefault()).trim()
@@ -630,24 +602,22 @@ private object RuTimeUtils {
         }
     }
 
-    // seconds in canonical unit (approx for months = 30 days)
     fun unitToSeconds(unit: String): Double {
         return when (unit) {
             "hours" -> 3600.0
             "days" -> 3600.0 * 24.0
             "weeks" -> 3600.0 * 24.0 * 7.0
-            "months" -> 3600.0 * 24.0 * 30.0 // approximate
+            "months" -> 3600.0 * 24.0 * 30.0
             else -> 1.0
         }
     }
 
-    // parse many flexible date/time formats, including russian "13 ноября 2025 14:30"
     fun parseDateTimeFlexible(raw: String): LocalDateTime? {
         val s = raw.trim()
         if (s.isBlank()) return null
 
-        // 1) russian "d MMMM yyyy [HH:mm]" with genitive month names
-        val ruGenRe = Regex("""\b(\d{1,2})\s+(января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)\s+(\d{4})(?:\s+(\d{1,2}):(\d{2}))?""", RegexOption.IGNORE_CASE)
+        // genitive months
+        val ruGenRe = Regex("\\b(\\d{1,2})\\s+(января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)\\s+(\\d{4})(?:\\s+(\\d{1,2}):(\\d{2}))?", RegexOption.IGNORE_CASE)
         val g = ruGenRe.find(s)
         if (g != null) {
             val day = g.groupValues[1].toIntOrNull() ?: return null
@@ -659,8 +629,8 @@ private object RuTimeUtils {
             return try { LocalDateTime.of(year, month, day, hour, minute) } catch (_: Exception) { null }
         }
 
-        // 1.5) russian nominative "13 январь 2025" / variations
-        val ruNomRe = Regex("""\b(\d{1,2})\s+(январь|февраль|март|апрель|май|июнь|июль|август|сентябрь|октябрь|ноябрь|декабрь)\s+(\d{4})(?:\s+(\d{1,2}):(\d{2}))?""", RegexOption.IGNORE_CASE)
+        // nominative months like "13 январь 2025"
+        val ruNomRe = Regex("\\b(\\d{1,2})\\s+(январь|февраль|март|апрель|май|июнь|июль|август|сентябрь|октябрь|ноябрь|декабрь)\\s+(\\d{4})(?:\\s+(\\d{1,2}):(\\d{2}))?", RegexOption.IGNORE_CASE)
         val n = ruNomRe.find(s)
         if (n != null) {
             val day = n.groupValues[1].toIntOrNull() ?: return null
@@ -672,19 +642,17 @@ private object RuTimeUtils {
             return try { LocalDateTime.of(year, month, day, hour, minute) } catch (_: Exception) { null }
         }
 
-        // try known patterns
         for (fmt in dtPatterns) {
             try {
-                val tmp = fmt.parseBest(s, LocalDateTime::from, LocalDate::from)
+                val tmp = fmt.parseBest(s, LocalDateTime::from, java.time.LocalDate::from)
                 when (tmp) {
                     is LocalDateTime -> return tmp
-                    is LocalDate -> return tmp.atStartOfDay()
+                    is java.time.LocalDate -> return tmp.atStartOfDay()
                 }
             } catch (_: Exception) { }
         }
 
-        // dd/MM/yyyy or dd-MM-yyyy optional time
-        val altRe = Regex("""\b(\d{1,2})[\.\/-](\d{1,2})[\.\/-](\d{2,4})(?:\s+(\d{1,2}):(\d{2}))?\b""")
+        val altRe = Regex("\\b(\\d{1,2})[\\.\\/\\-](\\d{1,2})[\\.\\/\\-](\\d{2,4})(?:\\s+(\\d{1,2}):(\\d{2}))?\\b")
         val a = altRe.find(s)
         if (a != null) {
             val d = a.groupValues[1].toIntOrNull() ?: return null
@@ -696,8 +664,7 @@ private object RuTimeUtils {
             return try { LocalDateTime.of(year, m, d, hour, min) } catch (_: Exception) { null }
         }
 
-        // iso
-        val isoRe = Regex("""\b(\d{4})-(\d{1,2})-(\d{1,2})(?:[T\s](\d{1,2}):(\d{2}))?\b""")
+        val isoRe = Regex("\\b(\\d{4})-(\\d{1,2})-(\\d{1,2})(?:[T\\s](\\d{1,2}):(\\d{2}))?\\b")
         val iso = isoRe.find(s)
         if (iso != null) {
             val y = iso.groupValues[1].toIntOrNull() ?: return null
@@ -708,7 +675,6 @@ private object RuTimeUtils {
             return try { LocalDateTime.of(y, mo, d, hour, min) } catch (_: Exception) { null }
         }
 
-        // keywords
         val lower = s.lowercase(Locale.getDefault())
         if (lower == "сегодня" || lower == "today") return LocalDate.now().atStartOfDay()
         if (lower == "завтра" || lower == "tomorrow") return LocalDate.now().plusDays(1).atStartOfDay()
@@ -722,7 +688,6 @@ private object RuTimeUtils {
         return dt.format(fmt)
     }
 
-    // business days between two LocalDate (inclusive)
     fun businessDaysBetween(start: LocalDate, end: LocalDate): Int {
         var s = if (start.isBefore(end)) start else end
         val e = if (start.isBefore(end)) end else start
@@ -768,7 +733,7 @@ private object RuTimeUtils {
         if (days > 0) parts.add("$days ${plural(days, "день", "дня", "дней")}")
         if (hours > 0) parts.add("$hours ${plural(hours, "час", "часа", "часов")}")
         if (mins > 0) parts.add("$mins ${plural(mins, "минута", "минуты", "минут")}")
-        if (secs > 0 && parts.isEmpty()) parts.add("$secs ${plural(secs, "секунда", "секунды", "секунд")}") // show seconds only if small
+        if (secs > 0 && parts.isEmpty()) parts.add("$secs ${plural(secs, "секунда", "секунды", "секунд")}")
         return if (parts.isEmpty()) "0 сек" else parts.joinToString(" ")
     }
 
@@ -782,12 +747,10 @@ private object RuTimeUtils {
     }
 
     fun parseDurationToSeconds(token: String): Long? {
-        // support tokens like "90061s", "1d 2h 3m", "1d2h", "3600"
-        var s = token.trim()
-        // if pure number -> seconds
-        if (s.matches(Regex("""^\d+$"""))) return s.toLong()
+        val s = token.trim()
+        if (s.matches(Regex("^\\d+$"))) return s.toLong()
         var total = 0L
-        val re = Regex("""(\d+)\s*(d|д|days|day|h|час|часов|m|min|мин|s|sec|сек)""", RegexOption.IGNORE_CASE)
+        val re = Regex("(\\d+)\\s*(d|д|days|day|h|час|часов|m|min|мин|s|sec|сек)", RegexOption.IGNORE_CASE)
         var found = false
         re.findAll(s).forEach {
             found = true
@@ -819,21 +782,19 @@ private object RuTimeUtils {
         }
     }
 
-    // parse weekday list e.g. "Mon,Wed" or "пн,ср"
     fun parseWeekdayList(raw: String): List<DayOfWeek> {
         val tokens = raw.split(Regex("[,\\s]+")).map { it.trim().lowercase(Locale.getDefault()) }.filter { it.isNotBlank() }
         val out = mutableListOf<DayOfWeek>()
         for (t in tokens) {
-            when (t.take(3)) {
-                "mon", "пн" -> out.add(DayOfWeek.MONDAY)
-                "tue", "вт" -> out.add(DayOfWeek.TUESDAY)
-                "wed", "ср" -> out.add(DayOfWeek.WEDNESDAY)
-                "thu", "чт" -> out.add(DayOfWeek.THURSDAY)
-                "fri", "пт" -> out.add(DayOfWeek.FRIDAY)
-                "sat", "сб" -> out.add(DayOfWeek.SATURDAY)
-                "sun", "вс" -> out.add(DayOfWeek.SUNDAY)
+            when {
+                t.startsWith("mon") || t.startsWith("пн") || t.startsWith("пон") -> out.add(DayOfWeek.MONDAY)
+                t.startsWith("tue") || t.startsWith("вт") || t.startsWith("втор") -> out.add(DayOfWeek.TUESDAY)
+                t.startsWith("wed") || t.startsWith("ср") || t.startsWith("сред") -> out.add(DayOfWeek.WEDNESDAY)
+                t.startsWith("thu") || t.startsWith("чт") || t.startsWith("чет") -> out.add(DayOfWeek.THURSDAY)
+                t.startsWith("fri") || t.startsWith("пт") || t.startsWith("пят") -> out.add(DayOfWeek.FRIDAY)
+                t.startsWith("sat") || t.startsWith("сб") -> out.add(DayOfWeek.SATURDAY)
+                t.startsWith("sun") || t.startsWith("вс") -> out.add(DayOfWeek.SUNDAY)
                 else -> {
-                    // try full russian names
                     if (t.startsWith("пон")) out.add(DayOfWeek.MONDAY)
                     if (t.startsWith("втор")) out.add(DayOfWeek.TUESDAY)
                     if (t.startsWith("сред")) out.add(DayOfWeek.WEDNESDAY)
@@ -876,35 +837,31 @@ private object RuTimeUtils {
         return ruMonthsGenitive.keys.any { lower.contains(it) } || ruMonthsNominative.keys.any { lower.contains(it) }
     }
 
-    // extract two date/time-like substrings from text, return list of up to two items
     fun extractTwoDateTimes(s: String): List<String> {
         val parts = mutableListOf<String>()
 
-        val ruGenRe = Regex("""\b\d{1,2}\s+(?:января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)\s+\d{4}(?:\s+\d{1,2}:\d{2})?""", RegexOption.IGNORE_CASE)
+        val ruGenRe = Regex("\\b\\d{1,2}\\s+(?:января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)\\s+\\d{4}(?:\\s+\\d{1,2}:\\d{2})?", RegexOption.IGNORE_CASE)
         ruGenRe.findAll(s).forEach { parts.add(it.value) }
 
-        val altRe = Regex("""\b\d{1,2}[\.\/-]\d{1,2}[\.\/-]\d{2,4}(?:\s+\d{1,2}:\d{2})?""")
+        val altRe = Regex("\\b\\d{1,2}[\\.\\/\\-]\\d{1,2}[\\.\\/\\-]\\d{2,4}(?:\\s+\\d{1,2}:\\d{2})?")
         altRe.findAll(s).forEach { parts.add(it.value) }
 
-        val isoRe = Regex("""\b\d{4}-\d{1,2}-\d{1,2}(?:[T\s]\d{1,2}:\d{2})?""")
+        val isoRe = Regex("\\b\\d{4}-\\d{1,2}-\\d{1,2}(?:[T\\s]\\d{1,2}:\\d{2})?")
         isoRe.findAll(s).forEach { parts.add(it.value) }
 
         if (parts.size >= 2) return listOf(parts[0], parts[1])
 
-        // fallback: split on common separators and try to parse tokens
-        val tokens = s.split(Regex("""\s+(?:и|and|to|—|-)\s+"""))
+        val tokens = s.split(Regex("\\s+(?:и|and|to|—|-)\\s+"))
         val parsed = tokens.mapNotNull { t -> if (parseDateTimeFlexible(t) != null) t.trim() else null }
         if (parsed.size >= 2) return parsed.take(2)
 
         return emptyList()
     }
 
-    // expand dow token like "1-5" or "Mon-Fri" into set of DayOfWeek
     fun expandDowRange(token: String): Set<DayOfWeek> {
         val t = token.trim().lowercase(Locale.getDefault())
         val set = mutableSetOf<DayOfWeek>()
-        // numeric 1-7 (cron uses 0-6 maybe), support both
-        val numRange = Regex("""(\d+)-(\d+)""").find(t)
+        val numRange = Regex("(\\d+)-(\\d+)").find(t)
         if (numRange != null) {
             val a = numRange.groupValues[1].toIntOrNull() ?: return emptySet()
             val b = numRange.groupValues[2].toIntOrNull() ?: return emptySet()
@@ -921,8 +878,8 @@ private object RuTimeUtils {
             }
             return set
         }
-        // textual like mon-fri or пон-пят
-        val txtRange = Regex("""([^\s\-]+)-([^\s\-]+)""").find(t)
+
+        val txtRange = Regex("([^\\s\\-]+)-([^\\s\\-]+)").find(t)
         if (txtRange != null) {
             val aRaw = txtRange.groupValues[1]
             val bRaw = txtRange.groupValues[2]
@@ -936,7 +893,7 @@ private object RuTimeUtils {
             }
             return set
         }
-        // single names separated by commas
+
         val items = t.split(Regex("[,\\s]+")).map { it.trim() }.filter { it.isNotBlank() }
         for (it in items) {
             val dow = weekdayFromToken(it)
@@ -948,7 +905,7 @@ private object RuTimeUtils {
     private fun weekdayFromToken(tok: String): DayOfWeek? {
         val t = tok.lowercase(Locale.getDefault())
         return when {
-            t.matches(Regex("""^\d+$""")) -> {
+            t.matches(Regex("^\\d+$")) -> {
                 val num = t.toInt()
                 when (num) {
                     0 -> DayOfWeek.SUNDAY
