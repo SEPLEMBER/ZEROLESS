@@ -356,13 +356,14 @@ class DateSpanRavenActivity : AppCompatActivity() {
         return count
     }
 
-    // count occurrences of Feb 29 between dates inclusive start..end
+// count occurrences of Feb 29 between dates inclusive start..end
     private fun countFeb29sBetween(startInclusive: LocalDate, endInclusive: LocalDate): Int {
         var count = 0
         var y = startInclusive.year
         val endYear = endInclusive.year
         while (y <= endYear) {
-            if (Year.isLeap(y)) {
+            // Year.isLeap expects a Long
+            if (Year.isLeap(y.toLong())) {
                 val feb29 = LocalDate.of(y, Month.FEBRUARY, 29)
                 if ((!feb29.isBefore(startInclusive)) && (!feb29.isAfter(endInclusive))) {
                     count++
