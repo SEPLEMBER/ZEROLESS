@@ -105,5 +105,19 @@
             android:theme="@style/VprTheme"
             android:configChanges="orientation|screenSize" />
 
+        <activity
+            android:name=".ChronoSplitterQActivity"
+            android:exported="false"
+            android:parentActivityName=".ArrivalActivity"
+            android:theme="@style/VprTheme"
+            android:configChanges="orientation|screenSize" />
+
+        <activity
+            android:name=".DateSpanRavenActivity"
+            android:exported="false"
+            android:parentActivityName=".ArrivalActivity"
+            android:theme="@style/VprTheme"
+            android:configChanges="orientation|screenSize" />
+
     </application>
 </manifest>
