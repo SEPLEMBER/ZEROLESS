@@ -114,7 +114,10 @@ class DateSpanRavenActivity : AppCompatActivity() {
         val days = p.days
 
         // остаток времени внутри дня: посчитаем так:
-        val afterPeriod = start.plusYears(years.toLong()).plusMonths(months.toLong()).plusDays(days.toLong())
+        val afterPeriod = start
+            .plusYears(years.toLong())
+            .plusMonths(months.toLong())
+            .plusDays(days.toLong())
         val timeRem = Duration.between(afterPeriod, end)
         val hours = timeRem.toHours()
         val minutes = timeRem.minusHours(hours).toMinutes()
@@ -348,7 +351,7 @@ class DateSpanRavenActivity : AppCompatActivity() {
         while (d.isBefore(endExclusive)) {
             val dow = d.dayOfWeek
             if (dow != DayOfWeek.SATURDAY && dow != DayOfWeek.SUNDAY) count++
-            d = d.plusDays(1L)
+            d = d.plusDays(1L) // <- Long literal
         }
         return count
     }
