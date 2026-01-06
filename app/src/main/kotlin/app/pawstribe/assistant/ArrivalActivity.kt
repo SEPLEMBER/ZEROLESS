@@ -130,13 +130,11 @@ class ArrivalActivity : AppCompatActivity() {
                 finish()
                 return listOf(getString(R.string.redirect_main))
             }
-                        }
             cmd.contains("тусовка") || cmd.contains("туса") -> {
                 startActivity(Intent(this, ChronoSplitterQActivity::class.java))
                 finish()
                 return listOf(getString(R.string.redirect_main))
             }
-                        }
             cmd.contains("круса") || cmd.contains("риса") -> {
                 startActivity(Intent(this, DateSpanRavenActivity::class.java))
                 finish()
